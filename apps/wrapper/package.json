@@ -2,6 +2,15 @@
   "name": "occode-wrapper",
   "version": "0.1.0",
   "description": "OCcode Electron wrapper — downloads and launches portable VSCodium",
+  "author": {
+    "name": "OCcode Contributors",
+    "email": "contributors@openclaw.ai"
+  },
+  "homepage": "https://github.com/damoahdominic/occ",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/damoahdominic/occ.git"
+  },
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
