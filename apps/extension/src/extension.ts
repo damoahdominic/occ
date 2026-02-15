@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { HomePanel } from './panels/home';
-import { SetupPanel } from './panels/setup';
+import { ConfigPanel } from './panels/setup';
 import { StatusPanel } from './panels/status';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -8,16 +8,21 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openclaw.home', () => {
       HomePanel.createOrShow(context.extensionUri);
     }),
-    vscode.commands.registerCommand('openclaw.setupLocal', () => {
-      SetupPanel.createOrShow(context.extensionUri);
+    vscode.commands.registerCommand('openclaw.configure', () => {
+      ConfigPanel.createOrShow(context.extensionUri);
+    }),
+    vscode.commands.registerCommand('openclaw.install', () => {
+      const terminal = vscode.window.createTerminal('OpenClaw Install');
+      terminal.show();
+      terminal.sendText('npm install -g openclaw@latest && openclaw onboard');
     }),
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
     }),
   );
 
-  // Show home panel on first activation
-  vscode.commands.executeCommand('openclaw.home');
+  // Auto-show Home panel on startup
+  HomePanel.createOrShow(context.extensionUri);
 }
 
 export function deactivate() {}
