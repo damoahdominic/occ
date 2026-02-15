@@ -9,6 +9,11 @@ export class HomePanel {
     this._panel = panel;
     this._panel.webview.html = this._getHtml();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    this._panel.webview.onDidReceiveMessage(msg => {
+      if (msg.command) {
+        vscode.commands.executeCommand(msg.command);
+      }
+    }, null, this._disposables);
   }
 
   public static createOrShow(extensionUri: vscode.Uri) {
