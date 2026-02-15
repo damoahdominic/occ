@@ -1,0 +1,52 @@
+name: Build OCcode
+
+on:
+  push:
+    branches: [main, scaffold-mvp]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-wrapper:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/wrapper
+      - name: Build Electron app
+        run: npm run build
+        working-directory: apps/wrapper
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occode-${{ matrix.os }}
+          path: apps/wrapper/dist/*
+
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/extension
+      - name: Compile extension
+        run: npm run compile
+        working-directory: apps/extension
+      - name: Package VSIX
+        run: npx @vscode/vsce package
+        working-directory: apps/extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-extension
+          path: apps/extension/*.vsix
