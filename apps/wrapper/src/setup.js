@@ -1,9 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execFile, spawn } = require('child_process');
-const { promisify } = require('util');
-
-const execFileAsync = promisify(execFile);
+const { execSync, spawn } = require('child_process');
 
 const DEFAULT_SETTINGS = {
   "workbench.startupEditor": "none",
@@ -20,20 +17,23 @@ async function installExtension(codiumBinary, occodeDir) {
     path.join(process.resourcesPath || '', 'extensions'),
   ];
 
+  console.log('[OCcode] Looking for extensions in:', searchPaths);
+
   for (const dir of searchPaths) {
     if (!fs.existsSync(dir)) continue;
     const vsixFiles = fs.readdirSync(dir).filter(f => f.endsWith('.vsix'));
+    console.log('[OCcode] Found VSIX in', dir, ':', vsixFiles);
     for (const vsix of vsixFiles) {
       const vsixPath = path.join(dir, vsix);
       const userDataDir = path.join(occodeDir, 'user-data');
       try {
-        await execFileAsync(codiumBinary, [
-          '--install-extension', vsixPath,
-          '--user-data-dir', userDataDir,
-          '--force',
-        ], { timeout: 60000 });
+        // Use execSync with shell:true — codium binary is a shell script on Linux/Mac
+        const cmd = `"${codiumBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --force`;
+        console.log('[OCcode] Running:', cmd);
+        const output = execSync(cmd, { timeout: 120000, shell: true, encoding: 'utf8' });
+        console.log('[OCcode] Install result:', output.trim());
       } catch (err) {
-        console.warn(`Failed to install ${vsix}:`, err.message);
+        console.warn(`[OCcode] Failed to install ${vsix}:`, err.message);
       }
     }
   }
