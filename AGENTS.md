@@ -83,9 +83,13 @@ Build **OCcode**, a branded, cross‑platform app (Windows/Mac/Linux) that ships
 - **Wrapper:** Electron + Node.js
 - **Extension:** VS Code API + Webviews
 - **Bundled Editor:** VS Code ZIP or VSCodium portable
+- **Version Pinning:**
+  - Wrapper downloads a **pinned VS Code/VSCodium version** (not latest).
+  - Update only when we explicitly bump the version.
+  - Prevents breakage if upstream changes UI/APIs.
 - **Update Strategy:**
   - Extension updated often (no wrapper rebuild)
-  - Wrapper rebuild only for install‑flow changes
+  - Wrapper rebuild only for install‑flow changes or version bump
 
 ---
 
