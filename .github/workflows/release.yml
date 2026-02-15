@@ -1,0 +1,93 @@
+name: Release OCcode
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/extension
+      - name: Compile extension
+        run: npm run compile
+        working-directory: apps/extension
+      - name: Package VSIX
+        run: npx @vscode/vsce package --no-dependencies --skip-license --no-git-tag-version --allow-missing-repository
+        working-directory: apps/extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-vsix
+          path: apps/extension/*.vsix
+
+  build-wrapper:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: apps/wrapper
+      - name: Build Electron app
+        run: npm run build:${{ matrix.platform }}
+        working-directory: apps/wrapper
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occode-${{ matrix.platform }}
+          path: |
+            apps/wrapper/dist/*.exe
+            apps/wrapper/dist/*.dmg
+            apps/wrapper/dist/*.AppImage
+            apps/wrapper/dist/*.deb
+            apps/wrapper/dist/*.zip
+
+  release:
+    needs: [build-extension, build-wrapper]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.zip
+            artifacts/**/*.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
