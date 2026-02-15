@@ -31,6 +31,7 @@ jobs:
           path: apps/extension/*.vsix
 
   build-wrapper:
+    needs: build-extension
     strategy:
       matrix:
         include:
@@ -46,6 +47,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Download extension VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-vsix
+          path: apps/wrapper/extensions
+      - name: Verify VSIX bundled
+        shell: bash
+        run: ls -la apps/wrapper/extensions/*.vsix
       - name: Install dependencies
         run: npm ci
         working-directory: apps/wrapper
