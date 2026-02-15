@@ -11,7 +11,13 @@ export class StatusPanel {
     this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
-      if (msg.command === 'refresh') { this._update(); }
+      if (msg.command === 'refresh') {
+        this._update();
+      } else if (msg.command === 'gateway-start') {
+        this._runGateway('start');
+      } else if (msg.command === 'gateway-stop') {
+        this._runGateway('stop');
+      }
     }, null, this._disposables);
   }
 
@@ -21,7 +27,8 @@ export class StatusPanel {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'openclawStatus', 'OpenClaw Status', vscode.ViewColumn.One, { enableScripts: true }
+      'openclawStatus', 'OpenClaw Status', vscode.ViewColumn.One,
+      { enableScripts: true }
     );
     StatusPanel.currentPanel = new StatusPanel(panel);
   }
@@ -30,6 +37,16 @@ export class StatusPanel {
     StatusPanel.currentPanel = undefined;
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
+  }
+
+  private _runGateway(action: string) {
+    try {
+      cp.execSync(`openclaw gateway ${action}`, { timeout: 10000 });
+      vscode.window.showInformationMessage(`OpenClaw gateway ${action} successful.`);
+    } catch {
+      vscode.window.showErrorMessage(`Failed to ${action} OpenClaw gateway.`);
+    }
+    this._update();
   }
 
   private _update() {
@@ -53,39 +70,65 @@ export class StatusPanel {
 <head>
   <meta charset="utf-8">
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: var(--vscode-font-family);
-      background: var(--vscode-editor-background);
-      color: var(--vscode-editor-foreground);
+      font-family: var(--vscode-font-family, sans-serif);
+      background: #1a1a1a;
+      color: #e0e0e0;
       padding: 30px;
     }
-    h2 { color: #00d4aa; }
+    h2 { color: #dc2828; margin-bottom: 20px; }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
     .indicator {
-      display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-      margin-right: 8px;
+      width: 12px; height: 12px; border-radius: 50%;
     }
-    .on { background: #00d4aa; }
-    .off { background: #e74c3c; }
+    .on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.4); }
+    .off { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.4); }
     pre {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 12px; border-radius: 4px; margin-top: 16px;
+      background: #2a2a2a;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 20px;
       overflow-x: auto;
+      font-size: 12px;
+      color: #aaa;
     }
+    .actions { display: flex; gap: 8px; }
     button {
-      background: #00d4aa; color: #1a1a2e; border: none; padding: 8px 16px;
-      border-radius: 4px; cursor: pointer; font-weight: 600; margin-top: 16px;
+      padding: 8px 18px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
     }
+    .btn-start { background: #4ade80; color: #1a1a1a; }
+    .btn-stop { background: #ef4444; color: #fff; }
+    .btn-refresh { background: #333; color: #aaa; border: 1px solid #555; }
   </style>
 </head>
 <body>
-  <h2>📡 OpenClaw Status</h2>
-  <p>
+  <h2>📡 OpenClaw Gateway Status</h2>
+  <div class="status-row">
     <span class="indicator ${running ? 'on' : 'off'}"></span>
-    ${running ? 'Running' : 'Not Running'}
-  </p>
+    <span>${running ? 'Running' : 'Not Running'}</span>
+  </div>
   <pre>${details}</pre>
-  <button onclick="vscode.postMessage({command:'refresh'})">Refresh</button>
-  <script>const vscode = acquireVsCodeApi();</script>
+  <div class="actions">
+    ${running
+      ? '<button class="btn-stop" onclick="cmd(\'gateway-stop\')">Stop Gateway</button>'
+      : '<button class="btn-start" onclick="cmd(\'gateway-start\')">Start Gateway</button>'}
+    <button class="btn-refresh" onclick="cmd('refresh')">Refresh</button>
+  </div>
+  <script>
+    const vscode = acquireVsCodeApi();
+    function cmd(c) { vscode.postMessage({ command: c }); }
+  </script>
 </body>
 </html>`;
   }
