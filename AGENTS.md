@@ -121,3 +121,17 @@ Dominic (boss) + contributors
 
 ## Status
 Draft plan ready. Next step: scaffold wrapper + extension.
+
+---
+
+## Completed Milestones
+
+### ✅ Home Screen Flow (feat/home-screen-flow)
+- **Home panel** (`panels/home.ts`): Branded "Welcome to OpenClaw Code" webview with lobster icon, dark red/black theme
+- **Detection**: Checks `~/.openclaw/` directory existence on startup
+- **Install flow**: If not installed → "Install OpenClaw" button → opens terminal with `npm install -g openclaw@latest && openclaw onboard`
+- **Configure flow**: If installed → "Configure OpenClaw" button → opens side panel to edit `~/.openclaw/openclaw.json`
+- **Config panel** (`panels/setup.ts`): Reads/writes openclaw.json, editable model + channels fields
+- **Status panel** (`panels/status.ts`): Gateway running detection with start/stop buttons
+- **Extension** (`extension.ts`): Registers `openclaw.home`, `openclaw.configure`, `openclaw.install`, `openclaw.status` commands; auto-shows Home on activation
+- **package.json**: Updated commands list, bumped to v0.2.0
