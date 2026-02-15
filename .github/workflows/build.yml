@@ -44,7 +44,7 @@ jobs:
         run: npm run compile
         working-directory: apps/extension
       - name: Package VSIX
-        run: npx @vscode/vsce package
+        run: npx @vscode/vsce package --no-dependencies --skip-license --no-git-tag-version --allow-missing-repository
         working-directory: apps/extension
       - uses: actions/upload-artifact@v4
         with:
