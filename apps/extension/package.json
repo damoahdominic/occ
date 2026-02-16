@@ -17,6 +17,16 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "OpenClaw",
+      "properties": {
+        "openclaw.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the OpenClaw CLI (overrides auto-detection)."
+        }
+      }
+    },
     "commands": [
       {
         "command": "openclaw.home",
