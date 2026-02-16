@@ -13,9 +13,16 @@ const PLATFORM_MAP = {
 function getPlatformInfo() {
   const p = PLATFORM_MAP[process.platform];
   if (!p) throw new Error(`Unsupported platform: ${process.platform}`);
-  // Handle Apple Silicon
-  if (process.platform === 'darwin' && process.arch === 'arm64') {
-    return { ...p, arch: 'arm64', dir: 'VSCodium-darwin-arm64' };
+  if (process.arch === 'arm64') {
+    if (process.platform === 'darwin') {
+      return { ...p, arch: 'arm64', dir: 'VSCodium-darwin-arm64' };
+    }
+    if (process.platform === 'linux') {
+      return { ...p, arch: 'arm64', dir: 'VSCodium-linux-arm64' };
+    }
+    if (process.platform === 'win32') {
+      return { ...p, arch: 'arm64', dir: 'VSCodium-win32-arm64' };
+    }
   }
   return p;
 }
@@ -67,15 +74,46 @@ async function downloadVSCodium(version, destDir) {
   fs.unlinkSync(archivePath);
 }
 
-function getVSCodiumBinary(vscodeDir) {
-  switch (process.platform) {
-    case 'win32':
-      return path.join(vscodeDir, 'bin', 'codium.cmd');
-    case 'darwin':
-      return path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium');
-    default:
-      return path.join(vscodeDir, 'bin', 'codium');
+function getVSCodiumBinaryCandidates(vscodeDir) {
+  const p = getPlatformInfo();
+  if (process.platform === 'win32') {
+    return [
+      path.join(vscodeDir, p.dir, 'bin', 'codium.cmd'),
+      path.join(vscodeDir, 'bin', 'codium.cmd'),
+    ];
   }
+  if (process.platform === 'darwin') {
+    return [
+      path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
+      path.join(vscodeDir, p.dir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
+    ];
+  }
+  return [
+    path.join(vscodeDir, p.dir, 'bin', 'codium'),
+    path.join(vscodeDir, 'bin', 'codium'),
+  ];
 }
 
-module.exports = { downloadVSCodium, getVSCodiumBinary, getPlatformInfo };
+function findVSCodiumBinary(vscodeDir) {
+  const candidates = getVSCodiumBinaryCandidates(vscodeDir);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function getVSCodiumBinary(vscodeDir) {
+  const found = findVSCodiumBinary(vscodeDir);
+  if (found) return found;
+  const candidates = getVSCodiumBinaryCandidates(vscodeDir);
+  throw new Error(
+    `VSCodium binary not found. Checked: ${candidates.join(', ')}`
+  );
+}
+
+module.exports = {
+  downloadVSCodium,
+  getVSCodiumBinary,
+  findVSCodiumBinary,
+  getPlatformInfo,
+};

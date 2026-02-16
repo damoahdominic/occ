@@ -1,12 +1,19 @@
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
-const { downloadVSCodium, getVSCodiumBinary } = require('./download');
+const {
+  downloadVSCodium,
+  findVSCodiumBinary,
+  getVSCodiumBinary,
+  getPlatformInfo,
+} = require('./download');
 const { installExtension, setDefaults, launchVSCodium } = require('./setup');
 
 const APP_NAME = 'OCcode';
 const VSCODIUM_VERSION = '1.109.31074';
 const OCCODE_DIR = path.join(require('os').homedir(), '.occode');
 const VSCODE_DIR = path.join(OCCODE_DIR, 'vscode');
+const isLinux = process.platform === 'linux';
+const isHeadless = isLinux && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 
 let mainWindow;
 
@@ -26,6 +33,7 @@ function createWindow() {
 }
 
 function sendStatus(msg) {
+  console.log(`[OCcode] ${msg}`);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.executeJavaScript(
       `document.getElementById('status').textContent = ${JSON.stringify(msg)}`
@@ -36,12 +44,26 @@ function sendStatus(msg) {
 async function bootstrap() {
   try {
     sendStatus('Checking VSCodium installation…');
-    const binary = getVSCodiumBinary(VSCODE_DIR);
+    let binary = findVSCodiumBinary(VSCODE_DIR);
 
     const fs = require('fs');
-    if (!fs.existsSync(binary)) {
+    if (!binary || !fs.existsSync(binary)) {
       sendStatus('Downloading VSCodium…');
       await downloadVSCodium(VSCODIUM_VERSION, VSCODE_DIR);
+    }
+    binary = getVSCodiumBinary(VSCODE_DIR);
+
+    const os = require('os');
+    if (process.platform !== 'win32') {
+      const p = getPlatformInfo();
+      const codiumRoot = path.join(VSCODE_DIR, p.dir);
+      const binDir = path.join(codiumRoot, 'bin');
+      if (fs.existsSync(binDir)) {
+        for (const file of fs.readdirSync(binDir)) {
+          const fullPath = path.join(binDir, file);
+          try { fs.chmodSync(fullPath, 0o755); } catch {}
+        }
+      }
     }
 
     sendStatus('Installing OpenClaw extension…');
@@ -56,12 +78,22 @@ async function bootstrap() {
     // Close wrapper after launching editor
     setTimeout(() => app.quit(), 2000);
   } catch (err) {
+    console.error('[OCcode] Error:', err);
     dialog.showErrorBox('OCcode Error', err.message);
     app.quit();
   }
 }
 
 app.setName(APP_NAME);
+if (isLinux) {
+  // Silence DBus connection errors in headless/limited environments.
+  app.commandLine.appendSwitch('disable-features', 'UseDBus');
+}
+if (process.env.OCCODE_DISABLE_GPU === '1' || isHeadless) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-software-rasterizer');
+}
 app.whenReady().then(() => {
   createWindow();
   bootstrap();
