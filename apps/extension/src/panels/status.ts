@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 type GatewayStatus = {
   installed: boolean;
@@ -14,9 +17,24 @@ type GatewayStatus = {
   configPath?: string;
   issues?: string[];
   exitCode?: string;
+  cliPath?: string;
+  command?: string;
+  stderr?: string;
+  pathEnv?: string;
   raw: string;
   error?: string;
   updatedAt: string;
+};
+
+type RunResult = {
+  stdout: string;
+  stderr: string;
+  code?: string;
+  timedOut?: boolean;
+  notFound?: boolean;
+  error?: string;
+  pathEnv?: string;
+  command?: string;
 };
 
 export class StatusPanel {
@@ -74,19 +92,14 @@ export class StatusPanel {
   }
 
   private async _runGateway(action: string) {
-    try {
-      await this._exec(`openclaw gateway ${action}`, 60000);
+    const { result } = await this._runOpenClaw(['gateway', action], 60000);
+    if (result.timedOut) {
+      vscode.window.showWarningMessage(`OpenClaw gateway ${action} is taking longer than expected.`);
+    } else if (result.error) {
+      const msg = result.stderr.trim() || result.error;
+      vscode.window.showErrorMessage(`Failed to ${action} OpenClaw gateway. ${msg}`);
+    } else {
       vscode.window.showInformationMessage(`OpenClaw gateway ${action} successful.`);
-    } catch (err: any) {
-      const details = this._formatError(err);
-      if (err?.code === 'ETIMEDOUT') {
-        vscode.window.showWarningMessage(`OpenClaw gateway ${action} is taking longer than expected.`);
-      } else {
-        vscode.window.showErrorMessage(`Failed to ${action} OpenClaw gateway.`);
-      }
-      if (details) {
-        console.warn('[OpenClaw] Gateway error:', details);
-      }
     }
     await this._update();
   }
@@ -98,12 +111,15 @@ export class StatusPanel {
 
   private async _getStatus(): Promise<GatewayStatus> {
     const updatedAt = new Date().toLocaleTimeString();
-    try {
-      const { stdout, stderr } = await this._exec('openclaw gateway status', 4000);
-      const out = stdout.trim();
+    const { command, result, cliPath } = await this._runOpenClaw(['gateway', 'status'], 4000);
+    const out = (result.stdout || result.stderr).trim();
+    if (out.length > 0) {
       const parsed = this._parseStatus(out);
+      const trimmedErr = result.stderr.trim();
+      const genericFail = result.error && result.error.toLowerCase().startsWith('command failed');
+      const error = trimmedErr || (!genericFail ? result.error : undefined);
       return {
-        installed: parsed.installed,
+        installed: parsed.installed || !result.notFound,
         running: parsed.running,
         pid: parsed.pid,
         port: parsed.port,
@@ -114,74 +130,336 @@ export class StatusPanel {
         logFile: parsed.logFile,
         configPath: parsed.configPath,
         issues: parsed.issues,
-        raw: out || 'No output from status command.',
-        error: stderr?.trim() || undefined,
-        updatedAt,
-      };
-    } catch (err: any) {
-      const stdout = err?.stdout ? err.stdout.toString() : '';
-      const stderr = err?.stderr ? err.stderr.toString() : '';
-      const hasOutput = stdout.trim().length > 0;
-      if (hasOutput) {
-        const out = stdout.trim();
-        const parsed = this._parseStatus(out);
-        const message = [stderr, err?.message].filter(Boolean).join('\n').trim();
-        return {
-          installed: parsed.installed,
-          running: parsed.running,
-          pid: parsed.pid,
-          port: parsed.port,
-          uptime: parsed.uptime,
-          service: parsed.service,
-          dashboard: parsed.dashboard,
-          probe: parsed.probe,
-          logFile: parsed.logFile,
-          configPath: parsed.configPath,
-          issues: parsed.issues,
-          exitCode: err?.code ? String(err.code) : undefined,
-          raw: out,
-          error: message || undefined,
-          updatedAt,
-        };
-      }
-
-      const message = this._formatError(err);
-      const notFound = this._isCommandNotFound(err);
-      const timedOut = err?.code === 'ETIMEDOUT';
-      return {
-        installed: !notFound,
-        running: false,
-        exitCode: err?.code ? String(err.code) : undefined,
-        raw: notFound
-          ? 'OpenClaw CLI not detected.'
-          : timedOut
-            ? 'Status command timed out.'
-            : 'Failed to read gateway status.',
-        error: message,
+        exitCode: result.code,
+        cliPath,
+        command,
+        stderr: trimmedErr || undefined,
+        pathEnv: result.pathEnv,
+        raw: out,
+        error,
         updatedAt,
       };
     }
+
+    if (result.notFound) {
+      return {
+        installed: false,
+        running: false,
+        exitCode: result.code,
+        cliPath,
+        command,
+        stderr: result.stderr.trim() || undefined,
+        pathEnv: result.pathEnv,
+        raw: 'OpenClaw CLI not detected.',
+        error: result.error,
+        updatedAt,
+      };
+    }
+
+    if (result.timedOut) {
+      return {
+        installed: !result.notFound,
+        running: false,
+        exitCode: result.code,
+        cliPath,
+        command,
+        stderr: result.stderr.trim() || undefined,
+        pathEnv: result.pathEnv,
+        raw: 'Status command timed out.',
+        error: result.error,
+        updatedAt,
+      };
+    }
+
+    return {
+      installed: !result.notFound,
+      running: false,
+      exitCode: result.code,
+      cliPath,
+      command,
+      stderr: result.stderr.trim() || undefined,
+      pathEnv: result.pathEnv,
+      raw: 'Failed to read gateway status.',
+      error: result.error,
+      updatedAt,
+    };
   }
 
-  private _exec(cmd: string, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
+  private _runCommand(cmd: string, timeoutMs: number): Promise<RunResult> {
+    const env = this._buildExecEnv();
+    return new Promise(resolve => {
       cp.exec(
         cmd,
         {
           timeout: timeoutMs,
           windowsHide: true,
           maxBuffer: 1024 * 1024,
+          env,
         },
         (error, stdout, stderr) => {
+          const result: RunResult = {
+            stdout: stdout?.toString() || '',
+            stderr: stderr?.toString() || '',
+            pathEnv: env.PATH,
+            command: cmd,
+          };
           if (error) {
-            (error as any).stdout = stdout;
-            (error as any).stderr = stderr;
-            return reject(error);
+            result.error = error.message || 'Command failed';
+            const errCode = (error as any).code;
+            result.code = errCode ? String(errCode) : undefined;
+            result.timedOut = errCode === 'ETIMEDOUT';
+            const text = `${result.stderr}\n${result.error}`.toLowerCase();
+            result.notFound =
+              errCode === 'ENOENT' ||
+              text.includes('not recognized as an internal or external command') ||
+              text.includes('command not found');
           }
-          resolve({ stdout, stderr });
+          resolve(result);
         }
       );
     });
+  }
+
+  private _execFile(command: string, args: string[], timeoutMs: number): Promise<RunResult> {
+    const env = this._buildExecEnv();
+    return new Promise(resolve => {
+      cp.execFile(
+        command,
+        args,
+        {
+          timeout: timeoutMs,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024,
+          env,
+        },
+        (error, stdout, stderr) => {
+          const result: RunResult = {
+            stdout: stdout?.toString() || '',
+            stderr: stderr?.toString() || '',
+            pathEnv: env.PATH,
+            command: [command, ...args].join(' '),
+          };
+          if (error) {
+            result.error = error.message || 'Command failed';
+            const errCode = (error as any).code;
+            result.code = errCode ? String(errCode) : undefined;
+            result.timedOut = errCode === 'ETIMEDOUT';
+            const text = `${result.stderr}\n${result.error}`.toLowerCase();
+            result.notFound =
+              errCode === 'ENOENT' ||
+              text.includes('not recognized as an internal or external command') ||
+              text.includes('command not found');
+          }
+          resolve(result);
+        }
+      );
+    });
+  }
+
+  private async _runOpenClaw(args: string[], timeoutMs: number): Promise<{ result: RunResult; command: string; cliPath?: string }> {
+    const cliPath = await this._findOpenClawPath();
+    const invocation = this._buildOpenClawInvocation(cliPath, args);
+    const result = await this._execFile(invocation.command, invocation.args, timeoutMs);
+    return { result, command: invocation.display, cliPath };
+  }
+
+  private _buildOpenClawInvocation(cliPath: string | undefined, args: string[]) {
+    if (process.platform !== 'win32') {
+      const command = cliPath || 'openclaw';
+      return { command, args, display: [command, ...args].join(' ') };
+    }
+
+    const comspec = process.env.ComSpec || 'cmd.exe';
+    if (!cliPath) {
+      const appData = process.env.APPDATA;
+      const shim = appData ? path.join(appData, 'npm', 'openclaw.cmd') : '';
+      const cmdLine = shim && fs.existsSync(shim)
+        ? `"${shim}" ${args.join(' ')}`
+        : `openclaw ${args.join(' ')}`;
+      return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
+    }
+
+    const resolved = this._resolveWindowsCliPath(cliPath || 'openclaw');
+    const ext = path.extname(resolved).toLowerCase();
+    if (ext === '.cmd' || ext === '.bat') {
+      const cmdLine = `"${resolved}" ${args.join(' ')}`.trim();
+      return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
+    }
+    if (ext === '.ps1') {
+      const ps = 'powershell.exe';
+      return {
+        command: ps,
+        args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolved, ...args],
+        display: `${ps} -NoProfile -ExecutionPolicy Bypass -File "${resolved}" ${args.join(' ')}`.trim(),
+      };
+    }
+    const command = resolved;
+    return { command, args, display: [command, ...args].join(' ') };
+  }
+
+  private _buildExecEnv() {
+    const env = { ...process.env };
+    const basePath = env.PATH || (env as any).Path || '';
+    const extra: string[] = [];
+    if (process.platform === 'win32') {
+      if (env.APPDATA) extra.push(path.join(env.APPDATA, 'npm'));
+      if (env.ProgramFiles) extra.push(path.join(env.ProgramFiles, 'nodejs'));
+      const systemRoot = env.SystemRoot || (env as any).WINDIR;
+      if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
+    } else {
+      extra.push('/usr/local/bin', '/opt/homebrew/bin');
+      extra.push(path.join(os.homedir(), '.local', 'bin'));
+      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
+    }
+    const sep = process.platform === 'win32' ? ';' : ':';
+    env.PATH = [...extra, basePath].filter(Boolean).join(sep);
+    (env as any).Path = env.PATH;
+    return env;
+  }
+
+  private async _findOpenClawPath(): Promise<string | undefined> {
+    for (const candidate of this._getWorkspaceCliCandidates()) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    const envPath = process.env.OPENCLAW_CLI;
+    if (envPath && fs.existsSync(envPath)) return envPath;
+
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA;
+      if (appData) {
+        const p = path.join(appData, 'npm', 'openclaw.cmd');
+        if (fs.existsSync(p)) return p;
+      }
+    }
+
+    const cfgPath = vscode.workspace.getConfiguration('openclaw').get<string>('cliPath');
+    if (cfgPath && fs.existsSync(cfgPath)) return cfgPath;
+
+    let cmd = process.platform === 'win32' ? 'where openclaw' : 'which openclaw';
+    if (process.platform === 'win32') {
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+      const whereExe = path.join(systemRoot, 'System32', 'where.exe');
+      cmd = `"${whereExe}" openclaw`;
+    }
+    const result = await this._runCommand(cmd, 2000);
+    if (!result.error && !result.notFound) {
+      const out = (result.stdout || '').trim();
+      if (out) {
+        const candidates = out
+          .split(/\r?\n/)
+          .map(l => l.trim().replace(/^"+|"+$/g, ''))
+          .filter(Boolean);
+        for (const candidate of candidates) {
+          const resolved = this._resolveWindowsCliPath(candidate);
+          if (fs.existsSync(resolved)) return resolved;
+        }
+        return candidates[0];
+      }
+    }
+
+    if (process.platform === 'win32') {
+      const psPath = await this._findOpenClawViaPowerShell();
+      if (psPath && fs.existsSync(psPath)) return psPath;
+    }
+
+    const npmCandidates = await this._getNpmGlobalCliCandidates();
+    for (const candidate of npmCandidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    const candidates = this._getCandidateCliPaths();
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return undefined;
+  }
+
+  private _getWorkspaceCliCandidates(): string[] {
+    const exts = process.platform === 'win32'
+      ? ['openclaw.cmd', 'openclaw.exe', 'openclaw.ps1', 'openclaw.bat', 'openclaw']
+      : ['openclaw'];
+    const folders = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+    const candidates: string[] = [];
+    for (const root of folders) {
+      for (const name of exts) {
+        candidates.push(path.join(root, 'node_modules', '.bin', name));
+      }
+    }
+    return candidates;
+  }
+
+  private async _findOpenClawViaPowerShell(): Promise<string | undefined> {
+    const ps = 'powershell.exe';
+    const cmd = [
+      '-NoProfile',
+      '-Command',
+      '($c = Get-Command openclaw -ErrorAction SilentlyContinue | Select-Object -First 1); ' +
+        'if ($c) { $c.Path; if (-not $c.Path) { $c.Source }; if (-not $c.Path -and -not $c.Source) { $c.Definition } }',
+    ];
+    const result = await this._execFile(ps, cmd, 2000);
+    const out = (result.stdout || '').trim();
+    if (!out) return undefined;
+    return out.split(/\r?\n/)[0].trim();
+  }
+
+  private _getCandidateCliPaths(): string[] {
+    const home = os.homedir();
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+      return [
+        path.join(appData, 'npm', 'openclaw.cmd'),
+        path.join(appData, 'npm', 'openclaw.exe'),
+        path.join(appData, 'npm', 'openclaw.ps1'),
+        path.join(appData, 'npm', 'openclaw.bat'),
+        path.join(localAppData, 'Programs', 'OpenClaw', 'openclaw.exe'),
+        path.join(localAppData, 'OpenClaw', 'openclaw.exe'),
+        path.join(programFiles, 'OpenClaw', 'openclaw.exe'),
+        path.join(programFiles, 'OpenClaw', 'bin', 'openclaw.exe'),
+        path.join(localAppData, 'Microsoft', 'WindowsApps', 'openclaw.exe'),
+        path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
+      ];
+    }
+    return [
+      '/usr/local/bin/openclaw',
+      '/opt/homebrew/bin/openclaw',
+      path.join(home, '.local', 'bin', 'openclaw'),
+      path.join(home, '.npm-global', 'bin', 'openclaw'),
+      path.join(home, '.openclaw', 'bin', 'openclaw'),
+    ];
+  }
+
+  private async _getNpmGlobalCliCandidates(): Promise<string[]> {
+    const result = await this._runCommand('npm config get prefix', 2000);
+    const prefix = (result.stdout || '').trim();
+    if (!prefix) return [];
+    if (process.platform === 'win32') {
+      const base = this._resolveWindowsCliPath(path.join(prefix, 'openclaw'));
+      const withExts = [
+        `${base}.cmd`,
+        `${base}.exe`,
+        `${base}.ps1`,
+        `${base}.bat`,
+        base,
+      ];
+      return withExts;
+    }
+    return [path.join(prefix, 'bin', 'openclaw')];
+  }
+
+  private _resolveWindowsCliPath(candidate: string) {
+    if (process.platform !== 'win32') return candidate;
+    const cleaned = candidate.replace(/^"+|"+$/g, '');
+    if (fs.existsSync(cleaned)) return cleaned;
+    if (path.extname(cleaned)) return cleaned;
+    const exts = ['.cmd', '.exe', '.bat', '.ps1'];
+    for (const ext of exts) {
+      const withExt = `${cleaned}${ext}`;
+      if (fs.existsSync(withExt)) return withExt;
+    }
+    return cleaned;
   }
 
   private _parseStatus(out: string) {
@@ -220,27 +498,16 @@ export class StatusPanel {
         issues.push(line);
         continue;
       }
+      if (lower.startsWith('runtime:') && lower.includes('stopped')) {
+        issues.push(line);
+        continue;
+      }
       if (lower.includes('requires explicit credentials') || lower.includes('pass --token') || lower.includes('pass --password')) {
         issues.push(line);
         continue;
       }
     }
     return issues;
-  }
-
-  private _isCommandNotFound(err: any) {
-    const msg = this._formatError(err).toLowerCase();
-    return (
-      err?.code === 'ENOENT' ||
-      msg.includes('not recognized as an internal or external command') ||
-      msg.includes('command not found')
-    );
-  }
-
-  private _formatError(err: any) {
-    const stdout = err?.stdout ? err.stdout.toString() : '';
-    const stderr = err?.stderr ? err.stderr.toString() : '';
-    return [stderr, stdout, err?.message].filter(Boolean).join('\n').trim();
   }
 
   private _escapeHtml(input: string) {
@@ -268,11 +535,27 @@ export class StatusPanel {
       configPath,
       issues,
       exitCode,
+      cliPath,
+      command,
+      stderr,
+      pathEnv,
       updatedAt,
     } = status;
     const safeRaw = this._escapeHtml(raw || '');
     const safeError = error ? this._escapeHtml(error) : '';
     const safeIssues = (issues || []).map(i => this._escapeHtml(i));
+    const safeService = this._escapeHtml(service || '—');
+    const safePid = this._escapeHtml(pid || '—');
+    const safePort = this._escapeHtml(port || '—');
+    const safeUptime = this._escapeHtml(uptime || '—');
+    const safeDashboard = this._escapeHtml(dashboard || '—');
+    const safeProbe = this._escapeHtml(probe || '—');
+    const safeLogFile = this._escapeHtml(logFile || '—');
+    const safeConfigPath = this._escapeHtml(configPath || '—');
+    const safeCliPath = this._escapeHtml(cliPath || '—');
+    const safeCommand = this._escapeHtml(command || '—');
+    const safeStderr = this._escapeHtml(stderr || '');
+    const safePathEnv = this._escapeHtml(pathEnv || '');
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -375,18 +658,19 @@ export class StatusPanel {
   <div class="card">
     <div class="grid">
       <div class="kv"><span>Status</span><span>${running ? 'Running' : installed ? 'Stopped' : 'Missing'}</span></div>
-      <div class="kv"><span>Service</span><span>${service || '—'}</span></div>
-      <div class="kv"><span>PID</span><span>${pid || '—'}</span></div>
-      <div class="kv"><span>Port</span><span>${port || '—'}</span></div>
-      <div class="kv"><span>Uptime</span><span>${uptime || '—'}</span></div>
+      <div class="kv"><span>Service</span><span>${safeService}</span></div>
+      <div class="kv"><span>PID</span><span>${safePid}</span></div>
+      <div class="kv"><span>Port</span><span>${safePort}</span></div>
+      <div class="kv"><span>Uptime</span><span>${safeUptime}</span></div>
     </div>
   </div>
   <div class="card">
     <div class="grid">
-      <div class="kv"><span>Dashboard</span><span>${dashboard || '—'}</span></div>
-      <div class="kv"><span>Probe</span><span>${probe || '—'}</span></div>
-      <div class="kv"><span>Logs</span><span>${logFile || '—'}</span></div>
-      <div class="kv"><span>Config</span><span>${configPath || '—'}</span></div>
+      <div class="kv"><span>Dashboard</span><span>${safeDashboard}</span></div>
+      <div class="kv"><span>Probe</span><span>${safeProbe}</span></div>
+      <div class="kv"><span>Logs</span><span>${safeLogFile}</span></div>
+      <div class="kv"><span>Config</span><span>${safeConfigPath}</span></div>
+      <div class="kv"><span>CLI</span><span>${safeCliPath}</span></div>
     </div>
   </div>
   ${safeIssues.length
@@ -399,6 +683,12 @@ export class StatusPanel {
   <pre>${safeRaw}</pre>
   ${error ? `<div class="error">${safeError}</div>` : `<div class="muted">Command: openclaw gateway status</div>`}
   ${exitCode ? `<div class="muted">Exit code: ${exitCode}</div>` : ''}
+  <div class="card">
+    <div class="muted">Diagnostics</div>
+    <pre>Command: ${safeCommand}</pre>
+    ${safeStderr ? `<pre>Stderr: ${safeStderr}</pre>` : '<div class="muted">Stderr: (empty)</div>'}
+    ${safePathEnv ? `<pre>PATH: ${safePathEnv}</pre>` : ''}
+  </div>
   <div class="actions">
     ${installed
       ? (running
