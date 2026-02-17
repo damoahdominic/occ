@@ -75,3 +75,12 @@ npm: 11.4.2
 OS: Linux 6.12.48+deb13-cloud-amd64 (x64)
 Electron: 30.x (devDependency)
 ```
+
+## 2026-02-17 — Build + integrity tooling
+
+- Windows: tightened CLI path detection so the Status panel only runs `openclaw` if the resolved path actually exists (fixes the "not recognized" error on Windows when the CLI isn't installed).
+- Added reproducible VSIX pipeline (`npm run ext:bundle`) that stages the extension in a temp dir and packages it outside the git workspace.
+- Documented the new pipeline in README.
+- Added ElevenLabs-compatible `.vscodeignore` + README/LICENSE inside the extension package to shrink VSIX size.
+- Introduced `apps/wrapper/vscodium-manifest.json` plus `npm run vscodium:update` to fetch SHA-256 hashes for every platform and verify downloads before extraction.
+

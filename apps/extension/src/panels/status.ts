@@ -354,7 +354,6 @@ export class StatusPanel {
           const resolved = this._resolveWindowsCliPath(candidate);
           if (fs.existsSync(resolved)) return resolved;
         }
-        return candidates[0];
       }
     }
 

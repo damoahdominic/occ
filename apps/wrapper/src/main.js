@@ -9,7 +9,8 @@ const {
 const { installExtension, setDefaults, launchVSCodium } = require('./setup');
 
 const APP_NAME = 'OCcode';
-const VSCODIUM_VERSION = '1.109.31074';
+const manifest = require('../vscodium-manifest.json');
+const VSCODIUM_VERSION = manifest.version;
 const OCCODE_DIR = path.join(require('os').homedir(), '.occode');
 const VSCODE_DIR = path.join(OCCODE_DIR, 'vscode');
 const isLinux = process.platform === 'linux';
