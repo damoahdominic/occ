@@ -260,6 +260,15 @@ export class StatusPanel {
     const cliPath = await this._findOpenClawPath();
     const invocation = this._buildOpenClawInvocation(cliPath, args);
     const result = await this._execFile(invocation.command, invocation.args, timeoutMs);
+    // If .ps1 invocation failed, retry with .cmd sibling if available
+    if (result.error && cliPath?.endsWith('.ps1')) {
+      const cmdPath = cliPath.replace(/\.ps1$/i, '.cmd');
+      if (fs.existsSync(cmdPath)) {
+        const retryInvocation = this._buildOpenClawInvocation(cmdPath, args);
+        const retryResult = await this._execFile(retryInvocation.command, retryInvocation.args, timeoutMs);
+        return { result: retryResult, command: retryInvocation.display, cliPath: cmdPath };
+      }
+    }
     return { result, command: invocation.display, cliPath };
   }
 
@@ -286,6 +295,13 @@ export class StatusPanel {
       return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
     }
     if (ext === '.ps1') {
+      // Prefer .cmd sibling over .ps1 — more reliable on Windows
+      const cmdSibling = resolved.replace(/\.ps1$/i, '.cmd');
+      if (fs.existsSync(cmdSibling)) {
+        const cmdLine = `"${cmdSibling}" ${args.join(' ')}`.trim();
+        return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
+      }
+      // Fall through to PowerShell invocation
       const ps = 'powershell.exe';
       return {
         command: ps,
