@@ -40,12 +40,10 @@ async function rebrandVSCodium(vscodeDir) {
 
 async function rebrandWindows(vscodeDir) {
   const root = path.join(vscodeDir, 'VSCodium-win32-x64');
-  if (!fs.existsSync(root)) {
-    // Try alternate naming
-    const alt = findSubdir(vscodeDir, 'win32');
-    if (!alt) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
-  }
-  const dir = fs.existsSync(root) ? root : findSubdir(vscodeDir, 'win32');
+  const dir = fs.existsSync(root) ? root
+    : findSubdir(vscodeDir, 'win32')
+    || (fs.existsSync(path.join(vscodeDir, 'codium.exe')) ? vscodeDir : null);
+  if (!dir) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
 
   // 1. Replace code.ico for file associations
   const codeIco = path.join(dir, 'resources', 'app', 'resources', 'win32', 'code.ico');
@@ -115,7 +113,10 @@ async function rebrandMacOS(vscodeDir) {
 
 async function rebrandLinux(vscodeDir) {
   const root = path.join(vscodeDir, 'VSCodium-linux-x64');
-  const dir = fs.existsSync(root) ? root : findSubdir(vscodeDir, 'linux');
+  // Files may be in a subdirectory OR directly in vscodeDir (flat extraction)
+  const dir = fs.existsSync(root) ? root
+    : findSubdir(vscodeDir, 'linux')
+    || (fs.existsSync(path.join(vscodeDir, 'resources', 'app')) ? vscodeDir : null);
   if (!dir) { console.warn('[rebrand] Linux VSCodium dir not found'); return; }
 
   const srcPng = path.join(ASSETS_DIR, 'icon.png');
