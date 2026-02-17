@@ -8,6 +8,8 @@
     "apps/extension"
   ],
   "scripts": {
+    "compile": "npm run ext:compile",
+    "build-electron": "npm run --workspace=apps/wrapper build",
     "wrapper": "npm run --workspace=apps/wrapper start",
     "ext:compile": "npm run --workspace=apps/extension compile",
     "ext:package": "npm run --workspace=apps/extension package",
