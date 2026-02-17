@@ -54,6 +54,10 @@ async function bootstrap() {
     }
     binary = getVSCodiumBinary(VSCODE_DIR);
 
+    sendStatus('Customizing appearance…');
+    const { rebrandVSCodium } = require('./rebrand');
+    await rebrandVSCodium(VSCODE_DIR);
+
     const os = require('os');
     if (process.platform !== 'win32') {
       const p = getPlatformInfo();
