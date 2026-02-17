@@ -269,7 +269,77 @@ export class StatusPanel {
         return { result: retryResult, command: retryInvocation.display, cliPath: cmdPath };
       }
     }
+    // If shim execution failed on Windows, try direct node invocation (bypasses .cmd shim entirely)
+    if (result.error && process.platform === 'win32' && cliPath) {
+      const directResult = await this._tryDirectNodeInvocation(cliPath, args, timeoutMs);
+      if (directResult) return directResult;
+    }
     return { result, command: invocation.display, cliPath };
+  }
+
+  /**
+   * Bypass the npm .cmd/.ps1 shim and invoke the openclaw JS entry point directly with node.
+   * This handles the case where node.exe isn't on PATH inside the VS Code extension host.
+   */
+  private async _tryDirectNodeInvocation(
+    cliPath: string, args: string[], timeoutMs: number
+  ): Promise<{ result: RunResult; command: string; cliPath?: string } | undefined> {
+    // Resolve the JS entry point from the shim's directory
+    const shimDir = path.dirname(cliPath);
+    const jsEntryPoints = [
+      path.join(shimDir, 'node_modules', 'openclaw', 'bin', 'openclaw.js'),
+      path.join(shimDir, 'node_modules', 'openclaw', 'dist', 'cli.js'),
+      path.join(shimDir, 'node_modules', 'openclaw', 'cli.js'),
+      path.join(shimDir, 'node_modules', '@openclaw', 'cli', 'bin', 'openclaw.js'),
+    ];
+    let jsEntry: string | undefined;
+    for (const candidate of jsEntryPoints) {
+      if (fs.existsSync(candidate)) { jsEntry = candidate; break; }
+    }
+    // Also try reading the .cmd shim to extract the JS path
+    if (!jsEntry) {
+      const cmdPath = cliPath.replace(/\.(ps1|cmd|bat|exe)$/i, '.cmd');
+      if (fs.existsSync(cmdPath)) {
+        try {
+          const shimContent = fs.readFileSync(cmdPath, 'utf8');
+          // npm .cmd shims contain: "%~dp0\node_modules\openclaw\bin\openclaw.js"  %*
+          const match = shimContent.match(/"([^"]*openclaw[^"]*\.js)"/i)
+            || shimContent.match(/node[."'\s]+([^\s"']+\.js)/i);
+          if (match) {
+            // Resolve %~dp0 style paths relative to shim directory
+            let resolved = match[1].replace(/%~dp0\\?/gi, '');
+            resolved = path.resolve(shimDir, resolved);
+            if (fs.existsSync(resolved)) jsEntry = resolved;
+          }
+        } catch {}
+      }
+    }
+    if (!jsEntry) return undefined;
+
+    // Find node.exe
+    let nodeExe: string | undefined;
+    // Check if node.exe is in the same dir as the shim (common with nvm-windows)
+    if (fs.existsSync(path.join(shimDir, 'node.exe'))) {
+      nodeExe = path.join(shimDir, 'node.exe');
+    }
+    if (!nodeExe) {
+      const nodeDir = this._findNodeDir();
+      if (nodeDir) nodeExe = path.join(nodeDir, 'node.exe');
+    }
+    // Try 'where node' as last resort
+    if (!nodeExe) {
+      try {
+        const whereResult = cp.execSync('where node', { timeout: 3000, encoding: 'utf8', windowsHide: true });
+        const firstLine = whereResult.trim().split(/\r?\n/)[0]?.trim();
+        if (firstLine && fs.existsSync(firstLine)) nodeExe = firstLine;
+      } catch {}
+    }
+    if (!nodeExe) return undefined;
+
+    const nodeArgs = [jsEntry, ...args];
+    const display = `${nodeExe} ${jsEntry} ${args.join(' ')}`.trim();
+    const result = await this._execFile(nodeExe, nodeArgs, timeoutMs);
+    return { result, command: display, cliPath: jsEntry };
   }
 
   private _buildOpenClawInvocation(cliPath: string | undefined, args: string[]) {
@@ -320,6 +390,16 @@ export class StatusPanel {
     if (process.platform === 'win32') {
       if (env.APPDATA) extra.push(path.join(env.APPDATA, 'npm'));
       if (env.ProgramFiles) extra.push(path.join(env.ProgramFiles, 'nodejs'));
+      // Common Node.js install locations on Windows (nvm-windows, volta, fnm, scoop, etc.)
+      const home = os.homedir();
+      const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      extra.push(path.join(localAppData, 'Volta', 'bin'));
+      extra.push(path.join(localAppData, 'fnm', 'node-versions'));
+      extra.push(path.join(env.APPDATA || '', 'nvm'));
+      extra.push(path.join(home, 'scoop', 'shims'));
+      // Try to find node.exe from the extension host's own process
+      const nodeDir = this._findNodeDir();
+      if (nodeDir) extra.push(nodeDir);
       const systemRoot = env.SystemRoot || (env as any).WINDIR;
       if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
     } else {
@@ -331,6 +411,42 @@ export class StatusPanel {
     env.PATH = [...extra, basePath].filter(Boolean).join(sep);
     (env as any).Path = env.PATH;
     return env;
+  }
+
+  /** Find the directory containing node.exe by checking common locations */
+  private _findNodeDir(): string | undefined {
+    if (process.platform !== 'win32') return undefined;
+    // 1. Check if node.exe is alongside npm in APPDATA
+    const appData = process.env.APPDATA;
+    if (appData) {
+      const npmDir = path.join(appData, 'npm');
+      // npm .cmd shims use %~dp0\node.exe or fall back to 'node' on PATH
+      // Check the nodejs install dir referenced by the shim
+    }
+    // 2. Check common install paths
+    const candidates = [
+      process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'nodejs'),
+      process.env['ProgramFiles(x86)'] && path.join(process.env['ProgramFiles(x86)']!, 'nodejs'),
+      path.join(os.homedir(), '.nvm', 'versions'),
+    ].filter(Boolean) as string[];
+    for (const dir of candidates) {
+      if (fs.existsSync(path.join(dir, 'node.exe'))) return dir;
+    }
+    // 3. Try to extract node location from NVM_HOME or NVM_SYMLINK
+    const nvmSymlink = process.env.NVM_SYMLINK;
+    if (nvmSymlink && fs.existsSync(path.join(nvmSymlink, 'node.exe'))) return nvmSymlink;
+    const nvmHome = process.env.NVM_HOME;
+    if (nvmHome && fs.existsSync(nvmHome)) {
+      // nvm-windows creates a symlink or uses a current version dir
+      try {
+        const entries = fs.readdirSync(nvmHome).filter(e => /^v?\d/.test(e));
+        for (const entry of entries) {
+          const p = path.join(nvmHome, entry);
+          if (fs.existsSync(path.join(p, 'node.exe'))) return p;
+        }
+      } catch {}
+    }
+    return undefined;
   }
 
   private async _findOpenClawPath(): Promise<string | undefined> {
