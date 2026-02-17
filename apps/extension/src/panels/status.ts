@@ -35,6 +35,7 @@ type RunResult = {
   error?: string;
   pathEnv?: string;
   command?: string;
+  exitCode?: number | null;
 };
 
 export class StatusPanel {
@@ -338,7 +339,47 @@ export class StatusPanel {
 
     const nodeArgs = [jsEntry, ...args];
     const display = `${nodeExe} ${jsEntry} ${args.join(' ')}`.trim();
-    const result = await this._execFile(nodeExe, nodeArgs, timeoutMs);
+    
+    // Use spawn with detached mode to avoid job object/console inheritance issues
+    const result = await new Promise<RunResult>((resolve) => {
+      const child = cp.spawn(
+        nodeExe,
+        nodeArgs,
+        {
+          timeout: timeoutMs,
+          windowsHide: true,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      );
+      
+      let stdout = '';
+      let stderr = '';
+      
+      child.stdout?.on('data', data => stdout += data);
+      child.stderr?.on('data', data => stderr += data);
+      
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM');
+      }, timeoutMs);
+      
+      child.on('close', (code, signal) => {
+        clearTimeout(timer);
+        if (signal === 'SIGTERM' || code === null) {
+          resolve({ error: 'Timed out', stdout, stderr, exitCode: null });
+        } else if (code !== 0) {
+          resolve({ error: stderr.trim() || `Exit ${code}`, stdout, stderr, exitCode: code ?? undefined });
+        } else {
+          resolve({ stdout, stderr, exitCode: 0 });
+        }
+      });
+      
+      child.on('error', err => {
+        clearTimeout(timer);
+        resolve({ error: err.message, stdout, stderr, exitCode: undefined });
+      });
+    });
+    
     return { result, command: display, cliPath: jsEntry };
   }
 

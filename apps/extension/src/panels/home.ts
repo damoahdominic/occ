@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -12,7 +13,7 @@ export class HomePanel {
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
     this._extensionUri = extensionUri;
-    this._update();
+    void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command) {
@@ -39,21 +40,33 @@ export class HomePanel {
     this._disposables.forEach(d => d.dispose());
   }
 
-  private _update() {
+  private async _update() {
     const openclawDir = path.join(os.homedir(), '.openclaw');
-    const isInstalled = fs.existsSync(openclawDir);
+    const dirExists = fs.existsSync(openclawDir);
+    const cliCheck = await this._testOpenClawCli();
+    const isInstalled = dirExists && cliCheck.ok;
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
-    this._panel.webview.html = this._getHtml(isInstalled, iconUri.toString());
+    this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
   }
 
-  private _getHtml(isInstalled: boolean, iconUri: string): string {
+  private _getHtml(
+    isInstalled: boolean,
+    dirExists: boolean,
+    cliCheck: { ok: boolean; output?: string; error?: string; command: string },
+    iconUri: string
+  ): string {
     const statusIcon = isInstalled ? '✅' : '⚠️';
     const statusText = isInstalled ? 'OpenClaw detected' : 'OpenClaw not found';
     const statusClass = isInstalled ? 'detected' : 'not-found';
     const buttonLabel = isInstalled ? 'Configure OpenClaw' : 'Install OpenClaw';
     const buttonCommand = isInstalled ? 'openclaw.configure' : 'openclaw.install';
+    const dirText = dirExists ? 'found' : 'missing';
+    const dirClass = dirExists ? 'ok' : 'warn';
+    const cliText = cliCheck.ok ? (cliCheck.output || 'ok') : (cliCheck.output || cliCheck.error || 'not found');
+    const cliClass = cliCheck.ok ? 'ok' : 'warn';
+    const cliHint = cliCheck.ok ? '' : ` (tried: ${cliCheck.command})`;
 
     return `<!DOCTYPE html>
 <html>
@@ -103,6 +116,26 @@ export class HomePanel {
     }
     .status.detected { color: #4ade80; }
     .status.not-found { color: #facc15; }
+    .checks {
+      width: min(520px, 95vw);
+      background: rgba(255,255,255,0.03);
+      border: 1px solid #2b2b2b;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 24px;
+      font-size: 13px;
+    }
+    .check-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #2b2b2b;
+    }
+    .check-row:last-child { border-bottom: none; }
+    .check-row .label { color: #9a9a9a; }
+    .check-row .value.ok { color: #4ade80; }
+    .check-row .value.warn { color: #facc15; }
     .btn-primary {
       background: #dc2828;
       color: #fff;
@@ -146,6 +179,16 @@ export class HomePanel {
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
   <p class="tagline">Your AI-powered development environment</p>
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
+  <div class="checks">
+    <div class="check-row">
+      <span class="label">Config folder (~/.openclaw)</span>
+      <span class="value ${dirClass}">${dirText}</span>
+    </div>
+    <div class="check-row">
+      <span class="label">CLI check (openclaw --version)</span>
+      <span class="value ${cliClass}">${cliText}${cliHint}</span>
+    </div>
+  </div>
   <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
   <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
   <div class="links">
@@ -159,5 +202,288 @@ export class HomePanel {
   </script>
 </body>
 </html>`;
+  }
+
+  private async _testOpenClawCli(): Promise<{ ok: boolean; output?: string; error?: string; command: string }> {
+    // Bypass the slow npm .cmd shim — call node.exe with openclaw.mjs directly
+    const mjs = path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
+    );
+    const display = `node "${mjs}" --version`;
+
+    if (fs.existsSync(mjs)) {
+      // Find actual node.exe — process.execPath is Electron/VSCodium, not Node
+      const candidates = [
+        process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+        'C:\\Program Files\\nodejs\\node.exe',
+        'C:\\Program Files (x86)\\nodejs\\node.exe',
+        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+      ].filter(Boolean);
+
+      let nodeExe = candidates.find(p => fs.existsSync(p));
+
+      if (!nodeExe) {
+        try {
+          const result = await new Promise<string>((resolve, reject) => {
+            cp.exec('where node.exe', { timeout: 3000 }, (err, stdout) => {
+              if (err) reject(err);
+              else resolve(stdout.trim().split(/\r?\n/)[0]?.trim() || '');
+            });
+          });
+          if (result && fs.existsSync(result)) nodeExe = result;
+        } catch {}
+      }
+
+      if (nodeExe) {
+        return new Promise(resolve => {
+          const child = cp.spawn(
+            nodeExe!,
+            [mjs, '--version'],
+            { 
+              timeout: 30000,
+              windowsHide: true,
+              detached: true, // Don't inherit parent's console/job object
+              stdio: ['ignore', 'pipe', 'pipe'] // Ignore stdin
+            }
+          );
+          
+          let stdout = '';
+          let stderr = '';
+          
+          child.stdout?.on('data', data => stdout += data);
+          child.stderr?.on('data', data => stderr += data);
+          
+          const timer = setTimeout(() => {
+            child.kill('SIGTERM');
+          }, 30000);
+          
+          child.on('close', (code, signal) => {
+            clearTimeout(timer);
+            if (signal === 'SIGTERM' || code === null) {
+              resolve({ ok: false, error: 'Timed out after 30s', command: display });
+            } else if (code !== 0) {
+              resolve({ ok: false, error: stderr.trim() || `Exit ${code}`, command: display });
+            } else {
+              resolve({ ok: true, output: (stdout || stderr).trim(), command: display });
+            }
+          });
+          
+          child.on('error', err => {
+            clearTimeout(timer);
+            resolve({ ok: false, error: err.message, command: display });
+          });
+        });
+      }
+    }
+
+    // Fallback: cmd shim (slow but works)
+    const cmdPath = path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'npm', 'openclaw.cmd'
+    );
+    if (fs.existsSync(cmdPath)) {
+      return new Promise(resolve => {
+        cp.execFile(
+          'cmd.exe',
+          ['/c', cmdPath, '--version'],
+          { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 },
+          (error, stdout, stderr) => {
+            if (error) {
+              const timedOut = error.code == null;
+              const errMsg = timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`);
+              resolve({ ok: false, error: errMsg, command: `${cmdPath} --version` });
+            } else {
+              resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cmdPath} --version` });
+            }
+          }
+        );
+      });
+    }
+
+    return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
+  }
+
+  private async _findOpenClawPath(): Promise<string | undefined> {
+    const cfgPath = vscode.workspace.getConfiguration('openclaw').get<string>('cliPath');
+    if (cfgPath && fs.existsSync(cfgPath)) return cfgPath;
+
+    const envPath = process.env.OPENCLAW_CLI;
+    if (envPath && fs.existsSync(envPath)) return envPath;
+
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      const candidates = [
+        path.join(appData, 'npm', 'openclaw.cmd'),
+        path.join(appData, 'npm', 'openclaw.exe'),
+        path.join(appData, 'npm', 'openclaw.bat'),
+        path.join(appData, 'npm', 'openclaw.ps1'),
+      ];
+      for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+
+    if (process.platform === 'win32') {
+      for (const probe of ['openclaw.cmd', 'openclaw.exe', 'openclaw.bat', 'openclaw.ps1', 'openclaw']) {
+        const result = await this._runCommand(`where ${probe}`, 2000);
+        if (!result.error && !result.notFound) {
+          const out = (result.stdout || '').trim();
+          if (out) {
+            const candidates = out
+              .split(/\r?\n/)
+              .map(l => l.trim().replace(/^"+|"+$/g, ''))
+              .filter(Boolean);
+            for (const candidate of candidates) {
+              const resolved = this._resolveWindowsCliPath(candidate);
+              if (fs.existsSync(resolved)) return resolved;
+            }
+          }
+        }
+      }
+    } else {
+      const result = await this._runCommand('which openclaw', 2000);
+      if (!result.error && !result.notFound) {
+        const out = (result.stdout || '').trim();
+        if (out) {
+          const candidates = out
+            .split(/\r?\n/)
+            .map(l => l.trim().replace(/^"+|"+$/g, ''))
+            .filter(Boolean);
+          for (const candidate of candidates) {
+            const resolved = this._resolveWindowsCliPath(candidate);
+            if (fs.existsSync(resolved)) return resolved;
+          }
+        }
+      }
+    }
+
+    const npmCandidates = await this._getNpmGlobalCliCandidates();
+    for (const candidate of npmCandidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    const fallback = this._getCandidateCliPaths();
+    for (const candidate of fallback) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+
+    return undefined;
+  }
+
+  private _getCandidateCliPaths(): string[] {
+    const home = os.homedir();
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+      const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+      const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+      return [
+        path.join(appData, 'npm', 'openclaw.cmd'),
+        path.join(appData, 'npm', 'openclaw.exe'),
+        path.join(appData, 'npm', 'openclaw.bat'),
+        path.join(appData, 'npm', 'openclaw.ps1'),
+        path.join(localAppData, 'Programs', 'OpenClaw', 'openclaw.exe'),
+        path.join(localAppData, 'OpenClaw', 'openclaw.exe'),
+        path.join(programFiles, 'OpenClaw', 'openclaw.exe'),
+        path.join(programFiles, 'OpenClaw', 'bin', 'openclaw.exe'),
+        path.join(localAppData, 'Microsoft', 'WindowsApps', 'openclaw.exe'),
+        path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
+      ];
+    }
+    return [
+      '/usr/local/bin/openclaw',
+      '/opt/homebrew/bin/openclaw',
+      path.join(home, '.local', 'bin', 'openclaw'),
+      path.join(home, '.npm-global', 'bin', 'openclaw'),
+      path.join(home, '.openclaw', 'bin', 'openclaw'),
+    ];
+  }
+
+  private async _getNpmGlobalCliCandidates(): Promise<string[]> {
+    const result = await this._runCommand('npm config get prefix', 2000);
+    const prefix = (result.stdout || '').trim();
+    if (!prefix) return [];
+    if (process.platform === 'win32') {
+      const base = this._resolveWindowsCliPath(path.join(prefix, 'openclaw'));
+      return [
+        `${base}.cmd`,
+        `${base}.exe`,
+        `${base}.bat`,
+        `${base}.ps1`,
+        base,
+      ];
+    }
+    return [path.join(prefix, 'bin', 'openclaw')];
+  }
+
+  private _resolveWindowsCliPath(candidate: string) {
+    if (process.platform !== 'win32') return candidate;
+    const cleaned = candidate.replace(/^"+|"+$/g, '');
+    if (fs.existsSync(cleaned)) return cleaned;
+    if (path.extname(cleaned)) return cleaned;
+    const exts = ['.cmd', '.exe', '.bat', '.ps1'];
+    for (const ext of exts) {
+      const withExt = `${cleaned}${ext}`;
+      if (fs.existsSync(withExt)) return withExt;
+    }
+    return cleaned;
+  }
+
+  private _getPreferredWindowsCmdPath(candidate: string | undefined) {
+    if (process.platform !== 'win32') return candidate;
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const shim = path.join(appData, 'npm', 'openclaw.cmd');
+    if (fs.existsSync(shim)) return shim;
+    return candidate;
+  }
+
+  private _runCommand(cmd: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; error?: string; notFound?: boolean }> {
+    const env = this._buildExecEnv();
+    return new Promise(resolve => {
+      cp.exec(
+        cmd,
+        { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024, env },
+        (error, stdout, stderr) => {
+          const result = { stdout: stdout?.toString() || '', stderr: stderr?.toString() || '' } as {
+            stdout: string;
+            stderr: string;
+            error?: string;
+            notFound?: boolean;
+          };
+          if (error) {
+            result.error = error.message || 'Command failed';
+            const text = `${result.stderr}\n${result.error}`.toLowerCase();
+            result.notFound =
+              (error as any).code === 'ENOENT' ||
+              text.includes('not recognized as an internal or external command') ||
+              text.includes('command not found');
+          }
+          resolve(result);
+        }
+      );
+    });
+  }
+
+  private _buildExecEnv() {
+    const env = { ...process.env };
+    const basePath = env.PATH || (env as any).Path || '';
+    const extra: string[] = [];
+    if (process.platform === 'win32') {
+      const appData = env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      if (appData) extra.push(path.join(appData, 'npm'));
+      if (env.ProgramFiles) extra.push(path.join(env.ProgramFiles, 'nodejs'));
+      if (env.LOCALAPPDATA) extra.push(path.join(env.LOCALAPPDATA, 'Programs', 'nodejs'));
+      const systemRoot = env.SystemRoot || (env as any).WINDIR;
+      if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
+    } else {
+      extra.push('/usr/local/bin', '/opt/homebrew/bin');
+      extra.push(path.join(os.homedir(), '.local', 'bin'));
+      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
+      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
+    }
+    const sep = process.platform === 'win32' ? ';' : ':';
+    env.PATH = [...extra, basePath].filter(Boolean).join(sep);
+    (env as any).Path = env.PATH;
+    return env;
   }
 }
