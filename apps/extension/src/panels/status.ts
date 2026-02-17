@@ -257,99 +257,57 @@ export class StatusPanel {
     });
   }
 
-  private async _runOpenClaw(args: string[], timeoutMs: number): Promise<{ result: RunResult; command: string; cliPath?: string }> {
-    const cliPath = await this._findOpenClawPath();
-    const invocation = this._buildOpenClawInvocation(cliPath, args);
-    const result = await this._execFile(invocation.command, invocation.args, timeoutMs);
-    // If .ps1 invocation failed, retry with .cmd sibling if available
-    if (result.error && cliPath?.endsWith('.ps1')) {
-      const cmdPath = cliPath.replace(/\.ps1$/i, '.cmd');
-      if (fs.existsSync(cmdPath)) {
-        const retryInvocation = this._buildOpenClawInvocation(cmdPath, args);
-        const retryResult = await this._execFile(retryInvocation.command, retryInvocation.args, timeoutMs);
-        return { result: retryResult, command: retryInvocation.display, cliPath: cmdPath };
-      }
-    }
-    // If shim execution failed on Windows, try direct node invocation (bypasses .cmd shim entirely)
-    if (result.error && process.platform === 'win32' && cliPath) {
-      const directResult = await this._tryDirectNodeInvocation(cliPath, args, timeoutMs);
-      if (directResult) return directResult;
-    }
-    return { result, command: invocation.display, cliPath };
-  }
-
-  /**
-   * Bypass the npm .cmd/.ps1 shim and invoke the openclaw JS entry point directly with node.
-   * This handles the case where node.exe isn't on PATH inside the VS Code extension host.
-   */
-  private async _tryDirectNodeInvocation(
-    cliPath: string, args: string[], timeoutMs: number
-  ): Promise<{ result: RunResult; command: string; cliPath?: string } | undefined> {
-    // Resolve the JS entry point from the shim's directory
-    const shimDir = path.dirname(cliPath);
-    const jsEntryPoints = [
-      path.join(shimDir, 'node_modules', 'openclaw', 'bin', 'openclaw.js'),
-      path.join(shimDir, 'node_modules', 'openclaw', 'dist', 'cli.js'),
-      path.join(shimDir, 'node_modules', 'openclaw', 'cli.js'),
-      path.join(shimDir, 'node_modules', '@openclaw', 'cli', 'bin', 'openclaw.js'),
-    ];
-    let jsEntry: string | undefined;
-    for (const candidate of jsEntryPoints) {
-      if (fs.existsSync(candidate)) { jsEntry = candidate; break; }
-    }
-    // Also try reading the .cmd shim to extract the JS path
-    if (!jsEntry) {
-      const cmdPath = cliPath.replace(/\.(ps1|cmd|bat|exe)$/i, '.cmd');
-      if (fs.existsSync(cmdPath)) {
-        try {
-          const shimContent = fs.readFileSync(cmdPath, 'utf8');
-          // npm .cmd shims contain: "%~dp0\node_modules\openclaw\bin\openclaw.js"  %*
-          const match = shimContent.match(/"([^"]*openclaw[^"]*\.js)"/i)
-            || shimContent.match(/node[."'\s]+([^\s"']+\.js)/i);
-          if (match) {
-            // Resolve %~dp0 style paths relative to shim directory
-            let resolved = match[1].replace(/%~dp0\\?/gi, '');
-            resolved = path.resolve(shimDir, resolved);
-            if (fs.existsSync(resolved)) jsEntry = resolved;
-          }
-        } catch {}
-      }
-    }
-    if (!jsEntry) return undefined;
+  private async _runOpenClaw(args: string[], timeoutMs: number = 30000): Promise<{ result: RunResult; command: string; cliPath?: string }> {
+    const mjs = path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
+    );
 
     // Find node.exe
     let nodeExe: string | undefined;
-    // Check if node.exe is in the same dir as the shim (common with nvm-windows)
-    if (fs.existsSync(path.join(shimDir, 'node.exe'))) {
-      nodeExe = path.join(shimDir, 'node.exe');
-    }
-    if (!nodeExe) {
-      const nodeDir = this._findNodeDir();
-      if (nodeDir) nodeExe = path.join(nodeDir, 'node.exe');
-    }
-    // Try 'where node' as last resort
+    const candidates = [
+      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+    ].filter(Boolean) as string[];
+    
+    nodeExe = candidates.find(p => fs.existsSync(p));
+    
     if (!nodeExe) {
       try {
-        const whereResult = cp.execSync('where node', { timeout: 3000, encoding: 'utf8', windowsHide: true });
-        const firstLine = whereResult.trim().split(/\r?\n/)[0]?.trim();
-        if (firstLine && fs.existsSync(firstLine)) nodeExe = firstLine;
+        const result = cp.execSync('where node.exe', { timeout: 3000, encoding: 'utf8', windowsHide: true });
+        const found = result.trim().split(/\r?\n/)[0]?.trim();
+        if (found && fs.existsSync(found)) nodeExe = found;
       } catch {}
     }
-    if (!nodeExe) return undefined;
 
-    const nodeArgs = [jsEntry, ...args];
-    const display = `${nodeExe} ${jsEntry} ${args.join(' ')}`.trim();
+    if (!nodeExe || !fs.existsSync(mjs)) {
+      return { 
+        result: { 
+          stdout: '', 
+          stderr: '', 
+          error: 'node.exe or openclaw.mjs not found',
+          exitCode: -1 
+        }, 
+        command: 'openclaw ' + args.join(' ') 
+      };
+    }
+
+    const display = `node "${mjs}" ${args.join(' ')}`;
+    const cmdLine = `node "${mjs}" ${args.join(' ')}`;
     
-    // Use spawn with detached mode to avoid job object/console inheritance issues
+    // Use shell execution which may work better for complex CLI commands
     const result = await new Promise<RunResult>((resolve) => {
       const child = cp.spawn(
-        nodeExe,
-        nodeArgs,
+        cmdLine,
+        [],
         {
           timeout: timeoutMs,
           windowsHide: true,
-          detached: true,
-          stdio: ['ignore', 'pipe', 'pipe']
+          shell: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: process.env
         }
       );
       
@@ -366,7 +324,7 @@ export class StatusPanel {
       child.on('close', (code, signal) => {
         clearTimeout(timer);
         if (signal === 'SIGTERM' || code === null) {
-          resolve({ error: 'Timed out', stdout, stderr, exitCode: null });
+          resolve({ error: 'Timed out after 30s', stdout, stderr, exitCode: null });
         } else if (code !== 0) {
           resolve({ error: stderr.trim() || `Exit ${code}`, stdout, stderr, exitCode: code ?? undefined });
         } else {
@@ -380,48 +338,33 @@ export class StatusPanel {
       });
     });
     
-    return { result, command: display, cliPath: jsEntry };
+    return { result, command: display, cliPath: mjs };
   }
 
-  private _buildOpenClawInvocation(cliPath: string | undefined, args: string[]) {
-    if (process.platform !== 'win32') {
-      const command = cliPath || 'openclaw';
-      return { command, args, display: [command, ...args].join(' ') };
+  /** Find the full path to node.exe on Windows */
+  private _findNodeExe(): string | undefined {
+    if (process.platform !== 'win32') return 'node';
+    
+    // Check common install paths
+    const candidates = [
+      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+    ].filter(Boolean) as string[];
+    
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p;
     }
-
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    if (!cliPath) {
-      const appData = process.env.APPDATA;
-      const shim = appData ? path.join(appData, 'npm', 'openclaw.cmd') : '';
-      const cmdLine = shim && fs.existsSync(shim)
-        ? `"${shim}" ${args.join(' ')}`
-        : `openclaw ${args.join(' ')}`;
-      return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
-    }
-
-    const resolved = this._resolveWindowsCliPath(cliPath || 'openclaw');
-    const ext = path.extname(resolved).toLowerCase();
-    if (ext === '.cmd' || ext === '.bat') {
-      const cmdLine = `"${resolved}" ${args.join(' ')}`.trim();
-      return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
-    }
-    if (ext === '.ps1') {
-      // Prefer .cmd sibling over .ps1 — more reliable on Windows
-      const cmdSibling = resolved.replace(/\.ps1$/i, '.cmd');
-      if (fs.existsSync(cmdSibling)) {
-        const cmdLine = `"${cmdSibling}" ${args.join(' ')}`.trim();
-        return { command: comspec, args: ['/d', '/s', '/c', cmdLine], display: `${comspec} /d /s /c ${cmdLine}` };
-      }
-      // Fall through to PowerShell invocation
-      const ps = 'powershell.exe';
-      return {
-        command: ps,
-        args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolved, ...args],
-        display: `${ps} -NoProfile -ExecutionPolicy Bypass -File "${resolved}" ${args.join(' ')}`.trim(),
-      };
-    }
-    const command = resolved;
-    return { command, args, display: [command, ...args].join(' ') };
+    
+    // Try where command
+    try {
+      const result = cp.execSync('where node.exe', { timeout: 3000, encoding: 'utf8', windowsHide: true });
+      const found = result.trim().split(/\r?\n/)[0]?.trim();
+      if (found && fs.existsSync(found)) return found;
+    } catch {}
+    
+    return undefined;
   }
 
   private _buildExecEnv() {

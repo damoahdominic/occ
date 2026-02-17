@@ -20,6 +20,15 @@ function normalizePath(p: string) {
   return expanded;
 }
 
+function escapeHtml(input: string) {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
@@ -102,111 +111,318 @@ export class ConfigPanel {
   }
 
   private _getHtml(config: Record<string, unknown>, configPath: string): string {
-    const model = (config.model as string) || '';
-    const channels = config.channels || {};
-    const channelsJson = JSON.stringify(channels, null, 2);
+    const model =
+      (config.model as string) ||
+      (((config as any).agents?.defaults?.model?.primary) as string) ||
+      '';
+    const channels = (config.channels && typeof config.channels === 'object') ? config.channels : {};
+    const channelEntries = (channels && typeof channels === 'object')
+      ? Object.entries(channels as Record<string, unknown>)
+      : [];
+    const channelRows = channelEntries.length
+      ? channelEntries.map(([key, value]) => {
+        const valueText = typeof value === 'string' ? value : JSON.stringify(value);
+        return `
+          <div class="channel-row">
+            <input class="channel-name" type="text" value="${escapeHtml(key)}" placeholder="e.g. default" />
+            <input class="channel-value" type="text" value="${escapeHtml(valueText)}" placeholder="URL, token, or JSON" />
+            <button class="icon-btn" title="Remove" onclick="removeRow(this)">x</button>
+          </div>
+        `;
+      }).join('\n')
+      : `
+        <div class="channel-row">
+          <input class="channel-name" type="text" placeholder="e.g. default" />
+          <input class="channel-value" type="text" placeholder="URL, token, or JSON" />
+          <button class="icon-btn" title="Remove" onclick="removeRow(this)">x</button>
+        </div>
+      `;
+
     const configJson = JSON.stringify(config, null, 2);
-    const safeChannels = channelsJson.replace(/</g, '&lt;');
-    const safeConfig = configJson.replace(/</g, '&lt;');
+    const safeConfig = escapeHtml(configJson);
+    const safeConfigPath = escapeHtml(configPath);
+    const safeModel = escapeHtml(model);
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: var(--vscode-font-family, sans-serif);
-      background: #1a1a1a;
-      color: #e0e0e0;
-      padding: 24px;
+      background: radial-gradient(circle at top left, #261313, #151515 35%, #101010 70%);
+      color: #e6e6e6;
+      padding: 28px;
     }
-    h2 { color: #dc2828; margin-bottom: 20px; font-size: 20px; }
+    h2 { color: #ff4b4b; margin-bottom: 6px; font-size: 22px; }
+    .subtitle {
+      color: #b6b6b6;
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: rgba(20,20,20,0.75);
+      border: 1px solid #2b2b2b;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f5f5f5;
+      margin-bottom: 8px;
+    }
+    .section-hint {
+      font-size: 12px;
+      color: #9a9a9a;
+      margin-bottom: 12px;
+    }
     label {
       display: block;
       font-size: 12px;
-      color: #aaa;
-      margin-bottom: 4px;
-      margin-top: 16px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      color: #bdbdbd;
+      margin-bottom: 6px;
+      margin-top: 10px;
+      font-weight: 600;
     }
-    input, textarea {
+    input, textarea, select {
       width: 100%;
-      background: #2a2a2a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: 13px;
+      background: #1f1f1f;
+      border: 1px solid #3a3a3a;
+      color: #f0f0f0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-family: var(--vscode-editor-font-family, sans-serif);
+      font-size: 14px;
     }
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
       outline: none;
-      border-color: #dc2828;
+      border-color: #ff4b4b;
+      box-shadow: 0 0 0 2px rgba(255, 75, 75, 0.15);
     }
-    textarea { min-height: 120px; resize: vertical; }
-    .actions { margin-top: 24px; display: flex; gap: 8px; }
+    textarea { min-height: 160px; resize: vertical; }
+    .actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
     button {
-      padding: 8px 20px;
-      border-radius: 6px;
+      padding: 10px 18px;
+      border-radius: 8px;
       border: none;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
     }
-    .btn-save { background: #dc2828; color: #fff; }
-    .btn-save:hover { background: #b91c1c; }
-    .btn-refresh { background: #333; color: #aaa; border: 1px solid #555; }
-    .btn-refresh:hover { background: #444; }
+    .btn-save { background: #ff4b4b; color: #fff; }
+    .btn-save:hover { background: #dc2828; }
+    .btn-secondary { background: #2c2c2c; color: #cfcfcf; border: 1px solid #3a3a3a; }
+    .btn-secondary:hover { background: #3a3a3a; }
+    .channel-row {
+      display: grid;
+      grid-template-columns: 1fr 2fr auto;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .icon-btn {
+      background: #2b2b2b;
+      border: 1px solid #3a3a3a;
+      color: #bdbdbd;
+      padding: 0 10px;
+      border-radius: 8px;
+      height: 40px;
+    }
+    .icon-btn:hover { background: #3a3a3a; color: #fff; }
+    .hint {
+      font-size: 12px;
+      color: #8c8c8c;
+      margin-top: 6px;
+    }
+    .error {
+      display: none;
+      background: rgba(255, 75, 75, 0.1);
+      border: 1px solid rgba(255, 75, 75, 0.4);
+      color: #ff9b9b;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+    .error.show { display: block; }
+    details {
+      margin-top: 10px;
+      border: 1px dashed #3a3a3a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: rgba(10,10,10,0.5);
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #cfcfcf;
+      font-size: 13px;
+    }
     .note {
-      margin-top: 20px;
+      margin-top: 12px;
       font-size: 11px;
-      color: #666;
+      color: #7a7a7a;
     }
   </style>
 </head>
 <body>
-  <h2>⚙️ OpenClaw Configuration</h2>
-  <p style="color:#888;font-size:13px;margin-bottom:8px;">
-    Editing <code>${configPath}</code>
-  </p>
+  <h2>OpenClaw Setup</h2>
+  <div class="subtitle">Friendly settings for non-technical users.</div>
 
-  <label>Model</label>
-  <input id="model" type="text" value="${model}" placeholder="e.g. claude-sonnet-4-20250514" />
+  <div id="error" class="error"></div>
 
-  <label>Channels (JSON)</label>
-  <textarea id="channels">${safeChannels}</textarea>
-
-  <div class="actions">
-    <button class="btn-save" onclick="save()">Save</button>
-    <button class="btn-refresh" onclick="vscode.postMessage({command:'refresh'})">Reload</button>
+  <div class="card">
+    <div class="section-title">Config File</div>
+    <div class="section-hint">Editing <code>${safeConfigPath}</code></div>
   </div>
 
-  <label>Full Config (JSON)</label>
-  <textarea id="configRaw" style="min-height:200px;">${safeConfig}</textarea>
+  <div class="card">
+    <div class="section-title">1) Choose Your Model</div>
+    <div class="section-hint">Pick a model (or type your own).</div>
+    <input id="model" type="text" list="model-list" value="${safeModel}" placeholder="e.g. claude-sonnet-4-20250514" />
+    <datalist id="model-list">
+      <option value="claude-sonnet-4-20250514"></option>
+      <option value="claude-3-5-sonnet"></option>
+      <option value="gpt-4o-mini"></option>
+      <option value="gpt-4o"></option>
+      <option value="o3-mini"></option>
+    </datalist>
+    <div class="hint">If you're unsure, leave it as-is.</div>
+  </div>
+
+  <div class="card">
+    <div class="section-title">2) Channels</div>
+    <div class="section-hint">Channels let OpenClaw connect to services. One row per channel.</div>
+    <div id="channels">${channelRows}</div>
+    <button class="btn-secondary" onclick="addRow()">Add Channel</button>
+    <div class="hint">Value can be a URL, token, or JSON (advanced).</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-save" onclick="save()">Save Settings</button>
+    <button class="btn-secondary" onclick="refresh()">Reload From File</button>
+  </div>
+
+  <details>
+    <summary>Advanced (JSON)</summary>
+    <p class="section-hint" style="margin-top:8px;">Only edit if you know what you're doing.</p>
+    <textarea id="configRaw">${safeConfig}</textarea>
+    <div class="actions">
+      <button class="btn-secondary" onclick="saveAdvanced()">Save Advanced JSON</button>
+    </div>
+  </details>
 
   <p class="note">Changes are written directly to your OpenClaw config file.</p>
 
   <script>
     const vscode = acquireVsCodeApi();
-    function save() {
-      let channels;
-      try {
-        channels = JSON.parse(document.getElementById('channels').value);
-      } catch(e) {
-        channels = {};
-        alert('Invalid JSON in channels field — saving as empty object.');
+    const errorEl = document.getElementById('error');
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.classList.add('show');
+    }
+    function clearError() {
+      errorEl.textContent = '';
+      errorEl.classList.remove('show');
+    }
+
+    function addRow(name = '', value = '') {
+      const container = document.getElementById('channels');
+      const row = document.createElement('div');
+      row.className = 'channel-row';
+      row.innerHTML = \`
+        <input class="channel-name" type="text" value="\${name}" placeholder="e.g. default" />
+        <input class="channel-value" type="text" value="\${value}" placeholder="URL, token, or JSON" />
+        <button class="icon-btn" title="Remove" onclick="removeRow(this)">x</button>
+      \`;
+      container.appendChild(row);
+    }
+
+    function removeRow(btn) {
+      const row = btn.closest('.channel-row');
+      if (row) row.remove();
+    }
+
+    function refresh() {
+      vscode.postMessage({ command:'refresh' });
+    }
+
+    function buildChannels() {
+      const rows = [...document.querySelectorAll('.channel-row')];
+      const channels = {};
+      for (const row of rows) {
+        const name = row.querySelector('.channel-name').value.trim();
+        const valueRaw = row.querySelector('.channel-value').value.trim();
+        if (!name) continue;
+        if (!valueRaw) {
+          channels[name] = '';
+          continue;
+        }
+        if ((valueRaw.startsWith('{') && valueRaw.endsWith('}')) || (valueRaw.startsWith('[') && valueRaw.endsWith(']'))) {
+          try {
+            channels[name] = JSON.parse(valueRaw);
+            continue;
+          } catch (e) {
+            channels[name] = valueRaw;
+            continue;
+          }
+        }
+        channels[name] = valueRaw;
       }
+      return channels;
+    }
+
+    function applyUpdates(config, model, channels) {
+      const configEmpty = Object.keys(config).length === 0;
+      const hasTopModel = Object.prototype.hasOwnProperty.call(config, 'model');
+      const hasTopChannels = Object.prototype.hasOwnProperty.call(config, 'channels');
+      const hasAgentsModel =
+        config &&
+        config.agents &&
+        config.agents.defaults &&
+        config.agents.defaults.model &&
+        Object.prototype.hasOwnProperty.call(config.agents.defaults.model, 'primary');
+
+      if (hasTopModel || configEmpty) {
+        config.model = model;
+      }
+      if (hasTopChannels || configEmpty) {
+        config.channels = channels;
+      }
+      if (hasAgentsModel) {
+        config.agents.defaults.model.primary = model;
+      }
+    }
+
+    function save() {
+      clearError();
+      const model = document.getElementById('model').value.trim();
+      const channels = buildChannels();
       let config;
       try {
         config = JSON.parse(document.getElementById('configRaw').value);
       } catch (err) {
-        alert('Config JSON is invalid. Fix it before saving.');
+        config = {};
+      }
+      applyUpdates(config, model, channels);
+      document.getElementById('configRaw').value = JSON.stringify(config, null, 2);
+      vscode.postMessage({ command: 'save', config });
+    }
+
+    function saveAdvanced() {
+      clearError();
+      let config;
+      try {
+        config = JSON.parse(document.getElementById('configRaw').value);
+      } catch (err) {
+        showError('Advanced JSON is invalid. Please fix it before saving.');
         return;
       }
-      config.model = document.getElementById('model').value;
-      config.channels = channels;
       vscode.postMessage({ command: 'save', config });
     }
   </script>
