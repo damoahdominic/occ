@@ -135,3 +135,10 @@ Draft plan ready. Next step: scaffold wrapper + extension.
 - **Status panel** (`panels/status.ts`): Gateway running detection with start/stop buttons
 - **Extension** (`extension.ts`): Registers `openclaw.home`, `openclaw.configure`, `openclaw.install`, `openclaw.status` commands; auto-shows Home on activation
 - **package.json**: Updated commands list, bumped to v0.2.0
+
+
+## Auto‑deploy (Webhook)
+- A server‑side webhook listens on: `https://openclawcode.org/__deploy/openclawcode`
+- GitHub webhook should send a **POST** with header `X-OC-Token: <secret>`
+- The webhook runs: `deploy.sh` which pulls latest, installs deps, builds, and restarts pm2.
+- Version control: deploy uses the current `main` branch.
