@@ -5,7 +5,8 @@
   "description": "OCcode \u2014 branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [
     "apps/wrapper",
-    "apps/extension"
+    "apps/extension",
+    "apps/web"
   ],
   "scripts": {
     "compile": "npm run ext:compile",
