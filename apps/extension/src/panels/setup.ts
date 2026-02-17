@@ -156,6 +156,23 @@ export class ConfigPanel {
       color: #e6e6e6;
       padding: 28px;
     }
+    .page { max-width: 920px; margin: 0 auto; }
+    .hero {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .path-pill {
+      background: rgba(15,15,15,0.7);
+      border: 1px solid #2b2b2b;
+      color: #bdbdbd;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
     h2 { color: #ff4b4b; margin-bottom: 6px; font-size: 22px; }
     .subtitle {
       color: #b6b6b6;
@@ -214,6 +231,17 @@ export class ConfigPanel {
       font-weight: 600;
       cursor: pointer;
     }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .chip {
+      background: #1f1f1f;
+      color: #e0e0e0;
+      border: 1px solid #3a3a3a;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .chip:hover { border-color: #ff4b4b; color: #fff; }
     .btn-save { background: #ff4b4b; color: #fff; }
     .btn-save:hover { background: #dc2828; }
     .btn-secondary { background: #2c2c2c; color: #cfcfcf; border: 1px solid #3a3a3a; }
@@ -270,53 +298,64 @@ export class ConfigPanel {
   </style>
 </head>
 <body>
-  <h2>OpenClaw Setup</h2>
-  <div class="subtitle">Friendly settings for non-technical users.</div>
-
-  <div id="error" class="error"></div>
-
-  <div class="card">
-    <div class="section-title">Config File</div>
-    <div class="section-hint">Editing <code>${safeConfigPath}</code></div>
-  </div>
-
-  <div class="card">
-    <div class="section-title">1) Choose Your Model</div>
-    <div class="section-hint">Pick a model (or type your own).</div>
-    <input id="model" type="text" list="model-list" value="${safeModel}" placeholder="e.g. claude-sonnet-4-20250514" />
-    <datalist id="model-list">
-      <option value="claude-sonnet-4-20250514"></option>
-      <option value="claude-3-5-sonnet"></option>
-      <option value="gpt-4o-mini"></option>
-      <option value="gpt-4o"></option>
-      <option value="o3-mini"></option>
-    </datalist>
-    <div class="hint">If you're unsure, leave it as-is.</div>
-  </div>
-
-  <div class="card">
-    <div class="section-title">2) Channels</div>
-    <div class="section-hint">Channels let OpenClaw connect to services. One row per channel.</div>
-    <div id="channels">${channelRows}</div>
-    <button class="btn-secondary" onclick="addRow()">Add Channel</button>
-    <div class="hint">Value can be a URL, token, or JSON (advanced).</div>
-  </div>
-
-  <div class="actions">
-    <button class="btn-save" onclick="save()">Save Settings</button>
-    <button class="btn-secondary" onclick="refresh()">Reload From File</button>
-  </div>
-
-  <details>
-    <summary>Advanced (JSON)</summary>
-    <p class="section-hint" style="margin-top:8px;">Only edit if you know what you're doing.</p>
-    <textarea id="configRaw">${safeConfig}</textarea>
-    <div class="actions">
-      <button class="btn-secondary" onclick="saveAdvanced()">Save Advanced JSON</button>
+  <div class="page">
+    <div class="hero">
+      <div>
+        <h2>OpenClaw Setup</h2>
+        <div class="subtitle">Simple, guided setup. Save when you are done.</div>
+      </div>
+      <div class="path-pill">Config: <code>${safeConfigPath}</code></div>
     </div>
-  </details>
 
-  <p class="note">Changes are written directly to your OpenClaw config file.</p>
+    <div id="error" class="error"></div>
+
+    <div class="card">
+      <div class="section-title">Model</div>
+      <div class="section-hint">Pick a model or type your own.</div>
+      <input id="model" type="text" list="model-list" value="${safeModel}" placeholder="e.g. claude-sonnet-4-20250514" />
+      <datalist id="model-list">
+        <option value="claude-sonnet-4-20250514"></option>
+        <option value="claude-3-5-sonnet"></option>
+        <option value="gpt-4o-mini"></option>
+        <option value="gpt-4o"></option>
+        <option value="o3-mini"></option>
+      </datalist>
+      <div class="chips">
+        <button class="chip" onclick="setModel('claude-sonnet-4-20250514')">claude-sonnet-4-20250514</button>
+        <button class="chip" onclick="setModel('claude-3-5-sonnet')">claude-3-5-sonnet</button>
+        <button class="chip" onclick="setModel('gpt-4o-mini')">gpt-4o-mini</button>
+        <button class="chip" onclick="setModel('gpt-4o')">gpt-4o</button>
+      </div>
+      <div class="hint">If you are unsure, leave it as-is.</div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Channels</div>
+      <div class="section-hint">One row per channel. Name is a label, value is a URL or token.</div>
+      <div id="channels">${channelRows}</div>
+      <div class="actions">
+        <button class="btn-secondary" onclick="addRow()">Add Channel</button>
+        <button class="btn-secondary" onclick="addExample()">Add Example</button>
+      </div>
+      <div class="hint">Example: name "default", value "https://example.com"</div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-save" onclick="save()">Save Settings</button>
+      <button class="btn-secondary" onclick="refresh()">Reload From File</button>
+    </div>
+
+    <details>
+      <summary>Advanced (JSON)</summary>
+      <p class="section-hint" style="margin-top:8px;">Only edit if you know what you are doing.</p>
+      <textarea id="configRaw">${safeConfig}</textarea>
+      <div class="actions">
+        <button class="btn-secondary" onclick="saveAdvanced()">Save Advanced JSON</button>
+      </div>
+    </details>
+
+    <p class="note">Changes are written directly to your OpenClaw config file.</p>
+  </div>
 
   <script>
     const vscode = acquireVsCodeApi();
@@ -341,6 +380,14 @@ export class ConfigPanel {
         <button class="icon-btn" title="Remove" onclick="removeRow(this)">x</button>
       \`;
       container.appendChild(row);
+    }
+
+    function addExample() {
+      addRow('default', 'https://example.com');
+    }
+
+    function setModel(value) {
+      document.getElementById('model').value = value;
     }
 
     function removeRow(btn) {
