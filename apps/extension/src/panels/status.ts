@@ -42,13 +42,27 @@ export class StatusPanel {
   public static currentPanel: StatusPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private _refreshing = false;
+  private _refreshQueued = false;
+  private _lastStatus?: GatewayStatus;
+  private _lastStatusAt = 0;
+  private _isVisible = true;
+  private _gatewayTerminal?: vscode.Terminal;
 
   private constructor(panel: vscode.WebviewPanel) {
     this._panel = panel;
+    this._isVisible = panel.visible;
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    this._panel.onDidChangeViewState(e => {
+      this._isVisible = e.webviewPanel.visible;
+      if (this._isVisible) {
+        void this._update();
+      }
+    }, null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'refresh') {
+        if (!this._isVisible) return;
         void this._update();
       } else if (msg.command === 'gateway-start') {
         void this._runGateway('start');
@@ -93,24 +107,58 @@ export class StatusPanel {
   }
 
   private async _runGateway(action: string) {
-    const { result } = await this._runOpenClaw(['gateway', action], 60000);
-    if (result.timedOut) {
-      vscode.window.showWarningMessage(`OpenClaw gateway ${action} is taking longer than expected.`);
-    } else if (result.error) {
-      const msg = result.stderr.trim() || result.error;
-      vscode.window.showErrorMessage(`Failed to ${action} OpenClaw gateway. ${msg}`);
+    const terminal = this._ensureGatewayTerminal();
+    terminal.show();
+    if (action === 'restart') {
+      const startCmd = 'openclaw gateway';
+      terminal.sendText('\u0003', false);
+      await new Promise(r => setTimeout(r, 1500));
+      terminal.sendText(startCmd, true);
+      vscode.window.showInformationMessage(`Sent: Ctrl+C then ${startCmd}`);
     } else {
-      vscode.window.showInformationMessage(`OpenClaw gateway ${action} successful.`);
+      if (action === 'start') {
+        const cmd = 'openclaw gateway';
+        terminal.sendText(cmd, true);
+        vscode.window.showInformationMessage(`Sent: ${cmd}`);
+      } else {
+        terminal.sendText('\u0003', false);
+        vscode.window.showInformationMessage('Sent: Ctrl+C');
+      }
     }
     await this._update();
+    await this._pollStatus(20000, 2000);
   }
 
   private async _update() {
-    const status = await this._getStatus();
-    this._panel.webview.html = this._getHtml(status);
+    if (this._refreshing) {
+      this._refreshQueued = true;
+      return;
+    }
+    this._refreshing = true;
+    try {
+      const status = await this._getStatus();
+      this._panel.webview.html = this._getHtml(status);
+    } finally {
+      this._refreshing = false;
+      if (this._refreshQueued) {
+        this._refreshQueued = false;
+        void this._update();
+      }
+    }
   }
 
   private async _getStatus(): Promise<GatewayStatus> {
+    const now = Date.now();
+    if (this._lastStatus && now - this._lastStatusAt < 3000) {
+      return this._lastStatus;
+    }
+    const status = await this._getStatusFresh();
+    this._lastStatus = status;
+    this._lastStatusAt = now;
+    return status;
+  }
+
+  private async _getStatusFresh(): Promise<GatewayStatus> {
     const updatedAt = new Date().toLocaleTimeString();
     const { command, result, cliPath } = await this._runOpenClaw(['gateway', 'status'], 4000);
     const out = (result.stdout || result.stderr).trim();
@@ -184,6 +232,28 @@ export class StatusPanel {
       error: result.error,
       updatedAt,
     };
+  }
+
+  private async _pollStatus(maxMs: number, intervalMs: number) {
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      if (!this._isVisible) return;
+      const status = await this._getStatusFresh();
+      this._panel.webview.html = this._getHtml(status);
+      if (status.running) return;
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+  }
+
+  private _ensureGatewayTerminal() {
+    if (this._gatewayTerminal) return this._gatewayTerminal;
+    const existing = vscode.window.terminals.find(t => t.name === 'OpenClaw Gateway');
+    if (existing) {
+      this._gatewayTerminal = existing;
+      return existing;
+    }
+    this._gatewayTerminal = vscode.window.createTerminal('OpenClaw Gateway');
+    return this._gatewayTerminal;
   }
 
   private _runCommand(cmd: string, timeoutMs: number): Promise<RunResult> {
@@ -579,8 +649,12 @@ export class StatusPanel {
 
   private _parseStatus(out: string) {
     const lower = out.toLowerCase();
-    let running = /runtime:\s*running|gateway:\s*running/.test(lower) || /running|active|started/.test(lower);
-    if (/not running|stopped|inactive|down|runtime:\s*stopped/.test(lower)) running = false;
+    let running = /rpc probe:\s*ok/.test(lower);
+    if (/rpc probe:\s*failed/.test(lower)) running = false;
+    if (!/rpc probe:\s*(ok|failed)/.test(lower)) {
+      running = /runtime:\s*running|gateway:\s*running/.test(lower) || /running|active|started/.test(lower);
+      if (/not running|stopped|inactive|down|runtime:\s*stopped/.test(lower)) running = false;
+    }
 
     const pid = out.match(/pid[:\s]+(\d+)/i)?.[1];
     const port = out.match(/port[:=\s]+(\d+)/i)?.[1];
@@ -635,75 +709,43 @@ export class StatusPanel {
   }
 
   private _getHtml(status: GatewayStatus): string {
-    const {
-      running,
-      installed,
-      raw,
-      error,
-      pid,
-      port,
-      uptime,
-      service,
-      dashboard,
-      probe,
-      logFile,
-      configPath,
-      issues,
-      exitCode,
-      cliPath,
-      command,
-      stderr,
-      pathEnv,
-      updatedAt,
-    } = status;
-    const safeRaw = this._escapeHtml(raw || '');
-    const safeError = error ? this._escapeHtml(error) : '';
-    const safeIssues = (issues || []).map(i => this._escapeHtml(i));
-    const safeService = this._escapeHtml(service || '—');
-    const safePid = this._escapeHtml(pid || '—');
-    const safePort = this._escapeHtml(port || '—');
-    const safeUptime = this._escapeHtml(uptime || '—');
+    const { running, installed, dashboard, updatedAt } = status;
     const safeDashboard = this._escapeHtml(dashboard || '—');
-    const safeProbe = this._escapeHtml(probe || '—');
-    const safeLogFile = this._escapeHtml(logFile || '—');
-    const safeConfigPath = this._escapeHtml(configPath || '—');
-    const safeCliPath = this._escapeHtml(cliPath || '—');
-    const safeCommand = this._escapeHtml(command || '—');
-    const safeStderr = this._escapeHtml(stderr || '');
-    const safePathEnv = this._escapeHtml(pathEnv || '');
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: var(--vscode-font-family, sans-serif);
-      background: radial-gradient(1200px 600px at -10% -10%, rgba(220,40,40,0.15), transparent),
-                  radial-gradient(900px 400px at 110% 10%, rgba(220,40,40,0.12), transparent),
-                  #141414;
-      color: #e7e7e7;
-      padding: 28px;
+      background: radial-gradient(900px 600px at -10% -10%, rgba(220,40,40,0.2), transparent),
+                  radial-gradient(800px 400px at 120% 0%, rgba(220,40,40,0.12), transparent),
+                  #121212;
+      color: #ededed;
+      padding: 26px;
     }
-    h2 { color: #dc2828; margin-bottom: 6px; letter-spacing: 0.2px; }
-    .subtitle { color: #b2b2b2; font-size: 12px; margin-bottom: 18px; }
-    .status-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .indicator {
-      width: 12px; height: 12px; border-radius: 50%;
-    }
+    h2 { color: #ff4b4b; margin-bottom: 6px; letter-spacing: 0.2px; }
+    .subtitle { color: #b8b8b8; font-size: 12px; margin-bottom: 18px; }
+    .status-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .indicator { width: 12px; height: 12px; border-radius: 50%; }
     .on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.4); }
     .off { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.4); }
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #1f1f1f;
+      border: 1px solid #2f2f2f;
+      color: #d0d0d0;
+    }
     .card {
-      background: #1d1d1d;
+      background: rgba(18,18,18,0.85);
       border: 1px solid #2a2a2a;
-      border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 16px;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
     }
     .grid {
       display: grid;
@@ -714,18 +756,9 @@ export class StatusPanel {
       display: flex;
       justify-content: space-between;
       font-size: 13px;
-      color: #c8c8c8;
+      color: #d2d2d2;
     }
-    .kv span:first-child { color: #8c8c8c; }
-    pre {
-      background: #111;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 14px;
-      overflow-x: auto;
-      font-size: 12px;
-      color: #c0c0c0;
-    }
+    .kv span:first-child { color: #9a9a9a; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     button {
       padding: 8px 18px;
@@ -740,69 +773,32 @@ export class StatusPanel {
     .btn-restart { background: #f59e0b; color: #141414; }
     .btn-refresh { background: #222; color: #bdbdbd; border: 1px solid #3a3a3a; }
     .btn-install { background: #dc2828; color: #fff; }
-    .btn-config { background: #444; color: #e2e2e2; border: 1px solid #5a5a5a; }
-    .btn-link { background: #1f2937; color: #dbeafe; border: 1px solid #374151; }
-    .error {
-      color: #fca5a5;
-      font-size: 12px;
-      margin-top: 8px;
-      white-space: pre-wrap;
+    .link {
+      color: #dbeafe;
+      text-decoration: none;
     }
-    .issues {
-      margin-top: 8px;
-      font-size: 12px;
-      color: #fef3c7;
-    }
-    .issue-item {
-      padding: 6px 8px;
-      border: 1px solid #4b2e12;
-      background: #2a1e12;
-      border-radius: 6px;
-      margin-bottom: 6px;
-    }
+    .link:hover { text-decoration: underline; }
     .muted { color: #9a9a9a; font-size: 12px; }
   </style>
 </head>
 <body>
-  <h2>OpenClaw Gateway Status</h2>
+  <h2>OpenClaw Gateway</h2>
   <div class="subtitle">Last updated: ${updatedAt}</div>
   <div class="status-row">
     <span class="indicator ${running ? 'on' : 'off'}"></span>
-    <span>${running ? 'Running' : installed ? 'Not Running' : 'Not Installed'}</span>
+    <span>${running ? 'Running' : installed ? 'Stopped' : 'Not Installed'}</span>
+    <span class="pill">${running ? 'Healthy' : installed ? 'Offline' : 'Missing'}</span>
   </div>
   <div class="card">
     <div class="grid">
       <div class="kv"><span>Status</span><span>${running ? 'Running' : installed ? 'Stopped' : 'Missing'}</span></div>
-      <div class="kv"><span>Service</span><span>${safeService}</span></div>
-      <div class="kv"><span>PID</span><span>${safePid}</span></div>
-      <div class="kv"><span>Port</span><span>${safePort}</span></div>
-      <div class="kv"><span>Uptime</span><span>${safeUptime}</span></div>
     </div>
   </div>
   <div class="card">
-    <div class="grid">
-      <div class="kv"><span>Dashboard</span><span>${safeDashboard}</span></div>
-      <div class="kv"><span>Probe</span><span>${safeProbe}</span></div>
-      <div class="kv"><span>Logs</span><span>${safeLogFile}</span></div>
-      <div class="kv"><span>Config</span><span>${safeConfigPath}</span></div>
-      <div class="kv"><span>CLI</span><span>${safeCliPath}</span></div>
+    <div class="kv">
+      <span>Dashboard</span>
+      ${dashboard ? `<a class="link" href="#" data-cmd="open-dashboard">${safeDashboard}</a>` : `<span>${safeDashboard}</span>`}
     </div>
-  </div>
-  ${safeIssues.length
-    ? `<div class="card">
-        <div class="issues">
-          ${safeIssues.map(i => `<div class="issue-item">${i}</div>`).join('')}
-        </div>
-      </div>`
-    : ''}
-  <pre>${safeRaw}</pre>
-  ${error ? `<div class="error">${safeError}</div>` : `<div class="muted">Command: openclaw gateway status</div>`}
-  ${exitCode ? `<div class="muted">Exit code: ${exitCode}</div>` : ''}
-  <div class="card">
-    <div class="muted">Diagnostics</div>
-    <pre>Command: ${safeCommand}</pre>
-    ${safeStderr ? `<pre>Stderr: ${safeStderr}</pre>` : '<div class="muted">Stderr: (empty)</div>'}
-    ${safePathEnv ? `<pre>PATH: ${safePathEnv}</pre>` : ''}
   </div>
   <div class="actions">
     ${installed
@@ -811,24 +807,23 @@ export class StatusPanel {
           : '<button class="btn-start" data-cmd="gateway-start">Start Gateway</button>')
       : '<button class="btn-install" data-cmd="install">Install OpenClaw</button>'}
     ${installed ? '<button class="btn-restart" data-cmd="gateway-restart">Restart Gateway</button>' : ''}
-    ${installed ? '<button class="btn-config" data-cmd="configure">Open Config</button>' : ''}
-    ${dashboard ? '<button class="btn-link" data-cmd="open-dashboard">Open Dashboard</button>' : ''}
-    ${logFile ? '<button class="btn-link" data-cmd="open-logs">Open Logs</button>' : ''}
     <button class="btn-refresh" data-cmd="refresh">Refresh</button>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
     const dashboardUrl = ${JSON.stringify(dashboard || '')};
-    const logFilePath = ${JSON.stringify(logFile || '')};
     document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[data-cmd]');
+      if (link) {
+        const cmd = link.getAttribute('data-cmd');
+        if (cmd === 'open-dashboard') return vscode.postMessage({ command: cmd, url: dashboardUrl });
+      }
       const btn = e.target.closest('button[data-cmd]');
       if (!btn) return;
       const cmd = btn.getAttribute('data-cmd');
-      if (cmd === 'open-dashboard') return vscode.postMessage({ command: cmd, url: dashboardUrl });
-      if (cmd === 'open-logs') return vscode.postMessage({ command: cmd, path: logFilePath });
       vscode.postMessage({ command: cmd });
     });
-    setInterval(() => vscode.postMessage({ command: 'refresh' }), 5000);
+    setInterval(() => vscode.postMessage({ command: 'refresh' }), 20000);
   </script>
 </body>
 </html>`;
