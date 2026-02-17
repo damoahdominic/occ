@@ -3,6 +3,8 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const https = require('https');
+const crypto = require('crypto');
+const manifest = require('../vscodium-manifest.json');
 
 const PLATFORM_MAP = {
   win32:  { os: 'win32', arch: 'x64', ext: 'zip',    dir: 'VSCodium-win32-x64' },
@@ -60,6 +62,15 @@ async function downloadVSCodium(version, destDir) {
 
   await downloadFile(url, archivePath);
 
+  const checksumKey = getChecksumKey(p);
+  const expectedHash = (manifest.sha256 || {})[checksumKey];
+  if (expectedHash) {
+    console.log(`[OCcode] Verifying checksum for ${checksumKey}…`);
+    await verifyChecksum(archivePath, expectedHash);
+  } else {
+    console.warn(`[OCcode] No checksum available for ${checksumKey}; skipping verification.`);
+  }
+
   // Extract
   if (p.ext === 'zip') {
     if (process.platform === 'win32') {
@@ -109,6 +120,28 @@ function getVSCodiumBinary(vscodeDir) {
   throw new Error(
     `VSCodium binary not found. Checked: ${candidates.join(', ')}`
   );
+}
+
+function getChecksumKey(platform) {
+  return `${platform.os}-${platform.arch}`;
+}
+
+async function verifyChecksum(filePath, expected) {
+  if (!expected) return false;
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => {
+      const digest = hash.digest('hex');
+      if (digest.toLowerCase() !== expected.toLowerCase()) {
+        reject(new Error(`Checksum mismatch for ${filePath}: expected ${expected} but got ${digest}`));
+        return;
+      }
+      resolve(true);
+    });
+    stream.on('error', reject);
+  });
 }
 
 module.exports = {

@@ -49,9 +49,14 @@ Then press F5 in VS Code to launch the Extension Development Host.
 # Wrapper — platform-specific installer
 cd apps/wrapper && npm run build
 
-# Extension — .vsix package
-cd apps/extension && npx @vscode/vsce package
+# Extension — .vsix package (bundled into wrapper)
+npm run ext:compile
+npm run ext:bundle
 ```
+
+The bundle step copies the extension into a clean temp directory, runs `vsce package`
+outside of the monorepo git workspace, and saves `openclaw.vsix` to
+`apps/wrapper/extensions/`.
 
 ## CI
 
@@ -64,3 +69,10 @@ PRs welcome! See [AGENTS.md](AGENTS.md) for the full plan and milestone tracker.
 ## License
 
 MIT
+
+## Updating VSCodium
+
+VSCodium version + SHA-256 hashes live in `apps/wrapper/vscodium-manifest.json`.
+Use `npm run vscodium:update <version>` to refresh the manifest directly from the
+official release assets. Downloads are now verified against those hashes before
+extracting.

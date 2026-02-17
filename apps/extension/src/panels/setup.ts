@@ -3,11 +3,43 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+function expandHome(p: string) {
+  if (!p) return p;
+  if (p.startsWith('~')) {
+    return path.join(os.homedir(), p.slice(1));
+  }
+  return p;
+}
+
+function normalizePath(p: string) {
+  if (!p) return p;
+  const expanded = expandHome(p);
+  if (process.platform === 'win32') {
+    return expanded.replace(/\\/g, '/');
+  }
+  return expanded;
+}
+
 export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
   private static readonly CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+  private static _customPath: string | undefined;
+
+  private static _getConfigPath() {
+    if (ConfigPanel._customPath) return ConfigPanel._customPath;
+    const userPath = vscode.workspace.getConfiguration('openclaw').get<string>('configPath');
+    if (userPath) {
+      ConfigPanel._customPath = normalizePath(userPath);
+      return ConfigPanel._customPath;
+    }
+    return ConfigPanel.CONFIG_PATH;
+  }
+
+  public static overrideConfigPath(p: string | undefined) {
+    ConfigPanel._customPath = p ? normalizePath(p) : undefined;
+  }
 
   private constructor(panel: vscode.WebviewPanel) {
     this._panel = panel;
@@ -42,7 +74,7 @@ export class ConfigPanel {
 
   private _readConfig(): Record<string, unknown> {
     try {
-      const raw = fs.readFileSync(ConfigPanel.CONFIG_PATH, 'utf-8');
+      const raw = fs.readFileSync(ConfigPanel._getConfigPath(), 'utf-8');
       return JSON.parse(raw);
     } catch {
       return {};
@@ -51,9 +83,10 @@ export class ConfigPanel {
 
   private _saveConfig(config: Record<string, unknown>) {
     try {
-      const dir = path.dirname(ConfigPanel.CONFIG_PATH);
+      const targetPath = ConfigPanel._getConfigPath();
+      const dir = path.dirname(targetPath);
       if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
-      fs.writeFileSync(ConfigPanel.CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+      fs.writeFileSync(targetPath, JSON.stringify(config, null, 2), 'utf-8');
       vscode.window.showInformationMessage('OpenClaw configuration saved.');
       this._update();
     } catch (e: unknown) {
@@ -64,13 +97,17 @@ export class ConfigPanel {
 
   private _update() {
     const config = this._readConfig();
-    this._panel.webview.html = this._getHtml(config);
+    const targetPath = ConfigPanel._getConfigPath();
+    this._panel.webview.html = this._getHtml(config, targetPath);
   }
 
-  private _getHtml(config: Record<string, unknown>): string {
+  private _getHtml(config: Record<string, unknown>, configPath: string): string {
     const model = (config.model as string) || '';
     const channels = config.channels || {};
     const channelsJson = JSON.stringify(channels, null, 2);
+    const configJson = JSON.stringify(config, null, 2);
+    const safeChannels = channelsJson.replace(/</g, '&lt;');
+    const safeConfig = configJson.replace(/</g, '&lt;');
 
     return `<!DOCTYPE html>
 <html>
@@ -132,19 +169,22 @@ export class ConfigPanel {
 <body>
   <h2>⚙️ OpenClaw Configuration</h2>
   <p style="color:#888;font-size:13px;margin-bottom:8px;">
-    Editing <code>~/.openclaw/openclaw.json</code>
+    Editing <code>${configPath}</code>
   </p>
 
   <label>Model</label>
   <input id="model" type="text" value="${model}" placeholder="e.g. claude-sonnet-4-20250514" />
 
   <label>Channels (JSON)</label>
-  <textarea id="channels">${channelsJson.replace(/</g, '&lt;')}</textarea>
+  <textarea id="channels">${safeChannels}</textarea>
 
   <div class="actions">
     <button class="btn-save" onclick="save()">Save</button>
     <button class="btn-refresh" onclick="vscode.postMessage({command:'refresh'})">Reload</button>
   </div>
+
+  <label>Full Config (JSON)</label>
+  <textarea id="configRaw" style="min-height:200px;">${safeConfig}</textarea>
 
   <p class="note">Changes are written directly to your OpenClaw config file.</p>
 
@@ -158,7 +198,13 @@ export class ConfigPanel {
         channels = {};
         alert('Invalid JSON in channels field — saving as empty object.');
       }
-      const config = ${JSON.stringify(config)};
+      let config;
+      try {
+        config = JSON.parse(document.getElementById('configRaw').value);
+      } catch (err) {
+        alert('Config JSON is invalid. Fix it before saving.');
+        return;
+      }
       config.model = document.getElementById('model').value;
       config.channels = channels;
       vscode.postMessage({ command: 'save', config });
