@@ -80,12 +80,6 @@ h1, h2, h3 {
   94% { transform: translateY(-1px) rotate(-5deg); }
 }
 
-/* Install feed — vertical marquee */
-@keyframes marquee-vertical {
-  0%   { transform: translateY(0); }
-  100% { transform: translateY(-50%); }
-}
-
 /* Download button — static glow */
 .btn-glow {
   box-shadow:
