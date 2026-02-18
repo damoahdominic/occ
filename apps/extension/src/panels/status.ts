@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getControlCenterData } from "@occode/control-center/data";
+import type { ControlCenterData } from "@occode/control-center/data";
 import { renderControlCenterHtml } from "./control-center-webview";
 import { resolveConfigPath } from "./config-path";
 
@@ -84,11 +84,53 @@ export class StatusPanel {
 
   private async _update() {
     const configPath = resolveConfigPath();
-    const data = getControlCenterData(configPath);
+    const data = loadControlCenterData(configPath);
     this._panel.webview.html = renderControlCenterHtml(
       this._panel.webview,
       this._extensionUri,
       data
     );
+  }
+}
+
+function getFallbackControlCenterData(): ControlCenterData {
+  return {
+    personas: [],
+    principles: [],
+    agents: [],
+    routing: {
+      bindings: [],
+      conflicts: [],
+      precedenceNotes: [],
+      broadcastGroups: []
+    },
+    channels: [],
+    automation: {
+      heartbeats: [],
+      cronJobs: [],
+      runHistory: []
+    },
+    maintenance: {
+      doctor: {
+        status: "warning",
+        lastRun: "Never",
+        pendingMigrations: [],
+        log: ["OpenClaw Control Center data source not available."]
+      },
+      plugins: []
+    },
+    commandHistory: []
+  };
+}
+
+function loadControlCenterData(configPath?: string): ControlCenterData {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require("@occode/control-center/data") as {
+      getControlCenterData: (path?: string) => ControlCenterData;
+    };
+    return mod.getControlCenterData(configPath);
+  } catch {
+    return getFallbackControlCenterData();
   }
 }
