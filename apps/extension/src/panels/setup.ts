@@ -33,6 +33,7 @@ export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private _disposed = false;
   private static readonly CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
   private static _customPath: string | undefined;
 
@@ -76,6 +77,7 @@ export class ConfigPanel {
   }
 
   public dispose() {
+    this._disposed = true;
     ConfigPanel.currentPanel = undefined;
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
@@ -105,8 +107,10 @@ export class ConfigPanel {
   }
 
   private _update() {
+    if (this._disposed) return;
     const config = this._readConfig();
     const targetPath = ConfigPanel._getConfigPath();
+    if (this._disposed) return;
     this._panel.webview.html = this._getHtml(config, targetPath);
   }
 
