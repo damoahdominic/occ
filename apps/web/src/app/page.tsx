@@ -592,8 +592,8 @@ export default function Home() {
 
             <div className="relative flex flex-col lg:flex-row items-center justify-center gap-10">
               {/* Globe */}
-              <div ref={globeContainerRef} className="relative aspect-square w-[320px] sm:w-[420px] lg:w-[500px] shrink-0">
-                <div className="absolute inset-0 bg-[var(--accent)]/[0.04] rounded-full blur-3xl pointer-events-none" />
+              <div ref={globeContainerRef} className="relative aspect-square w-[400px] sm:w-[580px] lg:w-[720px] shrink-0">
+                <div className="absolute inset-0 bg-[var(--accent)]/[0.06] rounded-full blur-3xl pointer-events-none" />
                 <canvas
                   ref={canvasRef}
                   className="w-full h-full"
