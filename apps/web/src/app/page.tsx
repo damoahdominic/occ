@@ -85,14 +85,14 @@ export default function Home() {
 
       {/* Hero */}
       <main className="flex-1">
-        <section className="relative flex flex-col items-center text-center px-6 pt-20 pb-16 max-w-4xl mx-auto overflow-hidden">
+        <section className="relative w-full min-h-screen overflow-hidden">
           {/* Background video */}
           <video
             autoPlay
             loop
             muted
             playsInline
-            className="absolute inset-0 w-full h-full object-cover opacity-20 -z-10 hidden sm:block"
+            className="absolute inset-0 w-full h-full object-cover opacity-30 -z-10 hidden sm:block"
           >
             <source src="/videos/hero.mp4" type="video/mp4" />
           </video>
@@ -101,70 +101,73 @@ export default function Home() {
             loop
             muted
             playsInline
-            className="absolute inset-0 w-full h-full object-cover opacity-20 -z-10 sm:hidden"
+            className="absolute inset-0 w-full h-full object-cover opacity-30 -z-10 sm:hidden"
           >
             <source src="/videos/hero_mobile.mp4" type="video/mp4" />
           </video>
           <div className="absolute inset-0 bg-gradient-to-b from-[var(--bg)]/60 via-transparent to-[var(--bg)] -z-10" />
-          <Image
-            src="/icon.png"
-            alt="OpenClaw Code"
-            width={96}
-            height={96}
-            className="rounded-2xl mb-8"
-            priority
-          />
-          <h1 className="text-5xl sm:text-6xl font-bold tracking-tight mb-4">
-            Open<span className="text-[var(--accent)]">Claw</span> Code
-          </h1>
-          <p className="text-xl text-[var(--text-muted)] max-w-2xl mb-10 leading-relaxed">
-            AI-powered development without the setup hassle. Download, install, code.
-            <br className="hidden sm:block" />
-            No terminal required.
-          </p>
 
-          {/* Download button */}
-          <div className="relative mb-4">
-            <div className="flex">
-              <a
-                href={RELEASES}
-                className="inline-flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-colors"
-              >
-                Download for {platformLabels[platform]}
-              </a>
-              <button
-                onClick={() => setShowDropdown(!showDropdown)}
-                className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-3 py-3.5 rounded-r-xl border-l border-white/20 transition-colors"
-                aria-label="Other platforms"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-            {showDropdown && (
-              <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[200px]">
-                {otherPlatforms.map((p) => (
-                  <a
-                    key={p}
-                    href={RELEASES}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm"
-                    onClick={() => setShowDropdown(false)}
-                  >
-                    <span>{platformIcons[p]}</span>
-                    <span>Download for {platformLabels[p]}</span>
-                  </a>
-                ))}
+          <div className="relative flex flex-col items-center text-center px-6 pt-20 pb-16 max-w-4xl mx-auto">
+            <Image
+              src="/icon.png"
+              alt="OpenClaw Code"
+              width={96}
+              height={96}
+              className="rounded-2xl mb-8"
+              priority
+            />
+            <h1 className="text-5xl sm:text-6xl font-bold tracking-tight mb-4">
+              Open<span className="text-[var(--accent)]">Claw</span> Code
+            </h1>
+            <p className="text-xl text-[var(--text-muted)] max-w-2xl mb-10 leading-relaxed">
+              AI-powered development without the setup hassle. Download, install, code.
+              <br className="hidden sm:block" />
+              No terminal required.
+            </p>
+
+            {/* Download button */}
+            <div className="relative mb-4">
+              <div className="flex">
+                <a
+                  href={RELEASES}
+                  className="inline-flex items-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-colors"
+                >
+                  Download for {platformLabels[platform]}
+                </a>
+                <button
+                  onClick={() => setShowDropdown(!showDropdown)}
+                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-3 py-3.5 rounded-r-xl border-l border-white/20 transition-colors"
+                  aria-label="Other platforms"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
-            )}
-          </div>
+              {showDropdown && (
+                <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[200px]">
+                  {otherPlatforms.map((p) => (
+                    <a
+                      key={p}
+                      href={RELEASES}
+                      className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm"
+                      onClick={() => setShowDropdown(false)}
+                    >
+                      <span>{platformIcons[p]}</span>
+                      <span>Download for {platformLabels[p]}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          <a
-            href={REPO}
-            className="inline-flex items-center gap-2 text-[var(--text-muted)] hover:text-white transition-colors text-sm"
-          >
-            ⭐ Star on GitHub
-          </a>
+            <a
+              href={REPO}
+              className="inline-flex items-center gap-2 text-[var(--text-muted)] hover:text-white transition-colors text-sm"
+            >
+              ⭐ Star on GitHub
+            </a>
+          </div>
         </section>
 
         {/* Screenshot */}
