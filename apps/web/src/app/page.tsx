@@ -1,6 +1,7 @@
 "use client";
 
 import createGlobe from "cobe";
+import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { ContainerScroll } from "@/components/ui/container-scroll-animation";
@@ -151,6 +152,82 @@ const installEvents = [
   { city: "Mexico City", flag: "🇲🇽", lat: 19.4326, lng: -99.1332 },
   { city: "Amsterdam", flag: "🇳🇱", lat: 52.3676, lng: 4.9041 },
 ];
+
+// ─── iOS-style push notification feed ────────────────────────────────────────
+type InstallNotif = (typeof installEvents)[0] & { id: number };
+
+function NotificationFeed() {
+  const [items, setItems] = useState<InstallNotif[]>(() =>
+    installEvents.slice(0, 3).map((e, i) => ({ ...e, id: i }))
+  );
+  const nextIdx = useRef(3);
+  const nextId = useRef(3);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      const ev = installEvents[nextIdx.current % installEvents.length];
+      nextIdx.current++;
+      setItems((prev) => [{ ...ev, id: nextId.current++ }, ...prev].slice(0, 3));
+    }, 2800);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="relative w-full max-w-xs flex flex-col gap-2.5 select-none">
+      <AnimatePresence mode="popLayout" initial={false}>
+        {items.map((item) => (
+          <motion.div
+            key={item.id}
+            layout
+            initial={{ opacity: 0, y: -56, scale: 0.88, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 24, scale: 0.9, filter: "blur(4px)" }}
+            transition={{
+              type: "spring",
+              stiffness: 420,
+              damping: 26,
+              mass: 0.7,
+              layout: { type: "spring", stiffness: 350, damping: 32 },
+              filter: { duration: 0.22, ease: "easeOut" },
+              opacity: { duration: 0.28, ease: "easeOut" },
+            }}
+            className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border shadow-2xl shadow-black/50 cursor-default overflow-hidden"
+            style={{
+              background: "rgba(255,255,255,0.055)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              borderColor: "rgba(255,255,255,0.09)",
+            }}
+          >
+            {/* App icon */}
+            <div
+              className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0"
+              style={{
+                background: "linear-gradient(135deg, rgba(239,68,68,0.25) 0%, rgba(239,68,68,0.12) 100%)",
+                border: "1px solid rgba(239,68,68,0.28)",
+              }}
+            >
+              <Image src="/icon.png" alt="OCCode" width={22} height={22} className="rounded-md" />
+            </div>
+
+            {/* Text */}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+                  OpenClaw Code
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)]/50">· just now</span>
+              </div>
+              <p className="text-[13px] font-medium text-white/90 truncate leading-snug">
+                {item.flag} {item.city} joined the community
+              </p>
+            </div>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 export default function Home() {
   const [platform, setPlatform] = useState<Platform>("linux");
@@ -524,35 +601,8 @@ export default function Home() {
                 />
               </div>
 
-              {/* Install feed — vertical marquee */}
-              <div
-                className="relative overflow-hidden w-full max-w-xs h-64"
-                style={{
-                  maskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
-                  WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
-                }}
-              >
-                <div
-                  className="flex flex-col gap-3"
-                  style={{ animation: "marquee-vertical 60s linear infinite", willChange: "transform" }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "paused")}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "running")}
-                >
-                  {[...installEvents, ...installEvents].map((event, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 shrink-0"
-                    >
-                      <span className="text-lg shrink-0">{event.flag}</span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{event.city}</p>
-                        <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
-                      </div>
-                      <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              {/* Install feed — iOS push notification style */}
+              <NotificationFeed />
             </div>
           </div>
         </section>
