@@ -168,19 +168,17 @@ export default function Home() {
               ⭐ Star on GitHub
             </a>
           </div>
-        </section>
-
-        {/* Screenshot */}
-        <section className="px-6 pb-20 max-w-5xl mx-auto">
-          <div className="rounded-2xl overflow-hidden border border-[var(--border)] shadow-2xl shadow-black/50">
-            <Image
-              src="/screenshot.png"
-              alt="OCCode editor showing OpenClaw integration"
-              width={1280}
-              height={720}
-              className="w-full h-auto"
-            />
-          </div>
+            <div className="mt-12 w-full">
+              <div className="rounded-2xl overflow-hidden border border-[var(--border)] shadow-2xl shadow-black/50">
+                <Image
+                  src="/screenshot.png"
+                  alt="OCCode editor showing OpenClaw integration"
+                  width={1280}
+                  height={720}
+                  className="w-full h-auto"
+                />
+              </div>
+            </div>
         </section>
 
         {/* Features */}
