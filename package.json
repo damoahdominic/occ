@@ -2,7 +2,7 @@
   "name": "occode",
   "version": "0.1.0",
   "private": true,
-  "description": "OCcode \u2014 branded cross-platform IDE wrapper with OpenClaw extension",
+  "description": "OCcode — branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [
     "apps/wrapper",
     "apps/extension",
@@ -16,5 +16,9 @@
     "ext:package": "npm run --workspace=apps/extension package",
     "ext:bundle": "bash ./scripts/package-extension.sh",
     "vscodium:update": "node ./scripts/update-vscodium.mjs"
+  },
+  "dependencies": {
+    "cobe": "^0.6.5",
+    "framer-motion": "^12.34.2"
   }
 }

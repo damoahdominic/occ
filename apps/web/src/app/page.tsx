@@ -157,37 +157,23 @@ export default function Home() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [visibleInstalls, setVisibleInstalls] = useState(
-    installEvents.slice(0, 3).map((e, i) => ({ ...e, id: i }))
-  );
+  const globeContainerRef = useRef<HTMLDivElement>(null);
+  // Mouse-tracking state for globe interaction
+  const isGlobeHovered = useRef(false);
+  const mouseNormX = useRef(0); // -0.5 → 0.5 (left → right)
+  const mouseNormY = useRef(0); // -0.5 → 0.5 (top → bottom)
+  // Smooth offsets applied on top of the base auto-rotation
+  const smoothOffsetX = useRef(0);
+  const smoothOffsetY = useRef(0);
 
   useEffect(() => {
     setPlatform(detectPlatform());
   }, []);
 
-  // Cycle install popups
-  useEffect(() => {
-    let index = 3;
-    let idCounter = 3;
-    const interval = setInterval(() => {
-      setVisibleInstalls((prev) => {
-        const newEvent = {
-          ...installEvents[index % installEvents.length],
-          id: idCounter,
-        };
-        index++;
-        idCounter++;
-        return [...prev.slice(1), newEvent];
-      });
-    }, 2800);
-    return () => clearInterval(interval);
-  }, []);
-
   // Cobe globe
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !globeContainerRef.current) return;
 
-    let phi = 0;
     let width = 0;
 
     const onResize = () => {
@@ -197,6 +183,30 @@ export default function Home() {
     };
     window.addEventListener("resize", onResize);
     onResize();
+
+    // Mouse handlers attached to the container div
+    const container = globeContainerRef.current;
+
+    const handleMouseEnter = () => {
+      isGlobeHovered.current = true;
+    };
+
+    const handleMouseLeave = () => {
+      isGlobeHovered.current = false;
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      // Normalize to -0.5 → 0.5
+      mouseNormX.current = (e.clientX - rect.left) / rect.width - 0.5;
+      mouseNormY.current = (e.clientY - rect.top) / rect.height - 0.5;
+    };
+
+    container.addEventListener("mouseenter", handleMouseEnter);
+    container.addEventListener("mouseleave", handleMouseLeave);
+    container.addEventListener("mousemove", handleMouseMove);
+
+    let phi = 0; // always-advancing base rotation
 
     const globe = createGlobe(canvasRef.current, {
       devicePixelRatio: 2,
@@ -216,9 +226,22 @@ export default function Home() {
         size: 0.07,
       })),
       onRender: (state) => {
-        state.phi = phi;
-        phi += 0.003;
-        state.width = width * 2;
+        // Base rotation always ticks — slower while hovered so the globe
+        // feels like it's "pausing" to look at the cursor
+        phi += isGlobeHovered.current ? 0.0005 : 0.003;
+
+        // Target offsets: mouse position mapped to a gentle angular nudge
+        // mouseNormX/Y are already -0.5 → 0.5; scale to a comfortable range
+        const targetOffX = isGlobeHovered.current ? mouseNormX.current * 1.4 : 0;
+        const targetOffY = isGlobeHovered.current ? mouseNormY.current * 0.5 : 0;
+
+        // Lerp the smooth offsets toward the targets each frame
+        smoothOffsetX.current += (targetOffX - smoothOffsetX.current) * 0.05;
+        smoothOffsetY.current += (targetOffY - smoothOffsetY.current) * 0.05;
+
+        state.phi   = phi + smoothOffsetX.current;
+        state.theta = 0.25 + smoothOffsetY.current;
+        state.width  = width * 2;
         state.height = width * 2;
       },
     });
@@ -226,6 +249,9 @@ export default function Home() {
     return () => {
       globe.destroy();
       window.removeEventListener("resize", onResize);
+      container.removeEventListener("mouseenter", handleMouseEnter);
+      container.removeEventListener("mouseleave", handleMouseLeave);
+      container.removeEventListener("mousemove", handleMouseMove);
     };
   }, []);
 
@@ -474,7 +500,7 @@ export default function Home() {
 
             <div className="relative flex flex-col lg:flex-row items-center justify-center gap-10">
               {/* Globe */}
-              <div className="relative aspect-square w-[320px] sm:w-[420px] lg:w-[500px] shrink-0">
+              <div ref={globeContainerRef} className="relative aspect-square w-[320px] sm:w-[420px] lg:w-[500px] shrink-0">
                 <div className="absolute inset-0 bg-[var(--accent)]/[0.04] rounded-full blur-3xl pointer-events-none" />
                 <canvas
                   ref={canvasRef}
@@ -483,22 +509,34 @@ export default function Home() {
                 />
               </div>
 
-              {/* Install popups */}
-              <div className="flex flex-col gap-3 w-full max-w-xs" style={{ perspective: "600px" }}>
-                {visibleInstalls.map((event, i) => (
-                  <div
-                    key={event.id}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 animate-install-popup"
-                    style={{ animationDelay: `${i * 80}ms` }}
-                  >
-                    <span className="text-lg shrink-0">{event.flag}</span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{event.city}</p>
-                      <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
+              {/* Install feed — vertical marquee */}
+              <div
+                className="relative overflow-hidden w-full max-w-xs h-64"
+                style={{
+                  maskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
+                  WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
+                }}
+              >
+                <div
+                  className="flex flex-col gap-3"
+                  style={{ animation: "marquee-vertical 60s linear infinite", willChange: "transform" }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "paused")}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "running")}
+                >
+                  {[...installEvents, ...installEvents].map((event, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 shrink-0"
+                    >
+                      <span className="text-lg shrink-0">{event.flag}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{event.city}</p>
+                        <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
+                      </div>
+                      <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
                     </div>
-                    <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
