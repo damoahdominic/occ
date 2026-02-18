@@ -25,4 +25,8 @@ const mount = () => {
   );
 };
 
-document.addEventListener("DOMContentLoaded", mount);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", mount);
+} else {
+  mount();
+}
