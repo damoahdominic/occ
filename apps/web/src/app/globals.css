@@ -9,9 +9,11 @@
   --border: #262626;
   --text: #FAFAFA;
   --text-muted: #A3A3A3;
+  --font-sans: var(--font-space), ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
   background: var(--bg);
   color: var(--text);
+  font-family: var(--font-sans);
 }
