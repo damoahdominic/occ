@@ -205,103 +205,124 @@ export class HomePanel {
   }
 
   private async _testOpenClawCli(): Promise<{ ok: boolean; output?: string; error?: string; command: string }> {
-    // Bypass the slow npm .cmd shim — call node.exe with openclaw.mjs directly
-    const mjs = path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
-    );
-    const display = `node "${mjs}" --version`;
+    if (process.platform === 'win32') {
+      // Bypass the slow npm .cmd shim — call node.exe with openclaw.mjs directly
+      const mjs = path.join(
+        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+        'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
+      );
+      const display = `node "${mjs}" --version`;
 
-    if (fs.existsSync(mjs)) {
-      // Find actual node.exe — process.execPath is Electron/VSCodium, not Node
-      const candidates = [
-        process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
-        'C:\\Program Files\\nodejs\\node.exe',
-        'C:\\Program Files (x86)\\nodejs\\node.exe',
-        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
-      ].filter(Boolean);
+      if (fs.existsSync(mjs)) {
+        // Find actual node.exe — process.execPath is Electron/VSCodium, not Node
+        const candidates = [
+          process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+          'C:\\Program Files\\nodejs\\node.exe',
+          'C:\\Program Files (x86)\\nodejs\\node.exe',
+          process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+        ].filter(Boolean);
 
-      let nodeExe = candidates.find(p => fs.existsSync(p));
+        let nodeExe = candidates.find(p => fs.existsSync(p));
 
-      if (!nodeExe) {
-        try {
-          const result = await new Promise<string>((resolve, reject) => {
-            cp.exec('where node.exe', { timeout: 3000 }, (err, stdout) => {
-              if (err) reject(err);
-              else resolve(stdout.trim().split(/\r?\n/)[0]?.trim() || '');
+        if (!nodeExe) {
+          try {
+            const result = await new Promise<string>((resolve, reject) => {
+              cp.exec('where node.exe', { timeout: 3000 }, (err, stdout) => {
+                if (err) reject(err);
+                else resolve(stdout.trim().split(/\r?\n/)[0]?.trim() || '');
+              });
+            });
+            if (result && fs.existsSync(result)) nodeExe = result;
+          } catch {}
+        }
+
+        if (nodeExe) {
+          return new Promise(resolve => {
+            const child = cp.spawn(
+              nodeExe!,
+              [mjs, '--version'],
+              {
+                timeout: 30000,
+                windowsHide: true,
+                detached: true, // Don't inherit parent's console/job object
+                stdio: ['ignore', 'pipe', 'pipe'] // Ignore stdin
+              }
+            );
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout?.on('data', data => stdout += data);
+            child.stderr?.on('data', data => stderr += data);
+
+            const timer = setTimeout(() => {
+              child.kill('SIGTERM');
+            }, 30000);
+
+            child.on('close', (code, signal) => {
+              clearTimeout(timer);
+              if (signal === 'SIGTERM' || code === null) {
+                resolve({ ok: false, error: 'Timed out after 30s', command: display });
+              } else if (code !== 0) {
+                resolve({ ok: false, error: stderr.trim() || `Exit ${code}`, command: display });
+              } else {
+                resolve({ ok: true, output: (stdout || stderr).trim(), command: display });
+              }
+            });
+
+            child.on('error', err => {
+              clearTimeout(timer);
+              resolve({ ok: false, error: err.message, command: display });
             });
           });
-          if (result && fs.existsSync(result)) nodeExe = result;
-        } catch {}
+        }
       }
 
-      if (nodeExe) {
+      // Fallback: cmd shim (slow but works)
+      const cmdPath = path.join(
+        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+        'npm', 'openclaw.cmd'
+      );
+      if (fs.existsSync(cmdPath)) {
         return new Promise(resolve => {
-          const child = cp.spawn(
-            nodeExe!,
-            [mjs, '--version'],
-            { 
-              timeout: 30000,
-              windowsHide: true,
-              detached: true, // Don't inherit parent's console/job object
-              stdio: ['ignore', 'pipe', 'pipe'] // Ignore stdin
+          cp.execFile(
+            'cmd.exe',
+            ['/c', cmdPath, '--version'],
+            { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 },
+            (error, stdout, stderr) => {
+              if (error) {
+                const timedOut = error.code == null;
+                const errMsg = timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`);
+                resolve({ ok: false, error: errMsg, command: `${cmdPath} --version` });
+              } else {
+                resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cmdPath} --version` });
+              }
             }
           );
-          
-          let stdout = '';
-          let stderr = '';
-          
-          child.stdout?.on('data', data => stdout += data);
-          child.stderr?.on('data', data => stderr += data);
-          
-          const timer = setTimeout(() => {
-            child.kill('SIGTERM');
-          }, 30000);
-          
-          child.on('close', (code, signal) => {
-            clearTimeout(timer);
-            if (signal === 'SIGTERM' || code === null) {
-              resolve({ ok: false, error: 'Timed out after 30s', command: display });
-            } else if (code !== 0) {
-              resolve({ ok: false, error: stderr.trim() || `Exit ${code}`, command: display });
-            } else {
-              resolve({ ok: true, output: (stdout || stderr).trim(), command: display });
-            }
-          });
-          
-          child.on('error', err => {
-            clearTimeout(timer);
-            resolve({ ok: false, error: err.message, command: display });
-          });
         });
       }
+
+      return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
     }
 
-    // Fallback: cmd shim (slow but works)
-    const cmdPath = path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'npm', 'openclaw.cmd'
-    );
-    if (fs.existsSync(cmdPath)) {
-      return new Promise(resolve => {
-        cp.execFile(
-          'cmd.exe',
-          ['/c', cmdPath, '--version'],
-          { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 },
-          (error, stdout, stderr) => {
-            if (error) {
-              const timedOut = error.code == null;
-              const errMsg = timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`);
-              resolve({ ok: false, error: errMsg, command: `${cmdPath} --version` });
-            } else {
-              resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cmdPath} --version` });
-            }
+    const cliPath = await this._findOpenClawPath();
+    if (!cliPath) return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
+
+    return new Promise(resolve => {
+      cp.execFile(
+        cliPath,
+        ['--version'],
+        { timeout: 30000, maxBuffer: 1024 * 1024, env: this._buildExecEnv() },
+        (error, stdout, stderr) => {
+          if (error) {
+            const errMsg = stderr?.toString().trim() || error.message || `Exit ${(error as any).code}`;
+            resolve({ ok: false, error: errMsg, command: `${cliPath} --version` });
+          } else {
+            resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cliPath} --version` });
           }
-        );
-      });
-    }
-
-    return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
+        }
+      );
+    });
   }
 
   private async _findOpenClawPath(): Promise<string | undefined> {
@@ -390,9 +411,19 @@ export class HomePanel {
         path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
       ];
     }
+    if (process.platform === 'darwin') {
+      return [
+        '/opt/homebrew/bin/openclaw',
+        '/usr/local/bin/openclaw',
+        path.join(home, '.local', 'bin', 'openclaw'),
+        path.join(home, '.npm-global', 'bin', 'openclaw'),
+        path.join(home, '.openclaw', 'bin', 'openclaw'),
+      ];
+    }
     return [
       '/usr/local/bin/openclaw',
-      '/opt/homebrew/bin/openclaw',
+      '/usr/bin/openclaw',
+      '/snap/bin/openclaw',
       path.join(home, '.local', 'bin', 'openclaw'),
       path.join(home, '.npm-global', 'bin', 'openclaw'),
       path.join(home, '.openclaw', 'bin', 'openclaw'),
@@ -475,8 +506,13 @@ export class HomePanel {
       if (env.LOCALAPPDATA) extra.push(path.join(env.LOCALAPPDATA, 'Programs', 'nodejs'));
       const systemRoot = env.SystemRoot || (env as any).WINDIR;
       if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
+    } else if (process.platform === 'darwin') {
+      extra.push('/opt/homebrew/bin', '/usr/local/bin');
+      extra.push(path.join(os.homedir(), '.local', 'bin'));
+      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
+      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
     } else {
-      extra.push('/usr/local/bin', '/opt/homebrew/bin');
+      extra.push('/usr/local/bin', '/usr/bin', '/snap/bin');
       extra.push(path.join(os.homedir(), '.local', 'bin'));
       extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
       extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
