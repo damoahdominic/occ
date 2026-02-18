@@ -156,72 +156,64 @@ const installEvents = [
 // ─── iOS-style push notification feed ────────────────────────────────────────
 type InstallNotif = (typeof installEvents)[0] & { id: number };
 
+const N_VISIBLE = 3;
+const CARD_H    = 70;  // px — enforced via minHeight on each card
+const CARD_GAP  = 10;  // px
+const SLOT      = CARD_H + CARD_GAP; // 80px per slot
+const CONTAINER_H = N_VISIBLE * SLOT - CARD_GAP; // 230px
+
+// items[0] = oldest (renders at top, y=0)
+// items[N-1] = newest (renders at bottom, y = (N-1)*SLOT)
+// New card enters from below (y = CONTAINER_H + CARD_GAP)
+// Exiting card flies off the top (y = -(CARD_H + CARD_GAP))
+
 function NotificationFeed() {
   const [items, setItems] = useState<InstallNotif[]>(() =>
-    installEvents.slice(0, 3).map((e, i) => ({ ...e, id: i }))
+    installEvents.slice(0, N_VISIBLE).map((e, i) => ({ ...e, id: i }))
   );
-  const nextIdx = useRef(3);
-  const nextId = useRef(3);
+  const nextIdx = useRef(N_VISIBLE);
+  const nextId  = useRef(N_VISIBLE);
 
   useEffect(() => {
     const t = setInterval(() => {
       const ev = installEvents[nextIdx.current % installEvents.length];
       nextIdx.current++;
-      setItems((prev) => [{ ...ev, id: nextId.current++ }, ...prev].slice(0, 3));
+      // append newest at end, drop oldest from front
+      setItems((prev) => [...prev, { ...ev, id: nextId.current++ }].slice(-N_VISIBLE));
     }, 2800);
     return () => clearInterval(t);
   }, []);
 
+  const spring = { type: "spring" as const, stiffness: 420, damping: 28, mass: 0.75 };
+
   return (
-    <div className="relative w-full max-w-xs flex flex-col gap-2.5 select-none">
-      <AnimatePresence mode="popLayout" initial={false}>
-        {items.map((item) => (
+    // Fixed-size container — cards are absolutely positioned inside
+    <div
+      className="relative w-full max-w-xs select-none overflow-hidden"
+      style={{ height: CONTAINER_H }}
+    >
+      <AnimatePresence initial={false}>
+        {items.map((item, i) => (
           <motion.div
             key={item.id}
-            layout
-            initial={{ opacity: 0, y: -56, scale: 0.88, filter: "blur(6px)" }}
-            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: 24, scale: 0.9, filter: "blur(4px)" }}
+            // Drive Y explicitly so every card springs to its correct slot on each render
+            initial={{ y: CONTAINER_H + CARD_GAP, opacity: 0, scale: 0.88, filter: "blur(8px)" }}
+            animate={{ y: i * SLOT,               opacity: 1, scale: 1,    filter: "blur(0px)" }}
+            exit={{    y: -(CARD_H + CARD_GAP),   opacity: 0, scale: 0.9,  filter: "blur(6px)" }}
             transition={{
-              type: "spring",
-              stiffness: 420,
-              damping: 26,
-              mass: 0.7,
-              layout: { type: "spring", stiffness: 350, damping: 32 },
-              filter: { duration: 0.22, ease: "easeOut" },
-              opacity: { duration: 0.28, ease: "easeOut" },
+              ...spring,
+              filter:  { duration: 0.22, ease: "easeOut" },
+              opacity: { duration: 0.25, ease: "easeOut" },
             }}
-            className="flex items-center gap-3 px-4 py-3.5 rounded-2xl border shadow-2xl shadow-black/50 cursor-default overflow-hidden"
-            style={{
-              background: "rgba(255,255,255,0.055)",
-              backdropFilter: "blur(20px)",
-              WebkitBackdropFilter: "blur(20px)",
-              borderColor: "rgba(255,255,255,0.09)",
-            }}
+            className="absolute inset-x-0 flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 cursor-default"
+            style={{ top: 0, minHeight: CARD_H }}
           >
-            {/* App icon */}
-            <div
-              className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0"
-              style={{
-                background: "linear-gradient(135deg, rgba(239,68,68,0.25) 0%, rgba(239,68,68,0.12) 100%)",
-                border: "1px solid rgba(239,68,68,0.28)",
-              }}
-            >
-              <Image src="/icon.png" alt="OCCode" width={22} height={22} className="rounded-md" />
+            <span className="text-lg shrink-0">{item.flag}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{item.city}</p>
+              <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
             </div>
-
-            {/* Text */}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest">
-                  OpenClaw Code
-                </span>
-                <span className="text-[10px] text-[var(--text-muted)]/50">· just now</span>
-              </div>
-              <p className="text-[13px] font-medium text-white/90 truncate leading-snug">
-                {item.flag} {item.city} joined the community
-              </p>
-            </div>
+            <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
           </motion.div>
         ))}
       </AnimatePresence>
