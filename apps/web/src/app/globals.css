@@ -10,15 +10,97 @@
   --text: #FAFAFA;
   --text-muted: #A3A3A3;
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
-  --font-heading: var(--font-space), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1, h2, h3 {
-  font-family: var(--font-heading);
+  font-family: var(--font-sans);
+}
+
+/* Bento icon animations */
+
+/* Lightning bolt — breathing glow */
+.animate-icon-pulse {
+  animation: icon-pulse 3s ease-in-out infinite;
+}
+@keyframes icon-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px var(--accent)); opacity: 1; }
+  50% { filter: drop-shadow(0 0 10px var(--accent)); opacity: 0.8; }
+}
+
+/* Code brackets — blinking cursor */
+.animate-icon-blink {
+  animation: icon-blink 1.2s step-end infinite;
+}
+@keyframes icon-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Globe — gentle float */
+.animate-icon-float {
+  animation: icon-float 6s ease-in-out infinite;
+}
+@keyframes icon-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+/* Claw pincers — subtle pinch */
+.animate-icon-pinch-left {
+  animation: icon-pinch-left 4s ease-in-out infinite;
+}
+.animate-icon-pinch-right {
+  animation: icon-pinch-right 4s ease-in-out infinite;
+}
+@keyframes icon-pinch-left {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(1.5px); }
+}
+@keyframes icon-pinch-right {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-1.5px); }
+}
+
+/* Lock shackle — occasional pop */
+.animate-icon-unlock {
+  transform-origin: left center;
+  animation: icon-unlock 5s ease-in-out infinite;
+}
+@keyframes icon-unlock {
+  0%, 80%, 100% { transform: translateY(0) rotate(0deg); }
+  88% { transform: translateY(-2px) rotate(-10deg); }
+  94% { transform: translateY(-1px) rotate(-5deg); }
+}
+
+/* Install popup toast — 3D slide in */
+.animate-install-popup {
+  animation: install-popup 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-style: preserve-3d;
+  will-change: transform, opacity;
+}
+@keyframes install-popup {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) translateZ(-30px) rotateX(12deg) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) translateZ(4px) rotateX(-1deg) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) translateZ(0) rotateX(0deg) scale(1);
+  }
 }

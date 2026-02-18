@@ -1,17 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Space_Grotesk } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
-const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-space" });
 
 export const metadata: Metadata = {
-  title: "OpenClaw Code — AI-Powered Code Editor",
+  title: "OpenClaw Code — The Easiest Way to Use AI",
   description:
-    "The easiest way to get started with OpenClaw. A code editor with AI built in. Download, install, and you're ready to go.",
+    "Get started with OpenClaw in minutes. Just download, install, and you're ready to go — no technical experience needed.",
   openGraph: {
     title: "OpenClaw Code",
-    description: "AI-powered code editor. No terminal required.",
+    description: "The easiest way to get started with AI. No technical experience needed.",
     images: ["/screenshot.png"],
   },
 };
@@ -23,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${geist.variable} ${spaceGrotesk.variable} font-sans antialiased`}>
+      <body className={`${geist.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>
