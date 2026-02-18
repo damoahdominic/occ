@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import SmoothScrolling from "@/components/ui/scroller";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 
@@ -23,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${geist.variable} font-sans antialiased`}>
-        {children}
+        <SmoothScrolling>
+          {children}
+        </SmoothScrolling>
       </body>
     </html>
   );

@@ -12,10 +12,6 @@
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   background: var(--bg);
   color: var(--text);
