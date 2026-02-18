@@ -73,11 +73,11 @@ const features = [
     title: "A real workspace",
     desc: "Built on the same tools professionals use, so you get a powerful, polished experience from day one.",
     icon: (
-      <svg viewBox="0 0 32 32" fill="none">
-        <path d="M10 8L3 16l7 8" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M22 8l7 8-7 8" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M19 5l-6 22" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" opacity="0.35" />
-        <line x1="16" y1="12" x2="16" y2="20" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" className="animate-icon-blink" />
+      <svg viewBox="0 0 32 32" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        {/* heroicons code-bracket scaled to 32×32 */}
+        <path d="M23 9L30 16l-7 7" />
+        <path d="M9 9L2 16l7 7" />
+        <path d="M19.5 5l-7 22" />
       </svg>
     ),
   },
@@ -474,7 +474,7 @@ export default function Home() {
                     inactiveZone={0.01}
                   />
                   <div
-                    className={`group relative h-full bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl p-6 transition-all duration-300 hover:bg-[var(--bg-elevated)] ${isHero ? "flex flex-col justify-between" : ""}`}
+                    className={`group relative h-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 transition-all duration-300 hover:bg-[var(--bg-elevated)] ${isHero ? "flex flex-col justify-between" : ""}`}
                   >
                     <div>
                       <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-12 h-12" : "w-8 h-8"}`}>{f.icon}</div>

@@ -18,6 +18,7 @@
     "vscodium:update": "node ./scripts/update-vscodium.mjs"
   },
   "dependencies": {
+    "@studio-freight/react-lenis": "^0.0.47",
     "cobe": "^0.6.5",
     "framer-motion": "^12.34.2"
   }
