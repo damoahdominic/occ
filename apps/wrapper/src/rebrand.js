@@ -7,8 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-
-const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+const { getAssetPath, assetBase: ASSETS_DIR } = require('./utils/assets');
 
 /**
  * Rebrand extracted VSCodium at `vscodeDir` with OCcode icons and names.
@@ -47,7 +46,7 @@ async function rebrandWindows(vscodeDir) {
 
   // 1. Replace code.ico for file associations
   const codeIco = path.join(dir, 'resources', 'app', 'resources', 'win32', 'code.ico');
-  const srcIco = path.join(ASSETS_DIR, 'icon.ico');
+  const srcIco = getAssetPath('icon.ico');
   safeCopy(srcIco, codeIco);
 
   // 2. Patch codium.exe icon via rcedit
@@ -74,14 +73,14 @@ async function rebrandMacOS(vscodeDir) {
   const resourcesDir = path.join(appBundle, 'Contents', 'Resources');
 
   // Try pre-built .icns first, then generate at runtime
-  const prebuiltIcns = path.join(ASSETS_DIR, 'icon.icns');
+  const prebuiltIcns = getAssetPath('icon.icns');
   const targetIcns = path.join(resourcesDir, 'VSCodium.icns');
 
   if (fs.existsSync(prebuiltIcns)) {
     safeCopy(prebuiltIcns, targetIcns);
   } else {
     // Generate using sips (macOS built-in)
-    const srcPng = path.join(ASSETS_DIR, 'icon.png');
+    const srcPng = getAssetPath('icon.png');
     try {
       const tmpIcns = path.join(resourcesDir, 'OCcode.icns');
       execSync(`sips -s format icns "${srcPng}" --out "${tmpIcns}"`, { stdio: 'pipe' });
@@ -119,7 +118,7 @@ async function rebrandLinux(vscodeDir) {
     || (fs.existsSync(path.join(vscodeDir, 'resources', 'app')) ? vscodeDir : null);
   if (!dir) { console.warn('[rebrand] Linux VSCodium dir not found'); return; }
 
-  const srcPng = path.join(ASSETS_DIR, 'icon.png');
+  const srcPng = getAssetPath('icon.png');
 
   // Replace pixmaps icon
   const pixmap = path.join(dir, 'pixmaps', 'vscodium.png');
