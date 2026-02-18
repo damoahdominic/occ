@@ -387,10 +387,10 @@ export default function Home() {
 
                   {/* Download button */}
                   <div className="relative mb-5">
-                    <div className="flex">
+                    <div className="relative flex rounded-xl btn-glow">
                       <a
                         href={RELEASES}
-                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-all shadow-[0_0_20px_var(--accent)/40,0_0_40px_var(--accent)/20] hover:shadow-[0_0_25px_var(--accent)/50,0_0_50px_var(--accent)/25]"
+                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-all"
                       >
                         {platformIcons[platform]}
                         Download for {platformLabels[platform]}
