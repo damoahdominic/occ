@@ -44,27 +44,33 @@ export class StatusPanel {
   private _disposables: vscode.Disposable[] = [];
   private _refreshing = false;
   private _refreshQueued = false;
+  private _refreshQueuedForce = false;
   private _lastStatus?: GatewayStatus;
   private _lastStatusAt = 0;
   private _isVisible = true;
-  private _disposed = false;
   private _gatewayTerminal?: vscode.Terminal;
+  private _pollTimer?: NodeJS.Timeout;
+  private static readonly POLL_MS = 10000;
 
   private constructor(panel: vscode.WebviewPanel) {
     this._panel = panel;
     this._isVisible = panel.visible;
-    void this._update();
+    void this._update(true);
+    this._startPolling();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.onDidChangeViewState(e => {
       this._isVisible = e.webviewPanel.visible;
       if (this._isVisible) {
-        void this._update();
+        this._startPolling();
+        void this._update(true);
+      } else {
+        this._stopPolling();
       }
     }, null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'refresh') {
         if (!this._isVisible) return;
-        void this._update();
+        void this._update(true);
       } else if (msg.command === 'gateway-start') {
         void this._runGateway('start');
       } else if (msg.command === 'gateway-stop') {
@@ -102,8 +108,8 @@ export class StatusPanel {
   }
 
   public dispose() {
-    this._disposed = true;
     StatusPanel.currentPanel = undefined;
+    this._stopPolling();
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
   }
@@ -127,26 +133,27 @@ export class StatusPanel {
         vscode.window.showInformationMessage('Sent: Ctrl+C');
       }
     }
-    await this._update();
+    await this._update(true);
     await this._pollStatus(20000, 2000);
   }
 
-  private async _update() {
+  private async _update(force: boolean = false) {
     if (this._refreshing) {
       this._refreshQueued = true;
+      this._refreshQueuedForce = this._refreshQueuedForce || force;
       return;
     }
     this._refreshing = true;
     try {
-      if (this._disposed) return;
-      const status = await this._getStatus();
-      if (this._disposed) return;
+      const status = force ? await this._getStatusFresh() : await this._getStatus();
       this._panel.webview.html = this._getHtml(status);
     } finally {
       this._refreshing = false;
       if (this._refreshQueued) {
+        const queuedForce = this._refreshQueuedForce;
         this._refreshQueued = false;
-        void this._update();
+        this._refreshQueuedForce = false;
+        void this._update(queuedForce);
       }
     }
   }
@@ -241,13 +248,26 @@ export class StatusPanel {
   private async _pollStatus(maxMs: number, intervalMs: number) {
     const deadline = Date.now() + maxMs;
     while (Date.now() < deadline) {
-      if (!this._isVisible || this._disposed) return;
+      if (!this._isVisible) return;
       const status = await this._getStatusFresh();
-      if (this._disposed) return;
       this._panel.webview.html = this._getHtml(status);
       if (status.running) return;
       await new Promise(r => setTimeout(r, intervalMs));
     }
+  }
+
+  private _startPolling() {
+    if (this._pollTimer) return;
+    this._pollTimer = setInterval(() => {
+      if (!this._isVisible) return;
+      void this._update(true);
+    }, StatusPanel.POLL_MS);
+  }
+
+  private _stopPolling() {
+    if (!this._pollTimer) return;
+    clearInterval(this._pollTimer);
+    this._pollTimer = undefined;
   }
 
   private _ensureGatewayTerminal() {
@@ -333,90 +353,102 @@ export class StatusPanel {
   }
 
   private async _runOpenClaw(args: string[], timeoutMs: number = 30000): Promise<{ result: RunResult; command: string; cliPath?: string }> {
-    const mjs = path.join(
-      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
-    );
+    if (process.platform === 'win32') {
+      const mjs = path.join(
+        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+        'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
+      );
 
-    // Find node.exe
-    let nodeExe: string | undefined;
-    const candidates = [
-      process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
-      'C:\\Program Files\\nodejs\\node.exe',
-      'C:\\Program Files (x86)\\nodejs\\node.exe',
-      process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
-    ].filter(Boolean) as string[];
-    
-    nodeExe = candidates.find(p => fs.existsSync(p));
-    
-    if (!nodeExe) {
-      try {
-        const result = cp.execSync('where node.exe', { timeout: 3000, encoding: 'utf8', windowsHide: true });
-        const found = result.trim().split(/\r?\n/)[0]?.trim();
-        if (found && fs.existsSync(found)) nodeExe = found;
-      } catch {}
+      // Find node.exe
+      let nodeExe: string | undefined;
+      const candidates = [
+        process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
+        'C:\\Program Files\\nodejs\\node.exe',
+        'C:\\Program Files (x86)\\nodejs\\node.exe',
+        process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
+      ].filter(Boolean) as string[];
+
+      nodeExe = candidates.find(p => fs.existsSync(p));
+
+      if (!nodeExe) {
+        try {
+          const result = cp.execSync('where node.exe', { timeout: 3000, encoding: 'utf8', windowsHide: true });
+          const found = result.trim().split(/\r?\n/)[0]?.trim();
+          if (found && fs.existsSync(found)) nodeExe = found;
+        } catch {}
+      }
+
+      if (!nodeExe || !fs.existsSync(mjs)) {
+        return {
+          result: {
+            stdout: '',
+            stderr: '',
+            error: 'node.exe or openclaw.mjs not found',
+            exitCode: -1
+          },
+          command: 'openclaw ' + args.join(' ')
+        };
+      }
+
+      const display = `node "${mjs}" ${args.join(' ')}`;
+      const cmdLine = `node "${mjs}" ${args.join(' ')}`;
+
+      // Use shell execution which may work better for complex CLI commands
+      const result = await new Promise<RunResult>((resolve) => {
+        const child = cp.spawn(
+          cmdLine,
+          [],
+          {
+            timeout: timeoutMs,
+            windowsHide: true,
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: process.env
+          }
+        );
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout?.on('data', data => stdout += data);
+        child.stderr?.on('data', data => stderr += data);
+
+        const timer = setTimeout(() => {
+          child.kill('SIGTERM');
+        }, timeoutMs);
+
+        child.on('close', (code, signal) => {
+          clearTimeout(timer);
+          if (signal === 'SIGTERM' || code === null) {
+            resolve({ error: 'Timed out after 30s', stdout, stderr, exitCode: null });
+          } else if (code !== 0) {
+            resolve({ error: stderr.trim() || `Exit ${code}`, stdout, stderr, exitCode: code ?? undefined });
+          } else {
+            resolve({ stdout, stderr, exitCode: 0 });
+          }
+        });
+
+        child.on('error', err => {
+          clearTimeout(timer);
+          resolve({ error: err.message, stdout, stderr, exitCode: undefined });
+        });
+      });
+
+      return { result, command: display, cliPath: mjs };
     }
 
-    if (!nodeExe || !fs.existsSync(mjs)) {
-      return { 
-        result: { 
-          stdout: '', 
-          stderr: '', 
-          error: 'node.exe or openclaw.mjs not found',
-          exitCode: -1 
-        }, 
-        command: 'openclaw ' + args.join(' ') 
+    const cliPath = await this._findOpenClawPath();
+    if (!cliPath) {
+      return {
+        result: { stdout: '', stderr: '', error: 'openclaw not found', exitCode: -1 },
+        command: 'openclaw ' + args.join(' ')
       };
     }
 
-    const display = `node "${mjs}" ${args.join(' ')}`;
-    const cmdLine = `node "${mjs}" ${args.join(' ')}`;
-    
-    // Use shell execution which may work better for complex CLI commands
-    const result = await new Promise<RunResult>((resolve) => {
-      const child = cp.spawn(
-        cmdLine,
-        [],
-        {
-          timeout: timeoutMs,
-          windowsHide: true,
-          shell: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: process.env
-        }
-      );
-      
-      let stdout = '';
-      let stderr = '';
-      
-      child.stdout?.on('data', data => stdout += data);
-      child.stderr?.on('data', data => stderr += data);
-      
-      const timer = setTimeout(() => {
-        child.kill('SIGTERM');
-      }, timeoutMs);
-      
-      child.on('close', (code, signal) => {
-        clearTimeout(timer);
-        if (signal === 'SIGTERM' || code === null) {
-          resolve({ error: 'Timed out after 30s', stdout, stderr, exitCode: null });
-        } else if (code !== 0) {
-          resolve({ error: stderr.trim() || `Exit ${code}`, stdout, stderr, exitCode: code ?? undefined });
-        } else {
-          resolve({ stdout, stderr, exitCode: 0 });
-        }
-      });
-      
-      child.on('error', err => {
-        clearTimeout(timer);
-        resolve({ error: err.message, stdout, stderr, exitCode: undefined });
-      });
-    });
-    
-    return { result, command: display, cliPath: mjs };
+    const result = await this._execFile(cliPath, args, timeoutMs);
+    return { result, command: `${cliPath} ${args.join(' ')}`, cliPath };
   }
 
-  /** Find the full path to node.exe on Windows */
   private _findNodeExe(): string | undefined {
     if (process.platform !== 'win32') return 'node';
     
@@ -461,10 +493,16 @@ export class StatusPanel {
       if (nodeDir) extra.push(nodeDir);
       const systemRoot = env.SystemRoot || (env as any).WINDIR;
       if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
-    } else {
-      extra.push('/usr/local/bin', '/opt/homebrew/bin');
+    } else if (process.platform === 'darwin') {
+      extra.push('/opt/homebrew/bin', '/usr/local/bin');
       extra.push(path.join(os.homedir(), '.local', 'bin'));
       extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
+      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
+    } else {
+      extra.push('/usr/local/bin', '/usr/bin', '/snap/bin');
+      extra.push(path.join(os.homedir(), '.local', 'bin'));
+      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
+      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
     }
     const sep = process.platform === 'win32' ? ';' : ':';
     env.PATH = [...extra, basePath].filter(Boolean).join(sep);
@@ -612,9 +650,19 @@ export class StatusPanel {
         path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
       ];
     }
+    if (process.platform === 'darwin') {
+      return [
+        '/opt/homebrew/bin/openclaw',
+        '/usr/local/bin/openclaw',
+        path.join(home, '.local', 'bin', 'openclaw'),
+        path.join(home, '.npm-global', 'bin', 'openclaw'),
+        path.join(home, '.openclaw', 'bin', 'openclaw'),
+      ];
+    }
     return [
       '/usr/local/bin/openclaw',
-      '/opt/homebrew/bin/openclaw',
+      '/usr/bin/openclaw',
+      '/snap/bin/openclaw',
       path.join(home, '.local', 'bin', 'openclaw'),
       path.join(home, '.npm-global', 'bin', 'openclaw'),
       path.join(home, '.openclaw', 'bin', 'openclaw'),
@@ -828,7 +876,6 @@ export class StatusPanel {
       const cmd = btn.getAttribute('data-cmd');
       vscode.postMessage({ command: cmd });
     });
-    setInterval(() => vscode.postMessage({ command: 'refresh' }), 20000);
   </script>
 </body>
 </html>`;
