@@ -89,3 +89,10 @@ h1, h2, h3 {
   0%   { transform: translateY(0); }
   100% { transform: translateY(-50%); }
 }
+
+/* Download button — static glow */
+.btn-glow {
+  box-shadow:
+    0 0 12px 3px rgba(239, 68, 68, 0.55),
+    0 0 32px 6px rgba(239, 68, 68, 0.25);
+}
