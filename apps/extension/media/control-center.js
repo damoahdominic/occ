@@ -14151,7 +14151,11 @@ var mount = () => {
     /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react8.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlCenterShell, { data }) })
   );
 };
-document.addEventListener("DOMContentLoaded", mount);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", mount);
+} else {
+  mount();
+}
 /*! Bundled license information:
 
 react/cjs/react.production.js:
