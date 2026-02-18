@@ -16,6 +16,15 @@ if [[ ! -f "$EXT_DIR/out/extension.js" ]]; then
 fi
 # Copy compiled output + media explicitly
 rsync -a "$EXT_DIR/out" "$EXT_DIR/media" "$TMP_DIR/"
+
+# Build control-center data module for runtime imports
+npm --prefix "$ROOT_DIR/packages/control-center" run build:data >/dev/null 2>&1 || \
+  npx --yes tsc -p "$ROOT_DIR/packages/control-center/tsconfig.build.json" >/dev/null
+
+# Vendor shared control-center package for runtime imports
+mkdir -p "$TMP_DIR/node_modules/@occode/control-center"
+rsync -a "$ROOT_DIR/packages/control-center/" "$TMP_DIR/node_modules/@occode/control-center/"
+
 # Ensure minimal dependencies are installed for vsce (only package.json)
 cd "$TMP_DIR"
 # Run vsce package without git context by forcing npm pack mode
