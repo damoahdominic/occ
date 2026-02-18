@@ -166,8 +166,37 @@ export default function Home() {
   const smoothOffsetX = useRef(0);
   const smoothOffsetY = useRef(0);
 
+  // Streaming install notifications
+  const [streamNotifs, setStreamNotifs] = useState<Array<{ id: number; city: string; flag: string; isNew: boolean }>>([]);
+  const streamIdRef = useRef(0);
+  const streamIndexRef = useRef(0);
+
   useEffect(() => {
     setPlatform(detectPlatform());
+  }, []);
+
+  // Streaming install notifications
+  useEffect(() => {
+    const initial = installEvents.slice(0, 3).map((e) => ({
+      id: streamIdRef.current++,
+      city: e.city,
+      flag: e.flag,
+      isNew: false,
+    }));
+    setStreamNotifs(initial);
+    streamIndexRef.current = 3;
+
+    const interval = setInterval(() => {
+      const idx = streamIndexRef.current % installEvents.length;
+      const e = installEvents[idx];
+      streamIndexRef.current++;
+      setStreamNotifs((prev) => {
+        const next = [...prev, { id: streamIdRef.current++, city: e.city, flag: e.flag, isNew: true }];
+        return next.slice(-4);
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Cobe globe
@@ -515,8 +544,8 @@ export default function Home() {
 
             <div className="relative flex flex-col lg:flex-row items-center justify-center gap-10">
               {/* Globe */}
-              <div ref={globeContainerRef} className="relative aspect-square w-[320px] sm:w-[420px] lg:w-[500px] shrink-0">
-                <div className="absolute inset-0 bg-[var(--accent)]/[0.04] rounded-full blur-3xl pointer-events-none" />
+              <div ref={globeContainerRef} className="relative aspect-square w-[400px] sm:w-[580px] lg:w-[720px] shrink-0">
+                <div className="absolute inset-0 bg-[var(--accent)]/[0.06] rounded-full blur-3xl pointer-events-none" />
                 <canvas
                   ref={canvasRef}
                   className="w-full h-full"
@@ -524,34 +553,28 @@ export default function Home() {
                 />
               </div>
 
-              {/* Install feed — vertical marquee */}
+              {/* Install feed — streaming notifications */}
               <div
-                className="relative overflow-hidden w-full max-w-xs h-64"
+                className="flex flex-col gap-3 w-full max-w-[280px] shrink-0"
                 style={{
-                  maskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
-                  WebkitMaskImage: "linear-gradient(to bottom, transparent, black 18%, black 82%, transparent)",
+                  maskImage: "linear-gradient(to bottom, transparent, black 20%, black 100%)",
+                  WebkitMaskImage: "linear-gradient(to bottom, transparent, black 20%, black 100%)",
                 }}
               >
-                <div
-                  className="flex flex-col gap-3"
-                  style={{ animation: "marquee-vertical 60s linear infinite", willChange: "transform" }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "paused")}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.animationPlayState = "running")}
-                >
-                  {[...installEvents, ...installEvents].map((event, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 shrink-0"
-                    >
-                      <span className="text-lg shrink-0">{event.flag}</span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{event.city}</p>
-                        <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
-                      </div>
-                      <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
+                {streamNotifs.map((notif) => (
+                  <div
+                    key={notif.id}
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20"
+                    style={notif.isNew ? { animation: "slide-in-bottom 0.5s ease-out" } : undefined}
+                  >
+                    <span className="text-lg shrink-0">{notif.flag}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{notif.city}</p>
+                      <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
                     </div>
-                  ))}
-                </div>
+                    <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
