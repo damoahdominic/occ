@@ -85,7 +85,27 @@ export default function Home() {
 
       {/* Hero */}
       <main className="flex-1">
-        <section className="flex flex-col items-center text-center px-6 pt-20 pb-16 max-w-4xl mx-auto">
+        <section className="relative flex flex-col items-center text-center px-6 pt-20 pb-16 max-w-4xl mx-auto overflow-hidden">
+          {/* Background video */}
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover opacity-20 -z-10 hidden sm:block"
+          >
+            <source src="/videos/hero.mp4" type="video/mp4" />
+          </video>
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover opacity-20 -z-10 sm:hidden"
+          >
+            <source src="/videos/hero_mobile.mp4" type="video/mp4" />
+          </video>
+          <div className="absolute inset-0 bg-gradient-to-b from-[var(--bg)]/60 via-transparent to-[var(--bg)] -z-10" />
           <Image
             src="/icon.png"
             alt="OpenClaw Code"
