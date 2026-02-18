@@ -189,44 +189,16 @@ export class HomePanel {
       <span class="value ${cliClass}">${cliText}${cliHint}</span>
     </div>
   </div>
-  <button class="btn-primary" data-command='${buttonCommand}'>${buttonLabel}</button>
-  <button class="btn-secondary" data-command='openclaw.status'>Check Status</button>
+  <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
+  <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
   <div class="links">
     <a href="https://github.com/damoahdominic/occ">GitHub</a>
     <a href="https://openclaw.ai">Website</a>
     <a href="https://docs.openclaw.ai">Docs</a>
   </div>
   <script>
-    (function () {
-      var vscodeApi;
-      try {
-        vscodeApi = acquireVsCodeApi();
-      } catch (error) {
-        console.error('OpenClaw home webview: VS Code API unavailable', error);
-        return;
-      }
-
-      function handleButtonClick(event) {
-        if (!vscodeApi) {
-          return;
-        }
-        var target = event.currentTarget;
-        if (!target || !target.getAttribute) {
-          return;
-        }
-        var command = target.getAttribute('data-command');
-        if (!command) {
-          return;
-        }
-        event.preventDefault();
-        vscodeApi.postMessage({ command: command });
-      }
-
-      var buttons = document.querySelectorAll('[data-command]');
-      Array.prototype.forEach.call(buttons, function (btn) {
-        btn.addEventListener('click', handleButtonClick);
-      });
-    })();
+    const vscode = acquireVsCodeApi();
+    function cmd(c) { vscode.postMessage({ command: c }); }
   </script>
 </body>
 </html>`;
@@ -272,8 +244,8 @@ export class HomePanel {
               {
                 timeout: 30000,
                 windowsHide: true,
-                detached: true, // Don't inherit parent's console/job object
-                stdio: ['ignore', 'pipe', 'pipe'] // Ignore stdin
+                detached: true,
+                stdio: ['ignore', 'pipe', 'pipe']
               }
             );
 
@@ -334,7 +306,9 @@ export class HomePanel {
     }
 
     const cliPath = await this._findOpenClawPath();
-    if (!cliPath) return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
+    if (!cliPath) {
+      return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
+    }
 
     return new Promise(resolve => {
       cp.execFile(
@@ -439,19 +413,9 @@ export class HomePanel {
         path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
       ];
     }
-    if (process.platform === 'darwin') {
-      return [
-        '/opt/homebrew/bin/openclaw',
-        '/usr/local/bin/openclaw',
-        path.join(home, '.local', 'bin', 'openclaw'),
-        path.join(home, '.npm-global', 'bin', 'openclaw'),
-        path.join(home, '.openclaw', 'bin', 'openclaw'),
-      ];
-    }
     return [
       '/usr/local/bin/openclaw',
-      '/usr/bin/openclaw',
-      '/snap/bin/openclaw',
+      '/opt/homebrew/bin/openclaw',
       path.join(home, '.local', 'bin', 'openclaw'),
       path.join(home, '.npm-global', 'bin', 'openclaw'),
       path.join(home, '.openclaw', 'bin', 'openclaw'),
@@ -534,13 +498,8 @@ export class HomePanel {
       if (env.LOCALAPPDATA) extra.push(path.join(env.LOCALAPPDATA, 'Programs', 'nodejs'));
       const systemRoot = env.SystemRoot || (env as any).WINDIR;
       if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
-    } else if (process.platform === 'darwin') {
-      extra.push('/opt/homebrew/bin', '/usr/local/bin');
-      extra.push(path.join(os.homedir(), '.local', 'bin'));
-      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
-      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
     } else {
-      extra.push('/usr/local/bin', '/usr/bin', '/snap/bin');
+      extra.push('/usr/local/bin', '/opt/homebrew/bin');
       extra.push(path.join(os.homedir(), '.local', 'bin'));
       extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
       extra.push(path.join(os.homedir(), '.openclaw', 'bin'));

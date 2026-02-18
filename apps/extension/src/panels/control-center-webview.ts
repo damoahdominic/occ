@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import type { ControlCenterData } from "@occode/control-center/data";
 
 function getNonce() {
@@ -16,13 +17,19 @@ export function renderControlCenterHtml(
   data: ControlCenterData
 ) {
   const nonce = getNonce();
-  const scriptUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, "media", "control-center.js")
-  );
   const tailwindUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, "media", "tailwindcdn.js")
   );
   const serialized = JSON.stringify(data).replace(/</g, "\\u003c");
+  const controlCenterPath = vscode.Uri.joinPath(extensionUri, "media", "control-center.js").fsPath;
+  let controlCenterScript = "";
+  try {
+    controlCenterScript = fs.readFileSync(controlCenterPath, "utf8");
+  } catch {
+    controlCenterScript = "console.error('Control Center bundle missing');";
+  }
+  // Prevent closing the script tag if the bundle contains </script>
+  controlCenterScript = controlCenterScript.replace(/<\/script/gi, "<\\/script");
 
   const baseStyles = `
     :root {
@@ -61,7 +68,7 @@ export function renderControlCenterHtml(
   </head>
   <body>
     <div id="control-center-root"></div>
-    <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
+    <script type="module" nonce="${nonce}">${controlCenterScript}</script>
   </body>
 </html>`;
 }

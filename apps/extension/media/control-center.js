@@ -12751,1394 +12751,250 @@ var require_jsx_runtime = __commonJS({
 });
 
 // src/webview/control-center.tsx
-var import_react8 = __toESM(require_react());
+var import_react2 = __toESM(require_react());
 var import_client = __toESM(require_client());
 
 // ../../packages/control-center/src/control-center-shell.tsx
-var import_react7 = __toESM(require_react());
-
-// ../../packages/control-center/src/panels/agent-manager-panel.tsx
 var import_react = __toESM(require_react());
 var import_jsx_runtime = __toESM(require_jsx_runtime());
-var tabs = ["Overview", "Identity", "Models / Tools", "Heartbeat"];
-var defaultTools = [
-  "web-search",
-  "web-fetch",
-  "exec",
-  "browser",
-  "voice-call"
-];
-function AgentManagerPanel({
-  agents,
-  stagedEntities,
-  onStageChange,
-  onApply,
-  onCommandPrefill
-}) {
-  const [selectedAgentId, setSelectedAgentId] = (0, import_react.useState)(agents[0]?.id ?? "");
-  const [activeTab, setActiveTab] = (0, import_react.useState)("Overview");
-  const [showWizard, setShowWizard] = (0, import_react.useState)(false);
-  const [wizardStep, setWizardStep] = (0, import_react.useState)(0);
-  const initialForms = (0, import_react.useMemo)(() => {
-    const map = {};
-    agents.forEach((agent) => {
-      map[agent.id] = {
-        workspace: agent.workspace,
-        model: agent.overview.model,
-        heartbeatPrompt: agent.heartbeat.preview,
-        heartbeatCadence: agent.heartbeat.cadence === "\u2014" ? "30m" : agent.heartbeat.cadence,
-        toolAccess: defaultTools.reduce((acc, tool) => {
-          acc[tool] = true;
-          return acc;
-        }, {}),
-        identityDraft: `# ${agent.name}
-
-${agent.notes}`,
-        soulDraft: "Guiding principles go here...",
-        heartbeatDraft: agent.heartbeat.preview,
-        dirty: false
-      };
-    });
-    return map;
-  }, [agents]);
-  const [formState, setFormState] = (0, import_react.useState)(initialForms);
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents[0];
-  const selectedForm = selectedAgent ? formState[selectedAgent.id] : void 0;
-  const updateForm = (agentId, updater) => {
-    setFormState((current) => {
-      const next = { ...current };
-      next[agentId] = updater(current[agentId]);
-      const dirty = JSON.stringify(next[agentId]) !== JSON.stringify(initialForms[agentId]);
-      next[agentId].dirty = dirty;
-      onStageChange(agentId, dirty);
-      return next;
-    });
-  };
-  const stageCount = stagedEntities.filter((id) => agents.some((agent) => agent.id === id)).length;
-  const wizardSteps = [
+var statusStyles = {
+  good: "bg-emerald-500",
+  warn: "bg-amber-400",
+  accent: "bg-[var(--accent)]",
+  bad: "bg-rose-500"
+};
+function ControlCenterShell({ data }) {
+  const summary = (0, import_react.useMemo)(() => {
+    const agentCount = data.agents.length;
+    const channelCount = data.channels.length;
+    const connectedChannels = data.channels.filter(
+      (channel) => channel.accounts.some((account) => account.status === "connected")
+    ).length;
+    const activeJobs = data.automation.cronJobs.filter((job) => job.status === "enabled").length;
+    const doctorStatus = data.maintenance.doctor.status;
+    const chips = [
+      {
+        label: doctorStatus === "healthy" ? "System healthy" : "System needs attention",
+        status: doctorStatus === "healthy" ? "good" : doctorStatus === "warning" ? "warn" : "bad"
+      },
+      {
+        label: `${channelCount - connectedChannels} channels pending`,
+        status: channelCount - connectedChannels > 0 ? "warn" : "good"
+      },
+      {
+        label: `${agentCount} active agents`,
+        status: "accent"
+      }
+    ];
+    return {
+      agentCount,
+      channelCount,
+      connectedChannels,
+      activeJobs,
+      doctorStatus,
+      chips
+    };
+  }, [data]);
+  const suggested = [
     {
-      title: "Basics",
-      description: "Define agent id, persona, workspace."
+      label: "Verify WhatsApp",
+      status: summary.connectedChannels > 0 ? "good" : "warn",
+      note: summary.connectedChannels > 0 ? "Ready" : "Pending"
     },
     {
-      title: "Workspace Template",
-      description: "Pick base repo with SOUL/IDENTITY seeds."
+      label: "Add backup channel",
+      status: summary.channelCount > 1 ? "good" : "warn",
+      note: summary.channelCount > 1 ? "Configured" : "Recommended"
     },
     {
-      title: "Models",
-      description: "Choose primary + fallback models."
-    },
-    {
-      title: "Channels & Heartbeat",
-      description: "Set default channels and heartbeat cadence."
+      label: "Enable daily check-ins",
+      status: summary.activeJobs > 0 ? "good" : "bad",
+      note: summary.activeJobs > 0 ? "Enabled" : "Not set"
     }
   ];
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", { className: "text-2xl font-semibold", children: "Agent Manager" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Select an agent to inspect workspace, heartbeat, and identity files." })
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "min-h-screen bg-[var(--bg)] text-[var(--text)]", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mx-auto w-full max-w-[1440px] px-6 py-8", children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex flex-wrap items-center justify-between gap-4", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center gap-3", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "h-2.5 w-2.5 rounded-full bg-[var(--accent)]" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "text-xl font-semibold tracking-tight", children: "OpenClaw Configure" })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex gap-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-            onClick: () => {
-              setShowWizard(true);
-              setWizardStep(0);
-            },
-            children: "Add / Clone Agent"
-          }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-            onClick: () => onCommandPrefill(`openclaw agents list --json`),
-            children: "Prefill CLI"
-          }
-        )
-      ] })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "rounded-full bg-[var(--bg-card)] px-4 py-2 text-xs uppercase text-[var(--text-muted)]", children: "Onboarding \xB7 Friendly mode" })
     ] }),
-    showWizard && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-4", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "Agent Wizard" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { className: "text-lg font-semibold", children: wizardSteps[wizardStep].title }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: wizardSteps[wizardStep].description })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-6 grid gap-6 lg:grid-cols-[2.1fr_1fr]", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", { className: "rounded-2xl bg-[var(--bg-card)] p-6 shadow-[0_20px_40px_rgba(0,0,0,0.35)]", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { className: "text-3xl font-semibold", children: "Get your Control Center ready in minutes" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "mt-2 text-sm text-[var(--text-muted)]", children: "Follow the guided steps below. We\u2019ll handle the heavy lifting and show you what\u2019s ready, what needs attention, and what you can skip for now." }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-6 grid gap-4 md:grid-cols-2", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex h-full flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Connect a channel" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "Let OpenClaw talk to you on WhatsApp, Telegram, or Slack." }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-auto rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-xs font-semibold text-black", children: "Start channel setup" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex h-full flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Add your first agent" }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "Choose a role or a template. No code required." }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-auto rounded-lg bg-gradient-to-r from-[#9d7bff] to-[#6ee7ff] px-3 py-2 text-center text-xs font-semibold text-black", children: "Create agent" })
+          ] })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex gap-2", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "button",
-            {
-              disabled: wizardStep === 0,
-              onClick: () => setWizardStep((step) => Math.max(step - 1, 0)),
-              className: "rounded border border-[var(--border)] px-3 py-2 text-sm disabled:opacity-40",
-              children: "Back"
-            }
-          ),
-          wizardStep < wizardSteps.length - 1 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "button",
-            {
-              onClick: () => setWizardStep((step) => Math.min(step + 1, wizardSteps.length - 1)),
-              className: "rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm text-black",
-              children: "Next"
-            }
-          ) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "button",
-            {
-              onClick: () => setShowWizard(false),
-              className: "rounded border border-emerald-500 bg-emerald-500 px-3 py-2 text-sm text-black",
-              children: "Finish"
-            }
-          )
-        ] })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-4 h-2 rounded bg-[var(--bg-card)]", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-        "div",
-        {
-          className: "h-full rounded bg-[var(--accent)]",
-          style: { width: `${(wizardStep + 1) / wizardSteps.length * 100}%` }
-        }
-      ) })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "grid gap-6 lg:grid-cols-[280px_1fr]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "space-y-3", children: agents.map((agent) => {
-        const isSelected = agent.id === selectedAgent?.id;
-        const isDirty = stagedEntities.includes(agent.id);
-        return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-          "button",
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-6 rounded-2xl bg-[var(--bg-elevated)] p-4", children: [
           {
-            onClick: () => setSelectedAgentId(agent.id),
-            className: `w-full rounded border px-3 py-3 text-left ${isSelected ? "border-[var(--accent)] bg-[var(--bg-elevated)]" : "border-[var(--border)]"}`,
+            title: "Pick your assistants",
+            meta: "(2 mins)",
+            body: "Add roles, names, and access levels."
+          },
+          {
+            title: "Connect channels",
+            meta: "(3 mins)",
+            body: "WhatsApp, Telegram, Slack, or Email."
+          },
+          {
+            title: "Automation",
+            meta: "(5 mins)",
+            body: "Schedule reminders and background checks."
+          }
+        ].map((step, index) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: `flex items-center gap-3 rounded-xl p-3 ${index > 0 ? "mt-3 bg-[var(--bg-card)]" : ""}`,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "font-semibold", children: agent.name }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: agent.workspace })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "flex h-7 w-7 items-center justify-center rounded-lg bg-[#242c40] text-xs font-semibold text-[var(--accent)]", children: index + 1 }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "text-sm font-semibold", children: [
+                  step.title,
+                  " ",
+                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-xs text-[var(--text-muted)]", children: step.meta })
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                  "span",
-                  {
-                    className: `rounded-full px-2 py-1 text-xs ${agent.status === "healthy" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`,
-                    children: agent.status === "healthy" ? "Healthy" : "Attention"
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: [
-                  "HB: ",
-                  agent.heartbeat.status === "active" ? agent.heartbeat.cadence : "Paused"
-                ] }),
-                isDirty && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-amber-300", children: "Unsaved edits" })
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "text-xs text-[var(--text-muted)]", children: step.body })
               ] })
             ]
           },
-          agent.id
-        );
-      }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-4", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "flex items-center gap-2", children: tabs.map((tab) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-          "button",
-          {
-            className: `rounded px-3 py-2 text-sm ${activeTab === tab ? "bg-[var(--accent)] text-black" : "bg-[var(--bg-elevated)] text-[var(--text-muted)]"}`,
-            onClick: () => setActiveTab(tab),
-            children: tab
-          },
-          tab
+          step.title
         )) }),
-        selectedAgent && selectedForm && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-6", children: [
-          activeTab === "Overview" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-4", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "grid gap-4 md:grid-cols-2", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Workspace" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                  "input",
-                  {
-                    value: selectedForm.workspace,
-                    onChange: (event) => updateForm(selectedAgent.id, (draft) => ({
-                      ...draft,
-                      workspace: event.target.value
-                    })),
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-sm"
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Default model" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                  "input",
-                  {
-                    value: selectedForm.model,
-                    onChange: (event) => updateForm(selectedAgent.id, (draft) => ({
-                      ...draft,
-                      model: event.target.value
-                    })),
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-sm"
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm font-semibold", children: "Stats" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 grid gap-4 md:grid-cols-3", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-2xl font-semibold", children: selectedAgent.overview.cronJobs }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: "Cron jobs" })
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-2xl font-semibold", children: selectedAgent.overview.heartbeatsPerDay }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: "Heartbeats / day" })
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-2xl font-semibold", children: selectedAgent.overview.channels.length }),
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: "Surfaces" })
-                ] })
-              ] })
-            ] })
-          ] }),
-          activeTab === "Identity" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-4", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-              FileEditor,
-              {
-                title: "IDENTITY.md",
-                path: selectedAgent.files.identityPath,
-                value: selectedForm.identityDraft,
-                onChange: (value) => updateForm(selectedAgent.id, (draft) => ({
-                  ...draft,
-                  identityDraft: value
-                }))
-              }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-              FileEditor,
-              {
-                title: "SOUL.md",
-                path: selectedAgent.files.soulPath,
-                value: selectedForm.soulDraft,
-                onChange: (value) => updateForm(selectedAgent.id, (draft) => ({
-                  ...draft,
-                  soulDraft: value
-                }))
-              }
-            )
-          ] }),
-          activeTab === "Models / Tools" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-4", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Toggle tools per agent. Conflicting capabilities surface warnings before apply." }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "rounded border border-[var(--border)] p-4", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "grid gap-3 md:grid-cols-2", children: defaultTools.map((tool) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "flex items-center gap-2 text-sm", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: selectedForm.toolAccess[tool],
-                  onChange: (event) => updateForm(selectedAgent.id, (draft) => ({
-                    ...draft,
-                    toolAccess: {
-                      ...draft.toolAccess,
-                      [tool]: event.target.checked
-                    }
-                  }))
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: tool })
-            ] }, tool)) }) })
-          ] }),
-          activeTab === "Heartbeat" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-y-4", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "grid gap-4 md:grid-cols-2", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Cadence" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-                  "select",
-                  {
-                    value: selectedForm.heartbeatCadence,
-                    onChange: (event) => updateForm(selectedAgent.id, (draft) => ({
-                      ...draft,
-                      heartbeatCadence: event.target.value
-                    })),
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-sm",
-                    children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "15m", children: "Every 15 minutes" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "30m", children: "Every 30 minutes" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "1h", children: "Every hour" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { value: "paused", children: "Paused" })
-                    ]
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Next run preview" }),
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                  "input",
-                  {
-                    readOnly: true,
-                    value: selectedAgent.heartbeat.nextRun,
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2 text-sm text-[var(--text-muted)]"
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { className: "space-y-1 text-sm", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Prompt" }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                "textarea",
-                {
-                  value: selectedForm.heartbeatDraft,
-                  onChange: (event) => updateForm(selectedAgent.id, (draft) => ({
-                    ...draft,
-                    heartbeatDraft: event.target.value
-                  })),
-                  className: "h-32 w-full rounded border border-[var(--border)] bg-transparent p-3 text-sm"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "grid grid-cols-7 gap-1 text-center text-xs text-[var(--text-muted)]", children: [...Array(7)].map((_, dayIndex) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-              "div",
-              {
-                className: "rounded bg-[var(--bg-elevated)] px-2 py-3",
-                children: [
-                  dayIndex === 0 && "Mon",
-                  dayIndex === 1 && "Tue",
-                  dayIndex === 2 && "Wed",
-                  dayIndex === 3 && "Thu",
-                  dayIndex === 4 && "Fri",
-                  dayIndex === 5 && "Sat",
-                  dayIndex === 6 && "Sun",
-                  /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-2 h-2 w-full rounded bg-emerald-500/40" })
-                ]
-              },
-              dayIndex
-            )) })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between border-t border-[var(--border)] pt-4", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "text-xs text-[var(--text-muted)]", children: selectedForm.dirty ? "Staged locally \u2014 apply to write config" : "No pending edits" }),
-            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "space-x-3", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                "button",
-                {
-                  className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-                  onClick: () => onStageChange(selectedAgent.id, false),
-                  children: "Discard"
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                "button",
-                {
-                  disabled: !stageCount,
-                  onClick: onApply,
-                  className: "rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm text-black disabled:opacity-40",
-                  children: "Apply staged"
-                }
-              )
-            ] })
-          ] })
-        ] })
-      ] })
-    ] })
-  ] });
-}
-function FileEditor({ title, path, value, onChange }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-sm font-semibold", children: title }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: path })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-xs text-[var(--text-muted)]", children: "Diff preview pending" })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-      "textarea",
-      {
-        value,
-        onChange: (event) => onChange(event.target.value),
-        className: "mt-3 h-36 w-full rounded border border-[var(--border)] bg-transparent p-3 text-sm"
-      }
-    )
-  ] });
-}
-
-// ../../packages/control-center/src/panels/routing-studio-panel.tsx
-var import_react2 = __toESM(require_react());
-var import_jsx_runtime2 = __toESM(require_jsx_runtime());
-function RoutingStudioPanel({ routing, stagedEntities, onStageChange }) {
-  const [selectedBindingId, setSelectedBindingId] = (0, import_react2.useState)(routing.bindings[0]?.id ?? "");
-  const [showConflicts, setShowConflicts] = (0, import_react2.useState)(true);
-  const [simulation, setSimulation] = (0, import_react2.useState)({
-    channel: "WhatsApp",
-    account: "Primary",
-    metadata: "peer:+233545****"
-  });
-  const [simulationResult, setSimulationResult] = (0, import_react2.useState)(null);
-  const selectedBinding = (0, import_react2.useMemo)(
-    () => routing.bindings.find((binding) => binding.id === selectedBindingId),
-    [routing.bindings, selectedBindingId]
-  );
-  const toggleBindingScope = (bindingId) => {
-    onStageChange(bindingId, !stagedEntities.includes(bindingId));
-  };
-  const runSimulation = () => {
-    const winner = routing.bindings.find((binding) => binding.status !== "missing") ?? routing.bindings[0];
-    setSimulationResult(
-      winner ? `${winner.agentId} wins via ${winner.precedence.toUpperCase()} precedence` : "No agent matched"
-    );
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("header", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("h2", { className: "text-2xl font-semibold", children: "Routing Studio" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Inspect bindings, precedence ladders, and run routing simulations." })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
-        "button",
-        {
-          className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-          onClick: () => setShowConflicts((prev) => !prev),
-          children: [
-            showConflicts ? "Hide" : "Show",
-            " conflicts"
-          ]
-        }
-      )
-    ] }),
-    showConflicts && routing.conflicts.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-amber-500 bg-amber-500/10 p-4 text-sm text-amber-200", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "font-semibold", children: "Conflicts detected" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { className: "mt-2 list-disc space-y-1 pl-6", children: routing.conflicts.map((conflict) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { children: [
-        conflict.description,
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "text-xs text-amber-100", children: [
-          "Scopes: ",
-          conflict.affectedScopes.join(", ")
-        ] })
-      ] }, conflict.id)) })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "grid gap-6 lg:grid-cols-[1.1fr_0.9fr]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "space-y-4", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "rounded border border-[var(--border)]", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("table", { className: "w-full text-sm", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("thead", { className: "text-left text-xs uppercase tracking-wide text-[var(--text-muted)]", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("tr", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { className: "border-b border-[var(--border)] px-4 py-2", children: "Channel" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { className: "border-b border-[var(--border)] px-4 py-2", children: "Account" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { className: "border-b border-[var(--border)] px-4 py-2", children: "Scope" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { className: "border-b border-[var(--border)] px-4 py-2", children: "Agent" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("th", { className: "border-b border-[var(--border)] px-4 py-2", children: "Status" })
-          ] }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("tbody", { children: routing.bindings.map((binding) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
-            "tr",
-            {
-              className: `cursor-pointer border-b border-[var(--border)] transition hover:bg-[var(--bg-elevated)] ${binding.id === selectedBindingId ? "bg-[var(--bg-elevated)]" : ""}`,
-              onClick: () => setSelectedBindingId(binding.id),
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { className: "px-4 py-3", children: binding.channel }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { className: "px-4 py-3", children: binding.account }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { className: "px-4 py-3", children: binding.scope }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { className: "px-4 py-3 font-semibold", children: binding.agentId }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("td", { className: "px-4 py-3", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                  "span",
-                  {
-                    className: `rounded-full px-2 py-1 text-xs ${binding.status === "healthy" ? "bg-emerald-500/20 text-emerald-200" : binding.status === "overlap" ? "bg-amber-500/20 text-amber-200" : "bg-rose-500/20 text-rose-200"}`,
-                    children: binding.status
-                  }
-                ) })
-              ]
-            },
-            binding.id
-          )) })
-        ] }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "text-sm font-semibold", children: "Broadcast groups" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "mt-3 space-y-3", children: routing.broadcastGroups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-[var(--border)] p-3", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "flex items-center justify-between", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "font-semibold", children: group.name }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "text-xs text-[var(--text-muted)]", children: [
-                  group.members.length,
-                  " members"
-                ] })
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                "button",
-                {
-                  className: "text-xs text-[var(--accent)]",
-                  onClick: () => toggleBindingScope(`broadcast-${group.id}`),
-                  children: stagedEntities.includes(`broadcast-${group.id}`) ? "Unstage" : "Stage"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "mt-2 text-xs text-[var(--text-muted)]", children: group.members.join(", ") })
-          ] }, group.id)) })
-        ] })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "space-y-4", children: [
-        selectedBinding && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "flex items-center justify-between", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "Binding detail" }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("h3", { className: "text-lg font-semibold", children: selectedBinding.scope })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-              "button",
-              {
-                className: "text-xs text-[var(--accent)]",
-                onClick: () => toggleBindingScope(selectedBinding.id),
-                children: stagedEntities.includes(selectedBinding.id) ? "Unstage" : "Stage edits"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "mt-4 space-y-2 text-sm", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DetailRow, { label: "Channel", value: selectedBinding.channel }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DetailRow, { label: "Account", value: selectedBinding.account }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DetailRow, { label: "Agent", value: selectedBinding.agentId }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(DetailRow, { label: "Precedence", value: selectedBinding.precedence })
-          ] })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "text-sm font-semibold", children: "Precedence ladder" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { className: "mt-2 space-y-2 text-sm", children: routing.precedenceNotes.map((note, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("li", { className: "rounded bg-[var(--bg-elevated)] p-2", children: note }, index)) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "text-sm font-semibold", children: "Simulate routing" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "mt-3 space-y-3 text-sm", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "space-y-1", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "Channel" }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                "input",
-                {
-                  value: simulation.channel,
-                  onChange: (event) => setSimulation((prev) => ({ ...prev, channel: event.target.value })),
-                  className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "space-y-1", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "Account" }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                "input",
-                {
-                  value: simulation.account,
-                  onChange: (event) => setSimulation((prev) => ({ ...prev, account: event.target.value })),
-                  className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("label", { className: "space-y-1", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: "Metadata" }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                "input",
-                {
-                  value: simulation.metadata,
-                  onChange: (event) => setSimulation((prev) => ({ ...prev, metadata: event.target.value })),
-                  className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-              "button",
-              {
-                className: "w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm text-black",
-                onClick: runSimulation,
-                children: "Run"
-              }
-            ),
-            simulationResult && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "rounded bg-[var(--bg-elevated)] p-3 text-xs text-[var(--text-muted)]", children: simulationResult })
-          ] })
-        ] })
-      ] })
-    ] })
-  ] });
-}
-function DetailRow({ label, value }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "flex items-center justify-between border-b border-[var(--border)] pb-2 text-sm", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "text-[var(--text-muted)]", children: label }),
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "font-semibold", children: value })
-  ] });
-}
-
-// ../../packages/control-center/src/panels/channel-controls-panel.tsx
-var import_react3 = __toESM(require_react());
-var import_jsx_runtime3 = __toESM(require_jsx_runtime());
-function ChannelControlsPanel({ channels, stagedEntities, onStageChange }) {
-  const [activeChannel, setActiveChannel] = (0, import_react3.useState)(channels[0]?.channel ?? "");
-  const [probeLog, setProbeLog] = (0, import_react3.useState)([]);
-  const channelState = (0, import_react3.useMemo)(() => {
-    const map = {};
-    channels.forEach((channel) => {
-      map[channel.channel] = channel.accounts;
-    });
-    return map;
-  }, [channels]);
-  const handlePolicyChange = (channelKey, accountId, field, value) => {
-    onStageChange(`${channelKey}-${accountId}`, true);
-    const message = `Field ${field} updated to ${value}`;
-    setProbeLog((log) => [`[${(/* @__PURE__ */ new Date()).toLocaleTimeString()}] ${message}`, ...log].slice(0, 5));
-  };
-  const runProbe = (channelKey, accountId) => {
-    setProbeLog((log) => [
-      `[${(/* @__PURE__ */ new Date()).toLocaleTimeString()}] Probing ${channelKey} / ${accountId}...`,
-      "Probe healthy (latency 412ms)",
-      ...log
-    ]);
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("header", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("h2", { className: "text-2xl font-semibold", children: "Channel Controls" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Channel policy guardrails and override workflows per account." })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "flex gap-2", children: channels.map((channel) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-        "button",
-        {
-          className: `rounded px-3 py-2 text-sm ${activeChannel === channel.channel ? "bg-[var(--accent)] text-black" : "bg-[var(--bg-elevated)] text-[var(--text-muted)]"}`,
-          onClick: () => setActiveChannel(channel.channel),
-          children: channel.channel
-        },
-        channel.channel
-      )) })
-    ] }),
-    channels.filter((channel) => channel.channel === activeChannel).map((channel) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "space-y-4", children: channel.accounts.map((account) => {
-      const staged = stagedEntities.includes(`${channel.channel}-${account.id}`);
-      return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
-        "div",
-        {
-          className: "rounded border border-[var(--border)] p-4",
-          children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "flex flex-wrap items-center justify-between gap-3", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-lg font-semibold", children: account.title }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("p", { className: "text-xs text-[var(--text-muted)]", children: [
-                  "Last probe ",
-                  account.lastProbe
-                ] })
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "flex items-center gap-2 text-xs", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-                  "span",
-                  {
-                    className: `rounded-full px-2 py-1 ${account.status === "connected" ? "bg-emerald-500/20 text-emerald-200" : "bg-amber-500/20 text-amber-200"}`,
-                    children: account.status === "connected" ? "Connected" : "Needs relink"
-                  }
-                ),
-                staged && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { className: "text-amber-200", children: "Staged" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-                  "button",
-                  {
-                    className: "rounded border border-[var(--border)] px-3 py-1",
-                    onClick: () => runProbe(channel.channel, account.id),
-                    children: "Probe account"
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-4 grid gap-4 md:grid-cols-2", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: "DM policy" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
-                  "select",
-                  {
-                    value: account.policies.dmPolicy,
-                    onChange: (event) => handlePolicyChange(
-                      channel.channel,
-                      account.id,
-                      "dmPolicy",
-                      event.target.value
-                    ),
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2",
-                    children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "allow", children: "Allow all" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "allowlist", children: "Allowlist" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "deny", children: "Deny" })
-                    ]
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { className: "space-y-1 text-sm", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: "Group policy" }),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
-                  "select",
-                  {
-                    value: account.policies.groupPolicy ?? "inherit",
-                    onChange: (event) => handlePolicyChange(
-                      channel.channel,
-                      account.id,
-                      "groupPolicy",
-                      event.target.value
-                    ),
-                    className: "w-full rounded border border-[var(--border)] bg-transparent px-3 py-2",
-                    children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "inherit", children: "Inherit" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "allow", children: "Allow all" }),
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "allowlist", children: "Allowlist" })
-                    ]
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "mt-4", children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { className: "flex items-center gap-2 text-sm", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-                "input",
-                {
-                  type: "checkbox",
-                  checked: Boolean(account.policies.mentionRequired),
-                  onChange: (event) => handlePolicyChange(
-                    channel.channel,
-                    account.id,
-                    "mentionRequired",
-                    event.target.checked
-                  )
-                }
-              ),
-              "Require mentions before agent replies"
-            ] }) }),
-            account.policies.allowList && account.policies.allowList.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-4 text-sm", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Allowlist" }),
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-2 flex flex-wrap gap-2", children: [
-                account.policies.allowList.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-                  "span",
-                  {
-                    className: "rounded border border-[var(--border)] px-2 py-1 text-xs",
-                    children: entry
-                  },
-                  entry
-                )),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-                  "button",
-                  {
-                    className: "rounded border border-dashed border-[var(--border)] px-2 py-1 text-xs text-[var(--text-muted)]",
-                    onClick: () => handlePolicyChange(channel.channel, account.id, "dmPolicy", "allowlist"),
-                    children: "+ Add entry"
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-4", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Overrides" }),
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-2 space-y-2 text-sm", children: [
-                account.overrides.map((override) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
-                  "div",
-                  {
-                    className: "flex items-center justify-between rounded border border-[var(--border)] px-3 py-2",
-                    children: [
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "font-semibold", children: override.label }),
-                        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("p", { className: "text-xs text-[var(--text-muted)]", children: [
-                          "Routed to ",
-                          override.agentId
-                        ] })
-                      ] }),
-                      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "text-xs text-[var(--accent)]", children: "Edit" })
-                    ]
-                  },
-                  override.id
-                )),
-                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { className: "text-xs text-[var(--accent)]", children: "+ Add override" })
-              ] })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-4 rounded border border-[var(--border)] p-3 text-xs text-[var(--text-muted)]", children: [
-              "Advanced: ",
-              account.advanced.join(" \xB7 ")
-            ] })
-          ]
-        },
-        account.id
-      );
-    }) }, channel.channel)),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "text-sm font-semibold", children: "Probe log" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "mt-2 space-y-1 text-xs text-[var(--text-muted)]", children: [
-        probeLog.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { children: "No probes executed this session." }),
-        probeLog.map((line, index) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { children: line }, `${line}-${index}`))
-      ] })
-    ] })
-  ] });
-}
-
-// ../../packages/control-center/src/panels/automation-center-panel.tsx
-var import_react4 = __toESM(require_react());
-var import_jsx_runtime4 = __toESM(require_jsx_runtime());
-function AutomationCenterPanel({ automation, stagedEntities, onStageChange }) {
-  const [selectedJobId, setSelectedJobId] = (0, import_react4.useState)(automation.cronJobs[0]?.id ?? "");
-  const [showHeartbeat, setShowHeartbeat] = (0, import_react4.useState)(true);
-  const [timelineFilter, setTimelineFilter] = (0, import_react4.useState)("all");
-  const heartbeatStats = (0, import_react4.useMemo)(() => {
-    const active = automation.heartbeats.filter((heartbeat) => heartbeat.status === "active").length;
-    return {
-      active,
-      paused: automation.heartbeats.length - active
-    };
-  }, [automation.heartbeats]);
-  const selectedJob = automation.cronJobs.find((job) => job.id === selectedJobId);
-  const toggleJob = (jobId) => {
-    const isStaged = stagedEntities.includes(jobId);
-    onStageChange(jobId, !isStaged);
-  };
-  const filteredHistory = automation.runHistory.filter(
-    (entry) => timelineFilter === "all" ? true : entry.status === timelineFilter
-  );
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("header", { className: "flex flex-wrap items-center justify-between gap-3", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h2", { className: "text-2xl font-semibold", children: "Automation Center" }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Manage heartbeats and cron automations with clear delivery previews." })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex gap-2 text-sm", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] px-3 py-2", children: [
-          "Active heartbeats: ",
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "font-semibold", children: heartbeatStats.active })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] px-3 py-2", children: [
-          "Cron jobs: ",
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "font-semibold", children: automation.cronJobs.length })
-        ] })
-      ] })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between border-b border-[var(--border)] px-4 py-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-sm font-semibold", children: "Heartbeats" }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "text-xs text-[var(--accent)]", onClick: () => setShowHeartbeat((prev) => !prev), children: showHeartbeat ? "Collapse" : "Expand" })
-      ] }),
-      showHeartbeat && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "grid gap-4 p-4 md:grid-cols-2", children: automation.heartbeats.map((heartbeat) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] p-3", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "font-semibold", children: heartbeat.agentId }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-            "span",
-            {
-              className: `rounded-full px-2 py-1 text-xs ${heartbeat.status === "active" ? "bg-emerald-500/20 text-emerald-200" : "bg-rose-500/20 text-rose-200"}`,
-              children: heartbeat.status
-            }
-          )
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "mt-2 text-sm text-[var(--text-muted)]", children: heartbeat.promptSnippet }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "mt-3 flex justify-between text-xs text-[var(--text-muted)]", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { children: heartbeat.cadence }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { children: [
-            "Next: ",
-            heartbeat.nextRun
-          ] })
-        ] })
-      ] }, heartbeat.agentId)) })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "grid gap-6 lg:grid-cols-[1.1fr_0.9fr]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)]", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between border-b border-[var(--border)] px-4 py-2", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-sm font-semibold", children: "Cron timeline" }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
-            "select",
-            {
-              value: timelineFilter,
-              onChange: (event) => setTimelineFilter(event.target.value),
-              className: "rounded border border-[var(--border)] bg-transparent px-3 py-1 text-xs",
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "all", children: "All" }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "success", children: "Success" }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "failed", children: "Failed" }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("option", { value: "skipped", children: "Skipped" })
-              ]
-            }
-          )
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "divide-y divide-[var(--border)]", children: automation.cronJobs.map((job) => /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-          "button",
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-4 flex flex-wrap gap-2", children: summary.chips.map((chip) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
           {
-            className: `w-full px-4 py-3 text-left text-sm transition hover:bg-[var(--bg-elevated)] ${job.id === selectedJobId ? "bg-[var(--bg-elevated)]" : ""}`,
-            onClick: () => setSelectedJobId(job.id),
-            children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "font-semibold", children: job.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: job.schedule })
-              ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "text-right text-xs text-[var(--text-muted)]", children: [
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { children: [
-                  "Next: ",
-                  job.nextRun
-                ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-                  "span",
-                  {
-                    className: `rounded-full px-2 py-1 ${job.status === "enabled" ? "bg-emerald-500/20 text-emerald-200" : "bg-amber-500/20 text-amber-200"}`,
-                    children: job.status
-                  }
-                )
-              ] })
-            ] })
+            className: "flex items-center gap-2 rounded-full bg-[var(--bg-elevated)] px-3 py-2 text-xs",
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `h-2 w-2 rounded-full ${statusStyles[chip.status]}` }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: chip.label })
+            ]
           },
-          job.id
+          chip.label
         )) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "space-y-4", children: [
-        selectedJob && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "Job detail" }),
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h3", { className: "text-lg font-semibold", children: selectedJob.label })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-              "button",
-              {
-                className: "text-xs text-[var(--accent)]",
-                onClick: () => toggleJob(selectedJob.id),
-                children: stagedEntities.includes(selectedJob.id) ? "Unstage" : "Stage edits"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "mt-4 space-y-2 text-sm", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Detail, { label: "Schedule", value: selectedJob.schedule }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Detail, { label: "Delivery", value: selectedJob.delivery }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Detail, { label: "Session target", value: selectedJob.sessionTarget }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(Detail, { label: "Last run", value: selectedJob.lastRunState })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "mt-4 flex gap-2 text-xs", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "flex-1 rounded border border-[var(--border)] px-3 py-2", children: "Run now" }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { className: "flex-1 rounded border border-[var(--border)] px-3 py-2", children: "Pause" })
-          ] })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-sm font-semibold", children: "Run history" }),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "mt-3 space-y-3", children: filteredHistory.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "rounded border border-[var(--border)] p-3 text-sm", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "font-semibold", children: entry.jobId }),
-              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "text-xs text-[var(--text-muted)]", children: entry.ranAt })
-            ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: entry.logExcerpt }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-              "span",
-              {
-                className: `mt-2 inline-block rounded-full px-2 py-1 text-xs ${entry.status === "success" ? "bg-emerald-500/20 text-emerald-200" : entry.status === "failed" ? "bg-rose-500/20 text-rose-200" : "bg-amber-500/20 text-amber-200"}`,
-                children: entry.status
-              }
-            )
-          ] }, entry.id)) })
-        ] })
-      ] })
-    ] })
-  ] });
-}
-function Detail({ label, value }) {
-  return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "flex items-center justify-between border-b border-[var(--border)] pb-2 text-sm", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "text-[var(--text-muted)]", children: label }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "font-semibold", children: value })
-  ] });
-}
-
-// ../../packages/control-center/src/panels/maintenance-plugins-panel.tsx
-var import_react5 = __toESM(require_react());
-var import_jsx_runtime5 = __toESM(require_jsx_runtime());
-function MaintenancePluginsPanel({
-  maintenance,
-  stagedEntities,
-  onStageChange,
-  onPrefillCommand
-}) {
-  const [showLog, setShowLog] = (0, import_react5.useState)(false);
-  const [doctorRunning, setDoctorRunning] = (0, import_react5.useState)(false);
-  const runDoctor = () => {
-    setDoctorRunning(true);
-    setTimeout(() => {
-      setDoctorRunning(false);
-      onPrefillCommand("openclaw doctor --non-interactive");
-    }, 800);
-  };
-  const togglePlugin = (pluginId) => {
-    const staged = stagedEntities.includes(pluginId);
-    onStageChange(pluginId, !staged);
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "space-y-6", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("header", { className: "flex items-center justify-between", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h2", { className: "text-2xl font-semibold", children: "Maintenance & Plugins" }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Doctor runs, restart signals, and plugin health in one grid." })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-        "button",
-        {
-          className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-          onClick: () => onPrefillCommand("openclaw plugins list --json"),
-          children: "Prefill CLI"
-        }
-      )
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "grid gap-6 lg:grid-cols-[0.9fr_1.1fr]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "space-y-4", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "Doctor status" }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("h3", { className: "text-xl font-semibold", children: maintenance.doctor.status }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("p", { className: "text-xs text-[var(--text-muted)]", children: [
-              "Last run ",
-              maintenance.doctor.lastRun
-            ] })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-            "button",
-            {
-              className: "rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm text-black",
-              onClick: runDoctor,
-              disabled: doctorRunning,
-              children: doctorRunning ? "Running..." : "Run doctor"
-            }
-          )
-        ] }),
-        maintenance.doctor.pendingMigrations.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "mt-3 text-sm", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Pending migrations" }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("ul", { className: "mt-1 list-disc space-y-1 pl-5", children: maintenance.doctor.pendingMigrations.map((migration) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("li", { children: migration }, migration)) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)(
-          "button",
-          {
-            className: "mt-4 text-xs text-[var(--accent)]",
-            onClick: () => setShowLog((prev) => !prev),
-            children: [
-              showLog ? "Hide" : "Show",
-              " doctor log"
-            ]
-          }
-        ),
-        showLog && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "mt-3 rounded bg-[var(--bg-elevated)] p-3 text-xs text-[var(--text-muted)]", children: maintenance.doctor.log.map((line) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: line }, line)) })
-      ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "rounded border border-[var(--border)]", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "border-b border-[var(--border)] px-4 py-2", children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-sm font-semibold", children: "Plugins" }) }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { className: "divide-y divide-[var(--border)]", children: maintenance.plugins.map((plugin) => /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "p-4", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center justify-between", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "text-lg font-semibold", children: plugin.name }),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("p", { className: "text-xs text-[var(--text-muted)]", children: [
-                "v",
-                plugin.version
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("aside", { className: "flex flex-col gap-4", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.3)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { className: "text-base font-semibold", children: "Overview" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-3 space-y-2 text-xs", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Agents" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "rounded-full bg-[#2a3145] px-2 py-1 text-[var(--text-muted)]", children: [
+                summary.agentCount,
+                " ready"
               ] })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { className: "flex items-center gap-2", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-                "span",
-                {
-                  className: `rounded-full px-2 py-1 text-xs ${plugin.status === "ok" ? "bg-emerald-500/20 text-emerald-200" : "bg-amber-500/20 text-amber-200"}`,
-                  children: plugin.status
-                }
-              ),
-              /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
-                "button",
-                {
-                  className: "rounded border border-[var(--border)] px-3 py-1 text-xs",
-                  onClick: () => togglePlugin(plugin.id),
-                  children: stagedEntities.includes(plugin.id) ? "Unstage" : plugin.enabled ? "Disable" : "Enable"
-                }
-              )
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Channels" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "rounded-full bg-[#2a3145] px-2 py-1 text-[var(--text-muted)]", children: [
+                summary.connectedChannels,
+                " connected"
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Automation" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "rounded-full bg-[#2a3145] px-2 py-1 text-[var(--text-muted)]", children: [
+                summary.activeJobs,
+                " active"
+              ] })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Maintenance" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "rounded-full bg-[#2a3145] px-2 py-1 text-[var(--text-muted)]", children: summary.doctorStatus === "healthy" ? "Up to date" : "Needs review" })
             ] })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { className: "mt-2 text-sm text-[var(--text-muted)]", children: plugin.notes })
-        ] }, plugin.id)) })
-      ] })
-    ] })
-  ] });
-}
-
-// ../../packages/control-center/src/panels/command-console-panel.tsx
-var import_react6 = __toESM(require_react());
-var import_jsx_runtime6 = __toESM(require_jsx_runtime());
-function CommandConsolePanel({
-  history,
-  prefilledCommand,
-  onPrefillCommand,
-  onStageClear
-}) {
-  const [input, setInput] = (0, import_react6.useState)(prefilledCommand);
-  const [logEntries, setLogEntries] = (0, import_react6.useState)(history);
-  const [currentOutput, setCurrentOutput] = (0, import_react6.useState)("Ready.");
-  const [running, setRunning] = (0, import_react6.useState)(false);
-  const [sandboxed, setSandboxed] = (0, import_react6.useState)(true);
-  (0, import_react6.useEffect)(() => {
-    setInput(prefilledCommand);
-  }, [prefilledCommand]);
-  const runCommand = () => {
-    if (!input.trim()) return;
-    setRunning(true);
-    setCurrentOutput("Executing...");
-    setTimeout(() => {
-      const newEntry = {
-        id: `local-${Date.now()}`,
-        command: input,
-        status: sandboxed ? "success" : "running",
-        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-        output: sandboxed ? "Sandbox dry-run complete. CLI output deferred until wiring real exec." : "Live execution pending. Hook CLI adapter here."
-      };
-      setLogEntries((entries) => [newEntry, ...entries]);
-      setCurrentOutput(newEntry.output);
-      setRunning(false);
-      onPrefillCommand(input);
-      onStageClear();
-    }, 600);
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "space-y-4", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("header", { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "Inline console" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("h2", { className: "text-2xl font-semibold", children: "Command Console" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "text-sm text-[var(--text-muted)]", children: "Run surgical openclaw commands without leaving the Control Center. Sandbox mode is on by default." })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "text-sm", children: [
-        "Command",
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "textarea",
-          {
-            value: input,
-            onChange: (event) => setInput(event.target.value),
-            className: "mt-2 h-24 w-full rounded border border-[var(--border)] bg-transparent p-3 text-sm",
-            placeholder: "openclaw status"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "mt-3 flex flex-wrap items-center gap-3 text-xs", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-            "input",
+          ] })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.3)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { className: "text-base font-semibold", children: "Now Suggested" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "mt-3 space-y-2 text-xs", children: suggested.map((item) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "div",
             {
-              type: "checkbox",
-              checked: sandboxed,
-              onChange: (event) => setSandboxed(event.target.checked)
-            }
-          ),
-          "Sandbox (dry run)"
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] px-3 py-1",
-            onClick: () => setInput("openclaw cron list --json"),
-            children: "Suggest cron list"
-          }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] px-3 py-1",
-            onClick: () => setInput("openclaw bindings lint"),
-            children: "Suggest bindings lint"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "mt-4 flex gap-2", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "button",
-          {
-            className: "flex-1 rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm text-black",
-            onClick: runCommand,
-            disabled: running,
-            children: running ? "Running" : "Run command"
-          }
-        ),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] px-3 py-2 text-sm",
-            onClick: () => setInput(prefilledCommand),
-            children: "Reset to prefills"
-          }
-        )
-      ] })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "rounded border border-[var(--border)] p-4", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "text-sm font-semibold", children: "Output" }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("pre", { className: "mt-2 min-h-[120px] rounded bg-[var(--bg-elevated)] p-3 text-xs text-[var(--text-muted)]", children: currentOutput })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "rounded border border-[var(--border)]", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "border-b border-[var(--border)] px-4 py-2", children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "text-sm font-semibold", children: "History" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { className: "divide-y divide-[var(--border)]", children: logEntries.map((entry) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "px-4 py-3 text-sm", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { className: "flex items-center justify-between", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "font-semibold", children: entry.command }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { className: "text-xs text-[var(--text-muted)]", children: entry.timestamp })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: entry.output }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-          "span",
-          {
-            className: `mt-1 inline-block rounded-full px-2 py-1 text-xs ${entry.status === "success" ? "bg-emerald-500/20 text-emerald-200" : entry.status === "failed" ? "bg-rose-500/20 text-rose-200" : "bg-amber-500/20 text-amber-200"}`,
-            children: entry.status
-          }
-        )
-      ] }, entry.id)) })
-    ] })
-  ] });
-}
-
-// ../../packages/control-center/src/control-center-shell.tsx
-var import_jsx_runtime7 = __toESM(require_jsx_runtime());
-var panels = [
-  {
-    id: "agent-manager",
-    label: "Agent Manager",
-    description: "Workspaces, files, heartbeat cadence"
-  },
-  {
-    id: "routing-studio",
-    label: "Routing Studio",
-    description: "Bindings + precedence"
-  },
-  {
-    id: "channel-controls",
-    label: "Channel Controls",
-    description: "Policies per surface"
-  },
-  {
-    id: "automation-center",
-    label: "Automation Center",
-    description: "Heartbeats \xB7 Cron"
-  },
-  {
-    id: "maintenance-plugins",
-    label: "Maintenance & Plugins",
-    description: "Doctor \xB7 Voice \xB7 Plugins"
-  },
-  {
-    id: "command-console",
-    label: "Command Console",
-    description: "Inline CLI"
-  }
-];
-function ControlCenterShell({ data }) {
-  const [activePanel, setActivePanel] = (0, import_react7.useState)("agent-manager");
-  const [pendingRestart, setPendingRestart] = (0, import_react7.useState)(false);
-  const [stagedEntities, setStagedEntities] = (0, import_react7.useState)([]);
-  const [prefilledCommand, setPrefilledCommand] = (0, import_react7.useState)(
-    data.commandHistory[0]?.command ?? "openclaw status"
-  );
-  const personaDigest = (0, import_react7.useMemo)(() => data.personas.slice(0, 4), [data.personas]);
-  const handleStageChange = (entityId, staged) => {
-    setStagedEntities((current) => {
-      const exists = current.includes(entityId);
-      if (staged && !exists) {
-        return [...current, entityId];
-      }
-      if (!staged && exists) {
-        return current.filter((id) => id !== entityId);
-      }
-      return current;
-    });
-  };
-  const handleApply = () => {
-    if (!stagedEntities.length) return;
-    setPendingRestart(true);
-    setStagedEntities([]);
-  };
-  const renderPanel = () => {
-    switch (activePanel) {
-      case "agent-manager":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          AgentManagerPanel,
-          {
-            agents: data.agents,
-            onStageChange: handleStageChange,
-            onCommandPrefill: setPrefilledCommand,
-            onApply: handleApply,
-            stagedEntities
-          }
-        );
-      case "routing-studio":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          RoutingStudioPanel,
-          {
-            routing: data.routing,
-            onStageChange: handleStageChange,
-            stagedEntities
-          }
-        );
-      case "channel-controls":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          ChannelControlsPanel,
-          {
-            channels: data.channels,
-            onStageChange: handleStageChange,
-            stagedEntities
-          }
-        );
-      case "automation-center":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          AutomationCenterPanel,
-          {
-            automation: data.automation,
-            onStageChange: handleStageChange,
-            stagedEntities
-          }
-        );
-      case "maintenance-plugins":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          MaintenancePluginsPanel,
-          {
-            maintenance: data.maintenance,
-            onStageChange: handleStageChange,
-            stagedEntities,
-            onPrefillCommand: setPrefilledCommand
-          }
-        );
-      case "command-console":
-        return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          CommandConsolePanel,
-          {
-            history: data.commandHistory,
-            prefilledCommand,
-            onPrefillCommand: setPrefilledCommand,
-            onStageClear: () => setStagedEntities([])
-          }
-        );
-      default:
-        return null;
-    }
-  };
-  return /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "min-h-screen bg-[var(--bg)] text-[var(--text)]", children: [
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex border-b border-[var(--border)] px-6 py-4", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex-1", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-sm uppercase tracking-wide text-[var(--text-muted)]", children: "OCCode Control Center" }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("h1", { className: "text-3xl font-semibold", children: "Configuration Console" })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex items-center gap-4", children: [
-        pendingRestart && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: "rounded-full border border-amber-500 px-4 py-1 text-sm text-amber-300", children: "Pending gateway restart" }),
-        stagedEntities.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
-          "button",
-          {
-            className: "rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-sm",
-            onClick: handleApply,
-            children: [
-              "Apply ",
-              stagedEntities.length,
-              " staged change",
-              stagedEntities.length > 1 ? "s" : ""
-            ]
-          }
-        )
-      ] })
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "flex", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("aside", { className: "w-80 border-r border-[var(--border)] bg-[var(--bg-card)] p-6", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: "space-y-6", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Personas" }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "mt-2 space-y-3", children: personaDigest.map((persona) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("li", { className: "rounded border border-[var(--border)] p-3", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-sm font-semibold", children: persona.title }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: persona.summary })
-          ] }, persona.id)) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Experience Principles" }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "mt-2 space-y-2", children: data.principles.map((principle) => /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("li", { className: "rounded bg-[var(--bg-elevated)] p-3", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-sm font-semibold", children: principle.title }),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: principle.detail })
-          ] }, principle.id)) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("nav", { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs uppercase tracking-wide text-[var(--text-muted)]", children: "Panels" }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("ul", { className: "mt-2 space-y-2", children: panels.map((panel) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
-            "button",
-            {
-              className: `w-full rounded border px-3 py-2 text-left text-sm transition-colors ${activePanel === panel.id ? "border-[var(--accent)] bg-[var(--bg-elevated)]" : "border-[var(--border)] hover:border-[var(--accent)]"}`,
-              onClick: () => setActivePanel(panel.id),
+              className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2",
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "font-semibold", children: panel.label }),
-                /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: "text-xs text-[var(--text-muted)]", children: panel.description })
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: item.label }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "span",
+                  {
+                    className: `font-semibold ${item.status === "good" ? "text-emerald-400" : item.status === "warn" ? "text-amber-300" : "text-rose-400"}`,
+                    children: item.note
+                  }
+                )
               ]
-            }
-          ) }, panel.id)) })
+            },
+            item.label
+          )) })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.3)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h3", { className: "text-base font-semibold", children: "Maintenance" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-3 space-y-2 text-xs", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Gateway status" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-emerald-400", children: "Online" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Updates" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-amber-300", children: "1 available" })
+            ] }),
+            /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex items-center justify-between rounded-xl bg-[var(--bg-elevated)] px-3 py-2", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Last backup" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "rounded-full bg-[#2a3145] px-2 py-1 text-[var(--text-muted)]", children: "Today" })
+            ] })
+          ] })
         ] })
-      ] }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("main", { className: "flex-1 p-6", children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { className: "rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-6", children: renderPanel() }) })
+      ] })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Agents" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "Guided roles: Executive, Ops, Research, Customer Support." }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Templates" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-emerald-400", children: "6" })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Channels" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "One-click pairing + QR scan, with friendly copy." }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Connected" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { className: "text-amber-300", children: [
+            summary.connectedChannels,
+            "/",
+            summary.channelCount
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Automation" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "Simple language: \u201CCheck inbox at 9am\u201D." }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Rules" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-rose-400", children: summary.activeJobs })
+        ] })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "rounded-2xl bg-[var(--bg-card)] p-4", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", { className: "text-sm font-semibold", children: "Maintenance" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "mt-1 text-xs text-[var(--text-muted)]", children: "Status indicators for health, updates, backups." }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Health" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "text-emerald-400", children: summary.doctorStatus === "healthy" ? "OK" : "Needs review" })
+        ] })
+      ] })
     ] })
-  ] });
+  ] }) });
 }
 
 // src/webview/control-center.tsx
-var import_jsx_runtime8 = __toESM(require_jsx_runtime());
+var import_jsx_runtime2 = __toESM(require_jsx_runtime());
 var mount = () => {
   const container = document.getElementById("control-center-root");
   const data = window.__CONTROL_CENTER_DATA__;
@@ -14148,7 +13004,7 @@ var mount = () => {
   }
   const root = (0, import_client.createRoot)(container);
   root.render(
-    /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(import_react8.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime8.jsx)(ControlCenterShell, { data }) })
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react2.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(ControlCenterShell, { data }) })
   );
 };
 if (document.readyState === "loading") {
