@@ -86,6 +86,12 @@ h1, h2, h3 {
   100% { transform: translateY(-50%); }
 }
 
+/* Install feed — stream in from bottom */
+@keyframes slide-in-bottom {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
 /* Download button — static glow */
 .btn-glow {
   box-shadow:
