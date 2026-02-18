@@ -418,16 +418,16 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
                     <a
                       href={REPO}
-                      className="group/star inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
+                      className="w-[75%] sm:w-auto mx-auto group/star inline-flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover/star:fill-yellow-400 group-hover/star:stroke-yellow-400 transition-colors duration-300">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 group-hover/star:fill-yellow-400 group-hover/star:stroke-yellow-400 transition-colors duration-300">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                       </svg>
                       Star on GitHub
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 group-hover/star:opacity-100 group-hover/star:translate-x-0.5 transition-all duration-300">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover/star:opacity-100 group-hover/star:translate-x-0.5 transition-all duration-300">
                         <path d="M7 17l9.2-9.2M17 17V8H8" />
                       </svg>
                     </a>
@@ -435,16 +435,16 @@ export default function Home() {
                       href="https://mba.sh"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group/skool inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
+                      className="w-[75%] sm:w-auto mx-auto group/skool inline-flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
                     >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover/skool:stroke-emerald-400 transition-colors duration-300">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 group-hover/skool:stroke-emerald-400 transition-colors duration-300">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                         <circle cx="9" cy="7" r="4" />
                         <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                       </svg>
                       Join our community on Skool
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 group-hover/skool:opacity-100 group-hover/skool:translate-x-0.5 transition-all duration-300">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover/skool:opacity-100 group-hover/skool:translate-x-0.5 transition-all duration-300">
                         <path d="M7 17l9.2-9.2M17 17V8H8" />
                       </svg>
                     </a>
