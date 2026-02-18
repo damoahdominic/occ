@@ -204,7 +204,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t border-[var(--border)] py-8 px-6">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-[var(--text-muted)]">
-          <span>Built with ❤️ by the OpenClaw community</span>
+          <span>Making Better Agents Community <a href="https://mba.sh" className="hover:text-white transition-colors">https://mba.sh</a></span>
           <div className="flex gap-6">
             <a href={REPO} className="hover:text-white transition-colors">GitHub</a>
             <a href="https://docs.openclaw.ai" className="hover:text-white transition-colors">Docs</a>
