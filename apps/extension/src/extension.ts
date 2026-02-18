@@ -32,8 +32,8 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Auto-show Home panel on startup
-  HomePanel.createOrShow(context.extensionUri);
+  // Auto-show Control Center on startup
+  ConfigPanel.createOrShow(context.extensionUri);
 }
 
 export function deactivate() {}
