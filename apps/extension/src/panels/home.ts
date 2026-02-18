@@ -189,16 +189,44 @@ export class HomePanel {
       <span class="value ${cliClass}">${cliText}${cliHint}</span>
     </div>
   </div>
-  <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
-  <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
+  <button class="btn-primary" data-command='${buttonCommand}'>${buttonLabel}</button>
+  <button class="btn-secondary" data-command='openclaw.status'>Check Status</button>
   <div class="links">
     <a href="https://github.com/damoahdominic/occ">GitHub</a>
     <a href="https://openclaw.ai">Website</a>
     <a href="https://docs.openclaw.ai">Docs</a>
   </div>
   <script>
-    const vscode = acquireVsCodeApi();
-    function cmd(c) { vscode.postMessage({ command: c }); }
+    (function () {
+      var vscodeApi;
+      try {
+        vscodeApi = acquireVsCodeApi();
+      } catch (error) {
+        console.error('OpenClaw home webview: VS Code API unavailable', error);
+        return;
+      }
+
+      function handleButtonClick(event) {
+        if (!vscodeApi) {
+          return;
+        }
+        var target = event.currentTarget;
+        if (!target || !target.getAttribute) {
+          return;
+        }
+        var command = target.getAttribute('data-command');
+        if (!command) {
+          return;
+        }
+        event.preventDefault();
+        vscodeApi.postMessage({ command: command });
+      }
+
+      var buttons = document.querySelectorAll('[data-command]');
+      Array.prototype.forEach.call(buttons, function (btn) {
+        btn.addEventListener('click', handleButtonClick);
+      });
+    })();
   </script>
 </body>
 </html>`;

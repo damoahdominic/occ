@@ -15,7 +15,12 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:openclaw.home",
+    "onCommand:openclaw.configure",
+    "onCommand:openclaw.install",
+    "onCommand:openclaw.status",
+    "*"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -58,5 +63,6 @@
     "@types/node": "^20.0.0",
     "typescript": "^5.3.0",
     "@vscode/vsce": "^2.22.0"
-  }
+  },
+  "icon": "media/icon.png"
 }
