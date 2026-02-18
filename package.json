@@ -6,7 +6,8 @@
   "workspaces": [
     "apps/wrapper",
     "apps/extension",
-    "apps/web"
+    "apps/web",
+    "packages/control-center"
   ],
   "scripts": {
     "compile": "npm run ext:compile",
