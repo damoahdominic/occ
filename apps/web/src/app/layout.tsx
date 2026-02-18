@@ -64,7 +64,7 @@ export const metadata: Metadata = {
       "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux. Free and open source.",
     images: [
       {
-        url: "/screenshot.png",
+        url: "/OpenClawOGImage.png",
         width: 1400,
         height: 720,
         alt: "OpenClaw Code — AI coding workspace",
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
     title: "OpenClaw Code — The Easiest Way to Use AI Locally",
     description:
       "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux.",
-    images: ["/screenshot.png"],
+    images: ["/OpenClawOGImage.png"],
     creator: "@openclawai",
     site: "@openclawai",
   },
@@ -105,7 +105,7 @@ const jsonLd = {
     price: "0",
     priceCurrency: "USD",
   },
-  screenshot: `${SITE_URL}/screenshot.png`,
+  screenshot: `${SITE_URL}/OpenClawOGImage.png`,
   downloadUrl: "https://github.com/damoahdominic/occ/releases",
   releaseNotes: "https://github.com/damoahdominic/occ/releases",
   softwareVersion: "latest",
