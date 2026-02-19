@@ -47,7 +47,6 @@ export class StatusPanel {
   private _lastStatus?: GatewayStatus;
   private _lastStatusAt = 0;
   private _isVisible = true;
-  private _disposed = false;
   private _gatewayTerminal?: vscode.Terminal;
 
   private constructor(panel: vscode.WebviewPanel) {
@@ -102,7 +101,6 @@ export class StatusPanel {
   }
 
   public dispose() {
-    this._disposed = true;
     StatusPanel.currentPanel = undefined;
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
@@ -138,9 +136,7 @@ export class StatusPanel {
     }
     this._refreshing = true;
     try {
-      if (this._disposed) return;
       const status = await this._getStatus();
-      if (this._disposed) return;
       this._panel.webview.html = this._getHtml(status);
     } finally {
       this._refreshing = false;
@@ -241,9 +237,8 @@ export class StatusPanel {
   private async _pollStatus(maxMs: number, intervalMs: number) {
     const deadline = Date.now() + maxMs;
     while (Date.now() < deadline) {
-      if (!this._isVisible || this._disposed) return;
+      if (!this._isVisible) return;
       const status = await this._getStatusFresh();
-      if (this._disposed) return;
       this._panel.webview.html = this._getHtml(status);
       if (status.running) return;
       await new Promise(r => setTimeout(r, intervalMs));

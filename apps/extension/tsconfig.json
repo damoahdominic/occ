@@ -4,9 +4,19 @@
     "target": "ES2020",
     "outDir": "out",
     "lib": ["ES2020", "DOM"],
+    "jsx": "react-jsx",
     "sourceMap": true,
     "rootDir": "src",
-    "strict": true
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "node",
+    "baseUrl": "./src",
+    "paths": {
+      "@occode/control-center": ["../packages/control-center/src/ui.ts"],
+      "@occode/control-center/ui": ["../packages/control-center/src/ui.ts"],
+      "@occode/control-center/data": ["../packages/control-center/src/data.ts"]
+    }
   },
-  "exclude": ["node_modules", "out"]
+  "exclude": ["node_modules", "out", "src/webview", "src/panels/control-center-webview.ts"]
 }
