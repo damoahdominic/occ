@@ -20,6 +20,8 @@
   "dependencies": {
     "@studio-freight/react-lenis": "^0.0.47",
     "cobe": "^0.6.5",
-    "framer-motion": "^12.34.2"
+    "framer-motion": "^12.34.2",
+    "gsap": "^3.14.2",
+    "lucide-react": "^0.574.0"
   }
 }
