@@ -1,6 +1,7 @@
 "use client";
 
 import createGlobe from "cobe";
+import { gsap } from "gsap";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
@@ -153,72 +154,163 @@ const installEvents = [
   { city: "Amsterdam", flag: "🇳🇱", lat: 52.3676, lng: 4.9041 },
 ];
 
-// ─── iOS-style push notification feed ────────────────────────────────────────
-type InstallNotif = (typeof installEvents)[0] & { id: number };
-
-const N_VISIBLE = 3;
-const CARD_H    = 70;  // px — enforced via minHeight on each card
-const CARD_GAP  = 10;  // px
-const SLOT      = CARD_H + CARD_GAP; // 80px per slot
-const CONTAINER_H = N_VISIBLE * SLOT - CARD_GAP; // 230px
-
-// items[0] = oldest (renders at top, y=0)
-// items[N-1] = newest (renders at bottom, y = (N-1)*SLOT)
-// New card enters from below (y = CONTAINER_H + CARD_GAP)
-// Exiting card flies off the top (y = -(CARD_H + CARD_GAP))
+// ─── 3-D card-stack notification feed (GSAP — mirrors Carousel.js technique) ──
+const N_VISIBLE = 5;
 
 function NotificationFeed() {
-  const [items, setItems] = useState<InstallNotif[]>(() =>
-    installEvents.slice(0, N_VISIBLE).map((e, i) => ({ ...e, id: i }))
-  );
-  const nextIdx = useRef(N_VISIBLE);
-  const nextId  = useRef(N_VISIBLE);
+  const sliderRef    = useRef<HTMLDivElement>(null);
+  const isAnimating  = useRef(false);
+  const tickerRef    = useRef(N_VISIBLE); // next installEvents index to load
 
   useEffect(() => {
-    const t = setInterval(() => {
-      const ev = installEvents[nextIdx.current % installEvents.length];
-      nextIdx.current++;
-      // append newest at end, drop oldest from front
-      setItems((prev) => [...prev, { ...ev, id: nextId.current++ }].slice(-N_VISIBLE));
-    }, 2800);
-    return () => clearInterval(t);
+    // Non-null assertion: useEffect only runs after mount, ref is always set by then
+    const slider = sliderRef.current!;
+
+    // ── Register the same custom ease as Carousel.js ──────────────────────────
+    gsap.registerEase("cubic", (t: number) => bezier(0.83, 0, 0.17, 1, t));
+
+    // ── Set up 3-D context on the slider — same as Carousel.js ───────────────
+    gsap.set(slider, { transformPerspective: 800, transformStyle: "preserve-3d" });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers — declared before use (mirrors Carousel.js structure)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Update city + flag text inside a card element. */
+    const setCardContent = (card: HTMLElement, ev: (typeof installEvents)[0]) => {
+      const flag = card.querySelector<HTMLElement>(".nc-flag");
+      const city = card.querySelector<HTMLElement>(".nc-city");
+      if (flag) flag.textContent = ev.flag;
+      if (city) city.textContent = ev.city;
+    };
+
+    /**
+     * Position ALL cards in the stack.
+     * DOM order: cards[0] = back (furthest), cards[N-1] = front (closest).
+     * Mirrors initializeCards() in Carousel.js.
+     */
+    const initCards = () => {
+      const cs = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
+      const n  = cs.length;
+      gsap.to(cs, {
+        y:        (i) => `${36 - 32 * i}%`,        // front (i=n-1) sits highest (top), back lowest
+        z:        (i) => 20 * i,                    // real translateZ depth
+        scale:    (i) => 1 - 0.055 * (n - 1 - i),  // back ≈ 0.78, front = 1
+        opacity:  1,                                  // always fully opaque — solid bg
+        // combine blur (depth haze) + brightness (depth dimming) in one filter
+        // front: blur(0) brightness(1) → back: blur(1.2px) brightness(0.55)
+        filter:   (i) => `blur(${(n - 1 - i) * 0.3}px) brightness(${1 - (n - 1 - i) * 0.09})`,
+        duration: 1.0,
+        ease:     "cubic",
+        stagger:  -0.06,
+        overwrite: "auto",
+      });
+    };
+
+    /**
+     * Rotate the stack: front card exits on Z, moves to back, new content loaded.
+     * Mirrors rotateCards() in Carousel.js.
+     */
+    const rotateCards = () => {
+      if (isAnimating.current) return;
+      isAnimating.current = true;
+
+      const cs    = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
+      const front = cs[cs.length - 1]; // last in DOM = highest z = front card
+
+      // ① Front card blasts toward the viewer until it exits the scene.
+      //
+      //   perspective: 800  →  apparent scale = 800 / (800 - z)
+      //   z = 0   → scale 1.0   (normal)
+      //   z = 400 → scale 2.0   (fills container)
+      //   z = 600 → scale 4.0   (clearly exits — card is 4× its original size)
+      //   z = 700 → scale 8.0   (well past any container edge)
+      //
+      //   opacity stays 1 the whole time — it's a physical launch, not a fade.
+      //   The card naturally disappears when it grows past the container's
+      //   overflow-hidden boundary, THEN onComplete teleports it to the back.
+      gsap.to(front, {
+        z:        "+=680",  // exits the scene at ~4-8× scale
+        opacity:  1,        // stays opaque — it moves OUT, not fades out
+        duration: 1.1,
+        ease:     "power2.in",   // accelerates toward viewer (feels like launching)
+        onComplete: () => {
+          // ② Recycle to back of DOM (card is already off-screen, so no visual glitch)
+          slider.prepend(front);
+          // ③ Load next notification into the recycled card
+          setCardContent(front, installEvents[tickerRef.current++ % installEvents.length]);
+          // ④ Instantly place far behind the viewer, invisible
+          gsap.set(front, { z: -300, opacity: 0 });
+          // ⑤ Re-stack all cards into their new positions
+          initCards();
+          // ⑥ Gently fade the new back card in (opacity stays 1, just reveal it)
+          gsap.to(front, { opacity: 1, duration: 0.6, delay: 0.2 });
+          setTimeout(() => { isAnimating.current = false; }, 1200);
+        },
+      });
+    };
+
+    // ── Seed initial card content ─────────────────────────────────────────────
+    Array.from(slider.querySelectorAll<HTMLElement>(".nc")).forEach((card, i) => {
+      setCardContent(card, installEvents[i % installEvents.length]);
+    });
+
+    // ── Initial stack layout ──────────────────────────────────────────────────
+    initCards();
+
+    // ── Auto-rotation ─────────────────────────────────────────────────────────
+    const interval = setInterval(rotateCards, 3200);
+    return () => clearInterval(interval);
   }, []);
 
-  const spring = { type: "spring" as const, stiffness: 420, damping: 28, mass: 0.75 };
-
   return (
-    // Fixed-size container — cards are absolutely positioned inside
-    <div
-      className="relative w-full max-w-xs select-none overflow-hidden"
-      style={{ height: CONTAINER_H }}
-    >
-      <AnimatePresence initial={false}>
-        {items.map((item, i) => (
-          <motion.div
-            key={item.id}
-            // Drive Y explicitly so every card springs to its correct slot on each render
-            initial={{ y: CONTAINER_H + CARD_GAP, opacity: 0, scale: 0.88, filter: "blur(8px)" }}
-            animate={{ y: i * SLOT,               opacity: 1, scale: 1,    filter: "blur(0px)" }}
-            exit={{    y: -(CARD_H + CARD_GAP),   opacity: 0, scale: 0.9,  filter: "blur(6px)" }}
-            transition={{
-              ...spring,
-              filter:  { duration: 0.22, ease: "easeOut" },
-              opacity: { duration: 0.25, ease: "easeOut" },
-            }}
-            className="absolute inset-x-0 flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-lg shadow-black/20 cursor-default"
-            style={{ top: 0, minHeight: CARD_H }}
+    // Outer wrapper: overflow-hidden + rounded so the growing card gets clipped
+    // at the edges — same pattern as Carousel.js outer container.
+    // The extra height gives the card room to grow before being clipped.
+    <div className="relative w-full max-w-xs select-none overflow-hidden rounded-2xl" style={{ height: 220 }}>
+      {/*
+        Slider: transformPerspective + transformStyle:preserve-3d applied by GSAP.
+        No overflow-hidden here — cards need to grow freely inside this space.
+      */}
+      <div
+        ref={sliderRef}
+        className="absolute inset-0 flex flex-col items-center justify-center"
+      >
+        {Array.from({ length: N_VISIBLE }).map((_, i) => (
+          <div
+            key={i}
+            className="nc absolute inset-x-4 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl shadow-black/30 cursor-default"
+            style={{ minHeight: 64 }}
           >
-            <span className="text-lg shrink-0">{item.flag}</span>
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{item.city}</p>
+            <span className="nc-flag text-lg shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="nc-city text-sm font-semibold truncate" />
               <p className="text-xs text-[var(--text-muted)]">started using OpenClaw Code</p>
             </div>
-            <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0">just now</span>
-          </motion.div>
+            <span className="ml-auto text-xs text-[var(--text-muted)] shrink-0 whitespace-nowrap pl-2">
+              just now
+            </span>
+          </div>
         ))}
-      </AnimatePresence>
+      </div>
     </div>
   );
+}
+
+// ── Cubic-bezier solver (needed for gsap.registerEase) ────────────────────────
+function bezier(p1x: number, p1y: number, p2x: number, p2y: number, progress: number): number {
+  const cx = 3 * p1x, bx = 3 * (p2x - p1x) - cx, ax = 1 - cx - bx;
+  const cy = 3 * p1y, by = 3 * (p2y - p1y) - cy, ay = 1 - cy - by;
+  const sampleX = (u: number) => ((ax * u + bx) * u + cx) * u;
+  const sampleY = (u: number) => ((ay * u + by) * u + cy) * u;
+  // Newton-Raphson: find u where sampleX(u) === progress, return sampleY(u)
+  let u = progress;
+  for (let i = 0; i < 8; i++) {
+    const s = sampleX(u) - progress;
+    if (Math.abs(s) < 1e-6) break;
+    u -= s / ((3 * ax * u * u + 2 * bx * u + cx) || 1e-6);
+  }
+  return sampleY(u);
 }
 
 export default function Home() {
