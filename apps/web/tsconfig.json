@@ -19,7 +19,10 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@occode/control-center": ["../../packages/control-center/src/ui.ts"],
+      "@occode/control-center/ui": ["../../packages/control-center/src/ui.ts"],
+      "@occode/control-center/data": ["../../packages/control-center/src/data.ts"]
     }
   },
   "include": [

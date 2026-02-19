@@ -1,5 +1,6 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, nativeImage } = require('electron');
 const path = require('path');
+const { getAssetPath } = require('./utils/assets');
 const {
   downloadVSCodium,
   findVSCodiumBinary,
@@ -13,10 +14,20 @@ const manifest = require('../vscodium-manifest.json');
 const VSCODIUM_VERSION = manifest.version;
 const OCCODE_DIR = path.join(require('os').homedir(), '.occode');
 const VSCODE_DIR = path.join(OCCODE_DIR, 'vscode');
+const ICON_PATH = getAssetPath('icon.png');
 const isLinux = process.platform === 'linux';
 const isHeadless = isLinux && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 
 let mainWindow;
+
+function applyAppIcon() {
+  if (process.platform === 'darwin' && app.dock) {
+    const image = nativeImage.createFromPath(ICON_PATH);
+    if (!image.isEmpty()) {
+      app.dock.setIcon(image);
+    }
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -24,6 +35,7 @@ function createWindow() {
     height: 380,
     title: APP_NAME,
     resizable: false,
+    icon: ICON_PATH,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -100,6 +112,7 @@ if (process.env.OCCODE_DISABLE_GPU === '1' || isHeadless) {
   app.commandLine.appendSwitch('disable-software-rasterizer');
 }
 app.whenReady().then(() => {
+  applyAppIcon();
   createWindow();
   bootstrap();
 });

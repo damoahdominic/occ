@@ -1,0 +1,32 @@
+{
+  "name": "@occode/control-center",
+  "version": "0.0.1",
+  "private": true,
+  "main": "dist/data.js",
+  "types": "ui.d.ts",
+  "exports": {
+    ".": {
+      "types": "./ui.d.ts",
+      "default": "./src/ui.ts"
+    },
+    "./ui": {
+      "types": "./ui.d.ts",
+      "default": "./src/ui.ts"
+    },
+    "./data": {
+      "types": "./data.d.ts",
+      "require": "./dist/data.js",
+      "default": "./src/data.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "*.d.ts",
+    "package.json"
+  ],
+  "peerDependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  }
+}
