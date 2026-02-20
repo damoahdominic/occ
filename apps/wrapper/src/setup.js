@@ -179,27 +179,48 @@ async function launchVSCodium(codiumBinary, occodeDir, vscodeDir) {
   };
 
   let child;
-  if (process.platform === 'darwin') {
-    const appBundle = findMacAppBundle(vscodeDir, codiumBinary);
-    if (appBundle) {
-      const openArgs = ['-n', '-a', appBundle, '--args', ...args];
-      child = spawn('open', openArgs, spawnOpts);
-      if (!debug) child.unref();
-      return;
+  try {
+    if (process.platform === 'darwin') {
+      const appBundle = findMacAppBundle(vscodeDir, codiumBinary);
+      if (appBundle) {
+        const openArgs = ['-n', '-a', appBundle, '--args', ...args];
+        console.log(`[OCcode] Spawning: open ${openArgs.join(' ')}`);
+        child = spawn('open', openArgs, spawnOpts);
+        if (!debug) child.unref();
+        return;
+      }
     }
-  }
-  if (isWin && codiumBinary.toLowerCase().endsWith('.cmd')) {
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    const quote = (s) => (/[ \t&(){}\^=;!'+,`~\[\]]/.test(s) ? `"${s}"` : s);
-    const cmdline = [quote(codiumBinary), ...args.map(quote)].join(' ');
-    child = spawn(comspec, ['/d', '/s', '/c', cmdline], {
-      ...spawnOpts,
-      windowsVerbatimArguments: true,
+    if (isWin && codiumBinary.toLowerCase().endsWith('.cmd')) {
+      const comspec = process.env.ComSpec || 'cmd.exe';
+      const quote = (s) => (/[ \t&(){}\^=;!'+,`~\[\]]/.test(s) ? `"${s}"` : s);
+      const cmdline = [quote(codiumBinary), ...args.map(quote)].join(' ');
+      console.log(`[OCcode] Spawning: ${comspec} /d /s /c ${cmdline}`);
+      console.log(`[OCcode] Working directory: ${binaryDir}`);
+      child = spawn(comspec, ['/d', '/s', '/c', cmdline], {
+        ...spawnOpts,
+        windowsVerbatimArguments: true,
+      });
+    } else {
+      console.log(`[OCcode] Spawning: ${codiumBinary} ${args.join(' ')}`);
+      console.log(`[OCcode] Working directory: ${binaryDir}`);
+      child = spawn(codiumBinary, args, spawnOpts);
+    }
+    
+    child.on('error', (err) => {
+      console.error(`[OCcode] Failed to spawn VSCodium: ${err.message}`);
     });
-  } else {
-    child = spawn(codiumBinary, args, spawnOpts);
+    
+    child.on('exit', (code) => {
+      if (code !== 0 && code !== null) {
+        console.error(`[OCcode] VSCodium exited with code ${code}`);
+      }
+    });
+    
+    if (!debug) child.unref();
+  } catch (err) {
+    console.error(`[OCcode] Error launching VSCodium: ${err.message}`);
+    throw err;
   }
-  if (!debug) child.unref();
 }
 
 module.exports = { installExtension, setDefaults, launchVSCodium };
