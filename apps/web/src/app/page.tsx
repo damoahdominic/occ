@@ -607,7 +607,7 @@ export default function Home() {
                     className={`group relative h-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 transition-all duration-300 hover:bg-[var(--bg-elevated)] ${isHero ? "flex flex-col justify-between" : ""}`}
                   >
                     <div>
-                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-20 h-20" : "w-16 h-16"}`}>{f.icon}</div>
+                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-12 h-12" : "w-8 h-8"}`}>{f.icon}</div>
                       <h3 className={`font-semibold mb-2 ${isHero ? "text-2xl" : "text-lg"}`}>{f.title}</h3>
                       <p className={`text-[var(--text-muted)] leading-relaxed ${isHero ? "text-base max-w-md" : "text-sm"}`}>{f.desc}</p>
                     </div>
