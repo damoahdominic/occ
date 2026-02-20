@@ -113,9 +113,28 @@ async function downloadVSCodium(version, destDir) {
     }
     console.log(`[OCcode] Extraction complete`);
     
-    // Log what was extracted
+    // Flatten: if archive created a single subdirectory, move contents up
     const extractedContents = fs.readdirSync(destDir);
     console.log(`[OCcode] Extracted contents: ${JSON.stringify(extractedContents)}`);
+    
+    if (extractedContents.length === 1) {
+      const singleItem = path.join(destDir, extractedContents[0]);
+      const stat = fs.statSync(singleItem);
+      if (stat.isDirectory()) {
+        console.log(`[OCcode] Flattening subdirectory: ${extractedContents[0]}`);
+        // Move all contents from subdirectory to destDir
+        const subContents = fs.readdirSync(singleItem);
+        for (const item of subContents) {
+          const src = path.join(singleItem, item);
+          const dest = path.join(destDir, item);
+          console.log(`[OCcode] Moving ${src} -> ${dest}`);
+          fs.renameSync(src, dest);
+        }
+        // Remove empty subdirectory
+        fs.rmdirSync(singleItem);
+        console.log(`[OCcode] Flatten complete`);
+      }
+    }
   } catch (err) {
     console.error(`[OCcode] Extraction failed: ${err.message}`);
     throw err;
@@ -127,23 +146,18 @@ async function downloadVSCodium(version, destDir) {
 }
 
 function getVSCodiumBinaryCandidates(vscodeDir) {
-  const p = getPlatformInfo();
   if (process.platform === 'win32') {
     return [
-      path.join(vscodeDir, p.dir, 'VSCodium.exe'),
       path.join(vscodeDir, 'VSCodium.exe'),
-      path.join(vscodeDir, p.dir, 'bin', 'codium.cmd'),
       path.join(vscodeDir, 'bin', 'codium.cmd'),
     ];
   }
   if (process.platform === 'darwin') {
     return [
       path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
-      path.join(vscodeDir, p.dir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
     ];
   }
   return [
-    path.join(vscodeDir, p.dir, 'bin', 'codium'),
     path.join(vscodeDir, 'bin', 'codium'),
   ];
 }

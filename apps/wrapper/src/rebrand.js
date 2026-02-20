@@ -38,11 +38,11 @@ async function rebrandVSCodium(vscodeDir) {
 // ── Windows ──────────────────────────────────────────────────────────────────
 
 async function rebrandWindows(vscodeDir) {
-  const root = path.join(vscodeDir, 'VSCodium-win32-x64');
-  const dir = fs.existsSync(root) ? root
-    : findSubdir(vscodeDir, 'win32')
-    || (fs.existsSync(path.join(vscodeDir, 'codium.exe')) ? vscodeDir : null);
-  if (!dir) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
+  // After flattening, files should be directly in vscodeDir
+  const dir = fs.existsSync(path.join(vscodeDir, 'VSCodium.exe')) 
+    ? vscodeDir
+    : path.join(vscodeDir, 'VSCodium-win32-x64');
+  if (!fs.existsSync(dir)) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
 
   // 1. Replace code.ico for file associations
   const codeIco = path.join(dir, 'resources', 'app', 'resources', 'win32', 'code.ico');
