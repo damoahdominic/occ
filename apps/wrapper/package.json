@@ -1,6 +1,6 @@
 {
   "name": "occode-wrapper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OCcode Electron wrapper — downloads and launches portable VSCodium",
   "author": {
     "name": "OCcode Contributors",

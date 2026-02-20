@@ -63,15 +63,17 @@ jobs:
         working-directory: apps/wrapper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Show dist output
+        shell: bash
+        run: |
+          echo "=== dist tree ==="
+          ls -la apps/wrapper/dist || true
+          find apps/wrapper/dist -maxdepth 3 -type f
       - uses: actions/upload-artifact@v4
         with:
           name: occode-${{ matrix.platform }}
-          path: |
-            apps/wrapper/dist/*.exe
-            apps/wrapper/dist/*.dmg
-            apps/wrapper/dist/*.AppImage
-            apps/wrapper/dist/*.deb
-            apps/wrapper/dist/*.zip
+          path: apps/wrapper/dist/**
+          if-no-files-found: error
 
   release:
     needs: [build-extension, build-wrapper]
@@ -89,14 +91,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           draft: false
           files: |
-            artifacts/**/*.exe
-            artifacts/**/*.dmg
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
-            artifacts/**/*.zip
-            artifacts/**/*.vsix
+            artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
