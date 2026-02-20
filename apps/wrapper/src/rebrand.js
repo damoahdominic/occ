@@ -1,4 +1,4 @@
-/**
+/*
  * rebrand.js – Replace VSCodium icons and product names with OCcode branding.
  *
  * All operations are non-fatal: failures are logged but never throw.
