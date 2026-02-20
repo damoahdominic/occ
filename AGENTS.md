@@ -84,6 +84,10 @@ Build **OCcode**, a branded, cross‑platform app (Windows/Mac/Linux) that ships
 - **Extension:** VS Code API + Webviews
 - **UI Constraint:** Keep Configure UI inline in a single `.ts`/`.tsx` file (no imported JS bundles for the panel).
 - **Bundled Editor:** VS Code ZIP or VSCodium portable
+- **OS-Specific CLI Execution:**
+  - **Windows:** Bypass npm `.cmd` shims by finding `node.exe` directly and executing `node.exe openclaw.mjs <args>` via `spawn` with `shell: true`
+  - **Linux/Mac:** Use `execFile` with the found CLI path (standard execution)
+  - **Why:** Windows npm shims cause quoting/escaping issues and timeouts in the VS Code: extension host; direct Node execution is more reliable
 - **Version Pinning:**
   - Wrapper downloads a **pinned VS Code/VSCodium version** (not latest).
   - Update only when we explicitly bump the version.

@@ -107,23 +107,33 @@ export class StatusPanel {
   }
 
   private async _runGateway(action: string) {
-    const terminal = this._ensureGatewayTerminal();
-    terminal.show();
-    if (action === 'restart') {
-      const startCmd = 'openclaw gateway';
-      terminal.sendText('\u0003', false);
-      await new Promise(r => setTimeout(r, 1500));
-      terminal.sendText(startCmd, true);
-      vscode.window.showInformationMessage(`Sent: Ctrl+C then ${startCmd}`);
-    } else {
-      if (action === 'start') {
-        const cmd = 'openclaw gateway';
-        terminal.sendText(cmd, true);
-        vscode.window.showInformationMessage(`Sent: ${cmd}`);
-      } else {
+    if (process.platform === 'win32') {
+      // Windows: Use terminal-based approach with openclaw gateway and Ctrl+C
+      const terminal = this._ensureGatewayTerminal();
+      terminal.show();
+      if (action === 'restart') {
+        const startCmd = 'openclaw gateway';
         terminal.sendText('\u0003', false);
-        vscode.window.showInformationMessage('Sent: Ctrl+C');
+        await new Promise(r => setTimeout(r, 1500));
+        terminal.sendText(startCmd, true);
+        vscode.window.showInformationMessage(`Sent: Ctrl+C then ${startCmd}`);
+      } else {
+        if (action === 'start') {
+          const cmd = 'openclaw gateway';
+          terminal.sendText(cmd, true);
+          vscode.window.showInformationMessage(`Sent: ${cmd}`);
+        } else {
+          terminal.sendText('\u0003', false);
+          vscode.window.showInformationMessage('Sent: Ctrl+C');
+        }
       }
+    } else {
+      // Linux/Mac: Use CLI commands (openclaw gateway start/stop/restart)
+      const cmd = `openclaw gateway ${action}`;
+      const terminal = this._ensureGatewayTerminal();
+      terminal.show();
+      terminal.sendText(cmd, true);
+      vscode.window.showInformationMessage(`Sent: ${cmd}`);
     }
     await this._update();
     await this._pollStatus(20000, 2000);
