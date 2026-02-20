@@ -112,6 +112,7 @@ jobs:
         run: npm ci
         working-directory: apps/wrapper
       - name: Build Electron app
+        shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "mac" ]; then
             npm run build:mac:${{ matrix.arch }}
