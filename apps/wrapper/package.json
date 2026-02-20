@@ -40,11 +40,6 @@
         "filter": ["**/*.vsix"]
       },
       {
-        "from": "assets/",
-        "to": "assets",
-        "filter": ["**/*"]
-      },
-      {
         "from": "assets/vscodium/",
         "to": "assets/vscodium",
         "filter": ["**/*"]
