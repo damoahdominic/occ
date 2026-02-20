@@ -41,7 +41,7 @@ jobs:
           - os: macos-latest
             platform: mac
             arch: arm64
-          - os: macos-13
+          - os: macos-12
             platform: mac
             arch: x64
           - os: windows-latest
@@ -70,26 +70,33 @@ jobs:
           PLATFORM="${{ matrix.platform }}"
           ARCH="${{ matrix.arch }}"
           
-          if [ "$PLATFORM" = "win" ]; then
-            ARCH="x64"
-            FILE="VSCodium-win32-${ARCH}-${VERSION}.zip"
-          elif [ "$PLATFORM" = "mac" ]; then
-            FILE="VSCodium-darwin-${ARCH}-${VERSION}.zip"
-          else
-            ARCH="x64"
-            FILE="VSCodium-linux-${ARCH}-${VERSION}.tar.gz"
-          fi
+          echo "Debug: PLATFORM=$PLATFORM, ARCH=$ARCH"
+          
+          # Determine file based on platform
+          case "$PLATFORM" in
+            win)
+              FILE="VSCodium-win32-${ARCH}-${VERSION}.zip"
+              CHECKSUM_KEY="win32-${ARCH}"
+              ;;
+            mac)
+              FILE="VSCodium-darwin-${ARCH}-${VERSION}.zip"
+              CHECKSUM_KEY="darwin-${ARCH}"
+              ;;
+            linux)
+              FILE="VSCodium-linux-${ARCH}-${VERSION}.tar.gz"
+              CHECKSUM_KEY="linux-${ARCH}"
+              ;;
+            *)
+              echo "Unknown platform: $PLATFORM"
+              exit 1
+              ;;
+          esac
           
           URL="https://github.com/VSCodium/vscodium/releases/download/${VERSION}/${FILE}"
           echo "Downloading VSCodium from: $URL"
           curl -L -o "apps/wrapper/assets/vscodium/${FILE}" "$URL"
           
-          echo "Verifying checksum..."
-          CHECKSUM_KEY="${PLATFORM}-${ARCH}"
-          if [ "$PLATFORM" = "win" ]; then CHECKSUM_KEY="win32-${ARCH}"; fi
-          if [ "$PLATFORM" = "mac" ]; then CHECKSUM_KEY="darwin-${ARCH}"; fi
-          if [ "$PLATFORM" = "linux" ]; then CHECKSUM_KEY="linux-${ARCH}"; fi
-          
+          echo "Verifying checksum for key: $CHECKSUM_KEY"
           EXPECTED=$(jq -r ".sha256[\"${CHECKSUM_KEY}\"]" apps/wrapper/vscodium-manifest.json)
           ACTUAL=$(sha256sum "apps/wrapper/assets/vscodium/${FILE}" | cut -d' ' -f1)
           
