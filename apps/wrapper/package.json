@@ -30,6 +30,7 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "!assets/vscodium/**/*",
       "vscodium-manifest.json"
     ],
     "extraResources": [
