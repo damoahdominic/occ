@@ -17,6 +17,8 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
+    "build:mac:x64": "electron-builder --mac --x64",
+    "build:mac:arm64": "electron-builder --mac --arm64",
     "build:linux": "electron-builder --linux",
     "download:vscodium": "node scripts/download-vscodium.js"
   },
@@ -50,7 +52,10 @@
       "icon": "assets/icon.ico"
     },
     "mac": {
-      "target": [{"target": "dmg", "arch": ["arm64", "x64"]}],
+      "target": [
+        {"target": "dmg", "arch": ["x64"]},
+        {"target": "dmg", "arch": ["arm64"]}
+      ],
       "icon": "assets/icon.png",
       "category": "public.app-category.developer-tools"
     },
