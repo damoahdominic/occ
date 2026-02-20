@@ -1,6 +1,6 @@
 {
   "name": "occode",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "private": true,
   "description": "OCcode — branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [
@@ -19,10 +19,7 @@
     "vscodium:update": "node ./scripts/update-vscodium.mjs"
   },
   "dependencies": {
-    "@studio-freight/react-lenis": "^0.0.47",
     "cobe": "^0.6.5",
-    "framer-motion": "^12.34.2",
-    "gsap": "^3.14.2",
-    "lucide-react": "^0.574.0"
+    "framer-motion": "^12.34.2"
   }
 }

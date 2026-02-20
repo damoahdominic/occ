@@ -35,6 +35,21 @@ function buildDownloadUrl(version) {
   return `https://github.com/VSCodium/vscodium/releases/download/${version}/${filename}`;
 }
 
+function getBundledArchivePath(version) {
+  const p = getPlatformInfo();
+  const filename = `VSCodium-${p.os}-${p.arch}-${version}.${p.ext}`;
+  const candidates = [
+    // Packaged app resources
+    process.resourcesPath ? path.join(process.resourcesPath, 'assets', 'vscodium', filename) : '',
+    // Dev/working tree
+    path.join(__dirname, '..', 'assets', 'vscodium', filename),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function downloadFile(url, dest) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
@@ -58,9 +73,15 @@ async function downloadVSCodium(version, destDir) {
   fs.mkdirSync(destDir, { recursive: true });
   const url = buildDownloadUrl(version);
   const p = getPlatformInfo();
-  const archivePath = path.join(os.tmpdir(), `vscodium.${p.ext}`);
+  const bundled = getBundledArchivePath(version);
+  const archivePath = bundled || path.join(os.tmpdir(), `vscodium.${p.ext}`);
+  const downloaded = !bundled;
 
-  await downloadFile(url, archivePath);
+  if (bundled) {
+    console.log(`[OCcode] Using bundled VSCodium archive: ${bundled}`);
+  } else {
+    await downloadFile(url, archivePath);
+  }
 
   const checksumKey = getChecksumKey(p);
   const expectedHash = (manifest.sha256 || {})[checksumKey];
@@ -82,7 +103,9 @@ async function downloadVSCodium(version, destDir) {
     execSync(`tar -xzf "${archivePath}" -C "${destDir}"`);
   }
 
-  fs.unlinkSync(archivePath);
+  if (downloaded) {
+    fs.unlinkSync(archivePath);
+  }
 }
 
 function getVSCodiumBinaryCandidates(vscodeDir) {

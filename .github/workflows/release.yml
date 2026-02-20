@@ -63,15 +63,17 @@ jobs:
         working-directory: apps/wrapper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Show dist output
+        shell: bash
+        run: |
+          echo "=== dist tree ==="
+          ls -la apps/wrapper/dist || true
+          find apps/wrapper/dist -maxdepth 3 -type f
       - uses: actions/upload-artifact@v4
         with:
           name: occode-${{ matrix.platform }}
-          path: |
-            apps/wrapper/dist/*.exe
-            apps/wrapper/dist/*.dmg
-            apps/wrapper/dist/*.AppImage
-            apps/wrapper/dist/*.deb
-            apps/wrapper/dist/*.zip
+          path: apps/wrapper/dist/**
+          if-no-files-found: error
 
   release:
     needs: [build-extension, build-wrapper]
@@ -85,18 +87,31 @@ jobs:
 
       - name: List artifacts
         run: find artifacts -type f | head -30
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # DMG (arm64, x64, universal)
+          while IFS= read -r -d '' f; do cp -n "$f" release/; done < <(find artifacts -type f -name "OCcode-*.dmg" -print0)
+          # AppImage
+          while IFS= read -r -d '' f; do cp -n "$f" release/; done < <(find artifacts -type f -name "OCcode-*.AppImage" -print0)
+          # Debian package
+          while IFS= read -r -d '' f; do cp -n "$f" release/; done < <(find artifacts -type f -name "occode-wrapper_*_amd64.deb" -print0)
+          # Windows installers/portable (exclude unpacked app)
+          while IFS= read -r -d '' f; do cp -n "$f" release/; done < <(find artifacts -type f -name "OCcode*.exe" ! -path "*unpacked*" -print0)
+          # VSIX
+          while IFS= read -r -d '' f; do cp -n "$f" release/; done < <(find artifacts -type f -name "openclaw-vscode-*.vsix" -print0)
+          echo "=== release assets ==="
+          ls -la release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           draft: false
           files: |
-            artifacts/**/*.exe
-            artifacts/**/*.dmg
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
-            artifacts/**/*.zip
-            artifacts/**/*.vsix
+            release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

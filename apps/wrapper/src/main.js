@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, nativeImage } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { getAssetPath } = require('./utils/assets');
 const {
   downloadVSCodium,
@@ -42,6 +43,12 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, 'splash.html'));
+  mainWindow.webContents.once('did-finish-load', () => {
+    const logoUrl = pathToFileURL(ICON_PATH).toString();
+    mainWindow.webContents.executeJavaScript(
+      `const img = document.getElementById('logo-img'); if (img) { img.src = ${JSON.stringify(logoUrl)}; }`
+    );
+  });
   mainWindow.setMenuBarVisibility(false);
 }
 
@@ -90,7 +97,7 @@ async function bootstrap() {
     await setDefaults(OCCODE_DIR);
 
     sendStatus('Launching editor…');
-    await launchVSCodium(binary, OCCODE_DIR);
+    await launchVSCodium(binary, OCCODE_DIR, VSCODE_DIR);
 
     // Close wrapper after launching editor
     setTimeout(() => app.quit(), 2000);
