@@ -168,10 +168,14 @@ async function launchVSCodium(codiumBinary, occodeDir, vscodeDir) {
     LIBGL_ALWAYS_SOFTWARE: disableGpu ? '1' : process.env.LIBGL_ALWAYS_SOFTWARE,
   };
 
+  // Get the binary directory for cwd - needed for ICU data loading
+  const binaryDir = path.dirname(codiumBinary);
+
   const spawnOpts = {
     detached: !debug,
     stdio: debug ? 'inherit' : 'ignore',
     env: spawnEnv,
+    cwd: binaryDir,
   };
 
   let child;
