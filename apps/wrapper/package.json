@@ -17,7 +17,10 @@
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "build:mac:x64": "electron-builder --mac --x64",
+    "build:mac:arm64": "electron-builder --mac --arm64",
+    "build:linux": "electron-builder --linux",
+    "download:vscodium": "node scripts/download-vscodium.js"
   },
   "build": {
     "appId": "com.openclaw.occode",
@@ -29,43 +32,69 @@
     "files": [
       "src/**/*",
       "assets/**/*",
+      "!assets/vscodium/**/*",
       "vscodium-manifest.json"
     ],
     "extraResources": [
       {
         "from": "extensions/",
         "to": "extensions/",
-        "filter": ["**/*.vsix"]
+        "filter": [
+          "**/*.vsix"
+        ]
       },
       {
-        "from": "assets/",
-        "to": "assets",
-        "filter": ["**/*"]
+        "from": "assets/vscodium/",
+        "to": "assets/vscodium",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "icon": "assets/icon.png",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png",
       "category": "Development"
     }
   },
   "dependencies": {
-    "electron-log": "^5.0.0"
+    "electron-log": "^5.0.0",
+    "sql.js": "^1.14.0"
   },
   "optionalDependencies": {
     "@electron/rcedit": "^4.0.0"
   },
   "devDependencies": {
     "electron": "^30.0.0",
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "rcedit": "^5.0.2"
   }
 }

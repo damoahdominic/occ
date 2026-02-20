@@ -8,7 +8,7 @@ const {
   getVSCodiumBinary,
   getPlatformInfo,
 } = require('./download');
-const { installExtension, setDefaults, launchVSCodium } = require('./setup');
+const { installExtension, setDefaults, patchActivityBarState, launchVSCodium } = require('./setup');
 
 const APP_NAME = 'OCcode';
 const manifest = require('../vscodium-manifest.json');
@@ -95,6 +95,7 @@ async function bootstrap() {
 
     sendStatus('Setting defaults…');
     await setDefaults(OCCODE_DIR);
+    await patchActivityBarState(OCCODE_DIR);
 
     sendStatus('Launching editor…');
     await launchVSCodium(binary, OCCODE_DIR, VSCODE_DIR);
