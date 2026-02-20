@@ -82,6 +82,7 @@ Build **OCcode**, a branded, cross‑platform app (Windows/Mac/Linux) that ships
 ## Technical Decisions
 - **Wrapper:** Electron + Node.js
 - **Extension:** VS Code API + Webviews
+- **UI Constraint:** Keep Configure UI inline in a single `.ts`/`.tsx` file (no imported JS bundles for the panel).
 - **Bundled Editor:** VS Code ZIP or VSCodium portable
 - **Version Pinning:**
   - Wrapper downloads a **pinned VS Code/VSCodium version** (not latest).

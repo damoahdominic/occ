@@ -19,8 +19,7 @@
     "onCommand:openclaw.home",
     "onCommand:openclaw.configure",
     "onCommand:openclaw.install",
-    "onCommand:openclaw.status",
-    "*"
+    "onCommand:openclaw.status"
   ],
   "main": "./out/extension.js",
   "contributes": {
