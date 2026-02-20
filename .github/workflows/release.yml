@@ -95,6 +95,11 @@ jobs:
           generate_release_notes: true
           draft: false
           files: |
-            artifacts/**/*
+            artifacts/**/OCcode-*.dmg
+            artifacts/**/OCcode-*.AppImage
+            artifacts/**/occode-wrapper_*_amd64.deb
+            artifacts/**/OCcode.*.exe
+            artifacts/**/OCcode.Setup.*.exe
+            artifacts/**/openclaw-vscode-*.vsix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
