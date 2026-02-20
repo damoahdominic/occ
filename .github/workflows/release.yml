@@ -55,6 +55,49 @@ jobs:
       - name: Verify VSIX bundled
         shell: bash
         run: ls -la apps/wrapper/extensions/*.vsix
+      - name: Download VSCodium for current platform
+        shell: bash
+        run: |
+          set -e
+          mkdir -p apps/wrapper/assets/vscodium
+          VERSION=$(jq -r '.version' apps/wrapper/vscodium-manifest.json)
+          PLATFORM="${{ matrix.platform }}"
+          
+          if [ "$PLATFORM" = "win" ]; then
+            ARCH="x64"
+            FILE="VSCodium-win32-${ARCH}-${VERSION}.zip"
+          elif [ "$PLATFORM" = "mac" ]; then
+            ARCH="arm64"
+            FILE="VSCodium-darwin-${ARCH}-${VERSION}.zip"
+          else
+            ARCH="x64"
+            FILE="VSCodium-linux-${ARCH}-${VERSION}.tar.gz"
+          fi
+          
+          URL="https://github.com/VSCodium/vscodium/releases/download/${VERSION}/${FILE}"
+          echo "Downloading VSCodium from: $URL"
+          curl -L -o "apps/wrapper/assets/vscodium/${FILE}" "$URL"
+          
+          echo "Verifying checksum..."
+          CHECKSUM_KEY="${PLATFORM}-${ARCH}"
+          if [ "$PLATFORM" = "win" ]; then CHECKSUM_KEY="win32-${ARCH}"; fi
+          if [ "$PLATFORM" = "mac" ]; then CHECKSUM_KEY="darwin-${ARCH}"; fi
+          if [ "$PLATFORM" = "linux" ]; then CHECKSUM_KEY="linux-${ARCH}"; fi
+          
+          EXPECTED=$(jq -r ".sha256[\"${CHECKSUM_KEY}\"]" apps/wrapper/vscodium-manifest.json)
+          ACTUAL=$(sha256sum "apps/wrapper/assets/vscodium/${FILE}" | cut -d' ' -f1)
+          
+          if [ "$EXPECTED" != "null" ] && [ "$EXPECTED" != "" ]; then
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "Checksum mismatch! Expected: $EXPECTED, Got: $ACTUAL"
+              exit 1
+            fi
+            echo "Checksum verified: $EXPECTED"
+          else
+            echo "Warning: No checksum found for $CHECKSUM_KEY"
+          fi
+          
+          ls -la apps/wrapper/assets/vscodium/
       - name: Install dependencies
         run: npm ci
         working-directory: apps/wrapper
