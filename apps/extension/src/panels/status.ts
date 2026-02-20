@@ -327,10 +327,33 @@ export class StatusPanel {
     });
   }
 
-  private async _runOpenClaw(args: string[], timeoutMs: number = 30000): Promise<{ result: RunResult; command: string; cliPath?: string }> {
+  private async _runOpenClaw(
+    args: string[],
+    timeoutMs: number = 30000
+  ): Promise<{ result: RunResult; command: string; cliPath?: string }> {
+    if (process.platform !== 'win32') {
+      const cliPath = await this._findOpenClawPath();
+      if (!cliPath) {
+        return {
+          result: {
+            stdout: '',
+            stderr: '',
+            error: 'openclaw not found',
+            notFound: true,
+          },
+          command: `openclaw ${args.join(' ')}`,
+        };
+      }
+      const result = await this._execFile(cliPath, args, timeoutMs);
+      return { result, command: `${cliPath} ${args.join(' ')}`, cliPath };
+    }
+
     const mjs = path.join(
       process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
+      'npm',
+      'node_modules',
+      'openclaw',
+      'openclaw.mjs'
     );
 
     // Find node.exe
@@ -341,9 +364,9 @@ export class StatusPanel {
       'C:\\Program Files (x86)\\nodejs\\node.exe',
       process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
     ].filter(Boolean) as string[];
-    
+
     nodeExe = candidates.find(p => fs.existsSync(p));
-    
+
     if (!nodeExe) {
       try {
         const result = cp.execSync('where node.exe', { timeout: 3000, encoding: 'utf8', windowsHide: true });
@@ -353,44 +376,45 @@ export class StatusPanel {
     }
 
     if (!nodeExe || !fs.existsSync(mjs)) {
-      return { 
-        result: { 
-          stdout: '', 
-          stderr: '', 
+      const cliPath = await this._findOpenClawPath();
+      if (cliPath) {
+        const result = await this._execFile(cliPath, args, timeoutMs);
+        return { result, command: `${cliPath} ${args.join(' ')}`, cliPath };
+      }
+      return {
+        result: {
+          stdout: '',
+          stderr: '',
           error: 'node.exe or openclaw.mjs not found',
-          exitCode: -1 
-        }, 
-        command: 'openclaw ' + args.join(' ') 
+          exitCode: -1,
+          notFound: true,
+        },
+        command: 'openclaw ' + args.join(' '),
       };
     }
 
     const display = `node "${mjs}" ${args.join(' ')}`;
     const cmdLine = `node "${mjs}" ${args.join(' ')}`;
-    
-    // Use shell execution which may work better for complex CLI commands
+
     const result = await new Promise<RunResult>((resolve) => {
-      const child = cp.spawn(
-        cmdLine,
-        [],
-        {
-          timeout: timeoutMs,
-          windowsHide: true,
-          shell: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: process.env
-        }
-      );
-      
+      const child = cp.spawn(cmdLine, [], {
+        timeout: timeoutMs,
+        windowsHide: true,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+      });
+
       let stdout = '';
       let stderr = '';
-      
-      child.stdout?.on('data', data => stdout += data);
-      child.stderr?.on('data', data => stderr += data);
-      
+
+      child.stdout?.on('data', data => (stdout += data));
+      child.stderr?.on('data', data => (stderr += data));
+
       const timer = setTimeout(() => {
         child.kill('SIGTERM');
       }, timeoutMs);
-      
+
       child.on('close', (code, signal) => {
         clearTimeout(timer);
         if (signal === 'SIGTERM' || code === null) {
@@ -401,13 +425,13 @@ export class StatusPanel {
           resolve({ stdout, stderr, exitCode: 0 });
         }
       });
-      
+
       child.on('error', err => {
         clearTimeout(timer);
         resolve({ error: err.message, stdout, stderr, exitCode: undefined });
       });
     });
-    
+
     return { result, command: display, cliPath: mjs };
   }
 
