@@ -116,7 +116,7 @@ export function ScreenshotShowcase() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`relative px-4 py-1.5 rounded-full text-sm font-medium transition-colors duration-200 cursor-pointer ${
+              className={`relative px-4 py-1.5 rounded-full text-xs md:text-sm font-medium transition-colors duration-200 cursor-pointer ${
                 isActive
                   ? "text-white"
                   : "text-[var(--text-muted)] hover:text-white"
