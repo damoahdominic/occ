@@ -19,6 +19,7 @@ import {
   MobileNavMenu,
 } from "@/components/ui/resizable-navbar";
 import { NoiseBackground } from "@/components/ui/noise-background";
+import { ScreenshotShowcase } from "@/components/ui/screenshot-showcase";
 
 type Platform = "windows" | "macos" | "linux";
 
@@ -154,29 +155,17 @@ const installEvents = [
   { city: "Amsterdam", flag: "🇳🇱", lat: 52.3676, lng: 4.9041 },
 ];
 
-// ─── 3-D card-stack notification feed (GSAP — mirrors Carousel.js technique) ──
-const N_VISIBLE = 5;
+// ─── Apple-style notification stack (3 cards, horizontal fling exit) ──────────
+const N_VISIBLE = 3;
 
 function NotificationFeed() {
-  const sliderRef    = useRef<HTMLDivElement>(null);
-  const isAnimating  = useRef(false);
-  const tickerRef    = useRef(N_VISIBLE); // next installEvents index to load
+  const sliderRef   = useRef<HTMLDivElement>(null);
+  const isAnimating = useRef(false);
+  const tickerRef   = useRef(N_VISIBLE);
 
   useEffect(() => {
-    // Non-null assertion: useEffect only runs after mount, ref is always set by then
     const slider = sliderRef.current!;
 
-    // ── Register the same custom ease as Carousel.js ──────────────────────────
-    gsap.registerEase("cubic", (t: number) => bezier(0.83, 0, 0.17, 1, t));
-
-    // ── Set up 3-D context on the slider — same as Carousel.js ───────────────
-    gsap.set(slider, { transformPerspective: 800, transformStyle: "preserve-3d" });
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Helpers — declared before use (mirrors Carousel.js structure)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /** Update city + flag text inside a card element. */
     const setCardContent = (card: HTMLElement, ev: (typeof installEvents)[0]) => {
       const flag = card.querySelector<HTMLElement>(".nc-flag");
       const city = card.querySelector<HTMLElement>(".nc-city");
@@ -184,102 +173,67 @@ function NotificationFeed() {
       if (city) city.textContent = ev.city;
     };
 
-    /**
-     * Position ALL cards in the stack.
-     * DOM order: cards[0] = back (furthest), cards[N-1] = front (closest).
-     * Mirrors initializeCards() in Carousel.js.
-     */
+    // Stack: cards anchor to bottom. front (i=n-1) sits at y=0, back cards
+    // peek upward with negative translateY and are slightly scaled down.
     const initCards = () => {
       const cs = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
       const n  = cs.length;
       gsap.to(cs, {
-        y:        (i) => `${36 - 32 * i}%`,        // front (i=n-1) sits highest (top), back lowest
-        z:        (i) => 20 * i,                    // real translateZ depth
-        scale:    (i) => 1 - 0.055 * (n - 1 - i),  // back ≈ 0.78, front = 1
-        opacity:  1,                                  // always fully opaque — solid bg
-        // combine blur (depth haze) + brightness (depth dimming) in one filter
-        // front: blur(0) brightness(1) → back: blur(1.2px) brightness(0.55)
-        filter:   (i) => `blur(${(n - 1 - i) * 0.3}px) brightness(${1 - (n - 1 - i) * 0.09})`,
-        duration: 1.0,
-        ease:     "cubic",
-        stagger:  -0.06,
+        y:        (i) => (n - 1 - i) * -11,         // front=0px, mid=-11px, back=-22px
+        scale:    (i) => 1 - (n - 1 - i) * 0.06,    // front=1, mid=0.94, back=0.88
+        duration: 0.5,
+        ease:     "power3.out",
         overwrite: "auto",
       });
     };
 
-    /**
-     * Rotate the stack: front card exits on Z, moves to back, new content loaded.
-     * Mirrors rotateCards() in Carousel.js.
-     */
     const rotateCards = () => {
       if (isAnimating.current) return;
       isAnimating.current = true;
 
       const cs    = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
-      const front = cs[cs.length - 1]; // last in DOM = highest z = front card
+      const front = cs[cs.length - 1];
 
-      // ① Front card blasts toward the viewer until it exits the scene.
-      //
-      //   perspective: 800  →  apparent scale = 800 / (800 - z)
-      //   z = 0   → scale 1.0   (normal)
-      //   z = 400 → scale 2.0   (fills container)
-      //   z = 600 → scale 4.0   (clearly exits — card is 4× its original size)
-      //   z = 700 → scale 8.0   (well past any container edge)
-      //
-      //   opacity stays 1 the whole time — it's a physical launch, not a fade.
-      //   The card naturally disappears when it grows past the container's
-      //   overflow-hidden boundary, THEN onComplete teleports it to the back.
+      // Fling front card off to the right — accelerates like a physical throw
       gsap.to(front, {
-        z:        "+=680",  // exits the scene at ~4-8× scale
-        opacity:  1,        // stays opaque — it moves OUT, not fades out
-        duration: 1.1,
-        ease:     "power2.in",   // accelerates toward viewer (feels like launching)
+        x:        "110%",
+        opacity:  0,
+        duration: 0.44,
+        ease:     "power2.in",
         onComplete: () => {
-          // ② Recycle to back of DOM (card is already off-screen, so no visual glitch)
+          // Recycle: move to back of DOM, load next city
           slider.prepend(front);
-          // ③ Load next notification into the recycled card
           setCardContent(front, installEvents[tickerRef.current++ % installEvents.length]);
-          // ④ Instantly place far behind the viewer, invisible
-          gsap.set(front, { z: -300, opacity: 0 });
-          // ⑤ Re-stack all cards into their new positions
+          // Place new back card slightly above the stack, invisible
+          gsap.set(front, { x: 0, y: -32, opacity: 0, scale: 0.82 });
+          // Restack all cards smoothly
           initCards();
-          // ⑥ Gently fade the new back card in (opacity stays 1, just reveal it)
-          gsap.to(front, { opacity: 1, duration: 0.6, delay: 0.2 });
-          setTimeout(() => { isAnimating.current = false; }, 1200);
+          // Fade the new back card in after the others have settled
+          gsap.to(front, { opacity: 1, duration: 0.45, delay: 0.12, ease: "power2.out" });
+          setTimeout(() => { isAnimating.current = false; }, 900);
         },
       });
     };
 
-    // ── Seed initial card content ─────────────────────────────────────────────
+    // Seed content and lay out initial stack
     Array.from(slider.querySelectorAll<HTMLElement>(".nc")).forEach((card, i) => {
       setCardContent(card, installEvents[i % installEvents.length]);
     });
-
-    // ── Initial stack layout ──────────────────────────────────────────────────
+    gsap.set(slider.querySelectorAll<HTMLElement>(".nc"), { opacity: 1 });
     initCards();
 
-    // ── Auto-rotation ─────────────────────────────────────────────────────────
     const interval = setInterval(rotateCards, 3200);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    // Outer wrapper: overflow-hidden + rounded so the growing card gets clipped
-    // at the edges — same pattern as Carousel.js outer container.
-    // The extra height gives the card room to grow before being clipped.
-    <div className="relative w-full max-w-xs select-none overflow-hidden rounded-2xl" style={{ height: 220 }}>
-      {/*
-        Slider: transformPerspective + transformStyle:preserve-3d applied by GSAP.
-        No overflow-hidden here — cards need to grow freely inside this space.
-      */}
-      <div
-        ref={sliderRef}
-        className="absolute inset-0 flex flex-col items-center justify-center"
-      >
+    // overflow-hidden clips the card as it flings right; height fits 3 stacked cards
+    <div className="relative w-full max-w-sm select-none overflow-hidden" style={{ height: 100 }}>
+      <div ref={sliderRef} className="absolute inset-0">
         {Array.from({ length: N_VISIBLE }).map((_, i) => (
           <div
             key={i}
-            className="nc absolute inset-x-4 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl shadow-black/30 cursor-default"
+            className="nc absolute inset-x-0 bottom-0 flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-xl shadow-black/30 cursor-default"
             style={{ minHeight: 64 }}
           >
             <span className="nc-flag text-lg shrink-0" />
@@ -653,7 +607,7 @@ export default function Home() {
                     className={`group relative h-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 transition-all duration-300 hover:bg-[var(--bg-elevated)] ${isHero ? "flex flex-col justify-between" : ""}`}
                   >
                     <div>
-                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-12 h-12" : "w-8 h-8"}`}>{f.icon}</div>
+                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-20 h-20" : "w-16 h-16"}`}>{f.icon}</div>
                       <h3 className={`font-semibold mb-2 ${isHero ? "text-2xl" : "text-lg"}`}>{f.title}</h3>
                       <p className={`text-[var(--text-muted)] leading-relaxed ${isHero ? "text-base max-w-md" : "text-sm"}`}>{f.desc}</p>
                     </div>
@@ -662,6 +616,15 @@ export default function Home() {
               );
             })}
           </div>
+        </section>
+
+        {/* Screenshots */}
+        <section className="px-6 py-24 max-w-6xl mx-auto">
+          <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">See it in action</h2>
+          <p className="text-[var(--text-muted)] text-center mb-16 max-w-xl mx-auto">
+            A complete development environment built for AI — from first open to full workflow.
+          </p>
+          <ScreenshotShowcase />
         </section>
 
         {/* Global community */}
@@ -674,7 +637,7 @@ export default function Home() {
               People everywhere are getting started with AI through OpenClaw Code.
             </p>
 
-            <div className="relative flex flex-col lg:flex-row items-center justify-center gap-10">
+            <div className="relative flex flex-col items-center justify-center gap-10">
               {/* Globe */}
               <div ref={globeContainerRef} className="relative aspect-square w-[400px] sm:w-[580px] lg:w-[720px] shrink-0">
                 <div className="absolute inset-0 bg-[var(--accent)]/[0.06] rounded-full blur-3xl pointer-events-none" />
