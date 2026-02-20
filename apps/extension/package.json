@@ -2,7 +2,7 @@
   "name": "openclaw-vscode",
   "displayName": "OpenClaw",
   "description": "OpenClaw home screen, install wizard, configuration, and status panel for VS Code",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "publisher": "openclaw",
   "repository": {
     "type": "git",
@@ -19,8 +19,7 @@
     "onCommand:openclaw.home",
     "onCommand:openclaw.configure",
     "onCommand:openclaw.install",
-    "onCommand:openclaw.status",
-    "*"
+    "onCommand:openclaw.status"
   ],
   "main": "./out/extension.js",
   "contributes": {

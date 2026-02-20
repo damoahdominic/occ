@@ -1,7 +1,102 @@
 import * as vscode from "vscode";
-import type { ControlCenterData } from "@occode/control-center/data";
-import { getControlCenterData } from "@occode/control-center/data";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { resolveConfigPath, overrideConfigPath } from "./config-path";
+
+type ChannelAccount = {
+  id: string;
+  title: string;
+  status: "connected" | "needs-relink";
+};
+
+type ChannelSummary = {
+  channel: string;
+  description: string;
+  accounts: ChannelAccount[];
+};
+
+type ControlCenterData = {
+  agents: { id: string }[];
+  channels: ChannelSummary[];
+  automation: { cronJobs: { status: "enabled" | "paused" }[] };
+  maintenance: { doctor: { status: "healthy" | "warning" | "error" } };
+};
+
+function sanitizeJson5(input: string) {
+  return input
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/,\s*(\}|\])/g, "$1");
+}
+
+function readOpenClawConfig(configPath: string) {
+  try {
+    const contents = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(sanitizeJson5(contents));
+  } catch (error) {
+    console.warn("OpenClaw Config: unable to read openclaw.json", error);
+    return null;
+  }
+}
+
+function readOpenClawConfigRaw(configPath: string) {
+  try {
+    return fs.readFileSync(configPath, "utf-8");
+  } catch (error) {
+    console.warn("OpenClaw Config: unable to read raw openclaw.json", error);
+    return "";
+  }
+}
+
+function buildControlCenterData(configPath: string): ControlCenterData {
+  const resolvedPath =
+    configPath || path.join(os.homedir(), ".openclaw", "openclaw.json");
+  const rawConfig = readOpenClawConfig(resolvedPath);
+  const agents = rawConfig?.agents?.list ?? [];
+  const channelsConfig = rawConfig?.channels ?? {};
+
+  const channels: ChannelSummary[] = Object.entries(channelsConfig).map(
+    ([channelKey]: [string, any]) => ({
+      channel: channelKey,
+      description: channelKey + ' surface configuration',
+      accounts: [
+        {
+          id: channelKey + '-primary',
+          title: channelKey + ' · Primary',
+          status: "connected",
+        },
+      ],
+    })
+  );
+
+  if (channels.length === 0) {
+    channels.push({
+      channel: "whatsapp",
+      description: "WhatsApp surface configuration",
+      accounts: [
+        {
+          id: "whatsapp-primary",
+          title: "WhatsApp · Primary",
+          status: "needs-relink",
+        },
+      ],
+    });
+  }
+
+  return {
+    agents: agents.map((agent: any) => ({ id: agent.id ?? "agent" })),
+    channels,
+    automation: {
+      cronJobs: rawConfig?.automation?.cronJobs ?? [],
+    },
+    maintenance: {
+      doctor: {
+        status: rawConfig?.doctor?.status ?? "warning",
+      },
+    },
+  };
+}
 
 function getNonce() {
   let text = "";
@@ -27,16 +122,15 @@ export class ConfigPanel {
 
   public static createOrShow(extensionUri: vscode.Uri) {
     if (ConfigPanel.currentPanel) {
-      ConfigPanel.currentPanel._panel.reveal();
-      return;
+      ConfigPanel.currentPanel.dispose();
     }
     const panel = vscode.window.createWebviewPanel(
-      "openclawConfig",
+      "openclawConfigV2",
       "OpenClaw Configuration",
       vscode.ViewColumn.Two,
       {
         enableScripts: true,
-        retainContextWhenHidden: true,
+        retainContextWhenHidden: false,
         localResourceRoots: [vscode.Uri.joinPath(extensionUri, "media")],
       }
     );
@@ -50,6 +144,58 @@ export class ConfigPanel {
     this._panel.webview.onDidReceiveMessage((message) => {
       if (message?.command === "refresh") {
         void this._update();
+        return;
+      }
+      if (message?.command === "openclaw.channelAdd") {
+        this._openChannelInstallerTerminal();
+        return;
+      }
+      if (message?.command === "openclaw.saveConfig") {
+        const configPath = resolveConfigPath();
+        const resolvedPath =
+          configPath || path.join(os.homedir(), ".openclaw", "openclaw.json");
+        try {
+          fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+          fs.writeFileSync(resolvedPath, message?.text ?? "", "utf-8");
+          this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
+        } catch (error) {
+          console.warn("OpenClaw Config: unable to write openclaw.json", error);
+          this._panel.webview.postMessage({
+            command: "openclaw.saveResult",
+            ok: false,
+            error: (error as Error)?.message ?? "Failed to save config",
+          });
+        }
+        return;
+      }
+      if (message?.command === "openclaw.runCommand") {
+        const input = String(message?.text ?? "").trim();
+        if (!input) return;
+        const terminal = vscode.window.createTerminal("openclaw command console");
+        terminal.show();
+        const command = input.startsWith("openclaw") ? input : "openclaw " + input;
+        terminal.sendText(command, true);
+        return;
+      }
+      if (message?.command === "openclaw.channelPair") {
+        const channelName = String(message?.channel ?? "").trim();
+        const terminal = vscode.window.createTerminal("openclaw pair " + (channelName || 'channel'));
+        terminal.show();
+        terminal.sendText("openclaw channels pair " + (channelName || ''), true);
+        return;
+      }
+      if (message?.command === "openclaw.channelConfigure") {
+        const channelName = String(message?.channel ?? "").trim();
+        vscode.window.showInformationMessage("Configure " + (channelName || 'channel') + " - Opening config file...");
+        const configPath = resolveConfigPath() || path.join(os.homedir(), ".openclaw", "openclaw.json");
+        vscode.workspace.openTextDocument(configPath).then(doc => {
+          vscode.window.showTextDocument(doc);
+        });
+        return;
+      }
+      if (message?.command === "openclaw.viewStatus") {
+        vscode.commands.executeCommand("openclaw.status");
+        return;
       }
     });
     void this._update();
@@ -68,32 +214,76 @@ export class ConfigPanel {
 
   private async _update() {
     const configPath = resolveConfigPath();
-    const data = getControlCenterData(configPath);
-    this._panel.webview.html = this._getHtml(data);
+    const data = buildControlCenterData(configPath);
+    const rawConfig = readOpenClawConfigRaw(
+      configPath || path.join(os.homedir(), ".openclaw", "openclaw.json")
+    );
+    this._panel.webview.html = this._getHtml(data, rawConfig);
   }
 
-  private _getHtml(data: ControlCenterData) {
+  private _openChannelInstallerTerminal() {
+    const terminal = vscode.window.createTerminal("openclaw channel installer");
+    terminal.show();
+    terminal.sendText("openclaw channels add", true);
+  }
+
+  private _getHtml(data: ControlCenterData, rawConfig: string) {
     const webview = this._panel.webview;
     const nonce = getNonce();
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "control-center.js")
-    );
-    const tailwindUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._extensionUri, "media", "tailwindcdn.js")
-    );
     const serialized = JSON.stringify(data).replace(/</g, "\\u003c");
+    const serializedConfig = JSON.stringify(rawConfig || "").replace(/</g, "\\u003c");
+
+    const connectedChannels = data.channels.filter((channel) =>
+      channel.accounts.some((account) => account.status === "connected")
+    ).length;
+    const channelCount = data.channels.length;
+
+    const channelCards = data.channels
+      .map((channel, index) => {
+        const connected = channel.accounts.some((account) => account.status === "connected");
+        const needsReview = channel.accounts.some((account) => account.status === "needs-relink");
+        const status = connected ? "Connected" : needsReview ? "Needs review" : "Not connected";
+        const chipClass = connected ? "chip-good" : needsReview ? "chip-warn" : "chip-bad";
+        const accountChips = channel.accounts
+          .map((account) => '<span class="pill">' + account.title + '</span>')
+          .join("");
+
+        return `
+          <div class="channel-card " + (index === 0 ? "active" : "") + "" data-index="" + index + "">
+            <div class="card-row">
+              <div>
+                <div class="card-title">${channel.channel}</div>
+                <div class="card-sub">${channel.description}</div>
+              </div>
+              <div class="status-chip">
+                <span class="dot ${chipClass}"></span>
+                <span>${status}</span>
+              </div>
+            </div>
+            <div class="pill-row">${accountChips}</div>
+            <div class="card-actions">
+              <button class="btn-secondary btn-sm" data-action="pair" data-index="${index}">Pair</button>
+              <button class="btn-secondary btn-sm" data-action="configure" data-index="${index}">Configure</button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
 
     const baseStyles = `
       :root {
         color-scheme: dark;
-        --accent: #6ee7ff;
-        --accent-hover: #9d7bff;
-        --bg: #0f1115;
-        --bg-card: #151922;
-        --bg-elevated: #1b2030;
-        --border: #26304a;
-        --text: #e7ecf6;
-        --text-muted: #8b93a7;
+        --accent: #ef4444;
+        --accent-hover: #dc2626;
+        --bg: #0b0a0a;
+        --bg-card: #151111;
+        --bg-elevated: #1d1414;
+        --border: #3a1f1f;
+        --text: #f8f2f2;
+        --text-muted: #b9a8a8;
+        --chip-good: #22c55e;
+        --chip-warn: #f59e0b;
+        --chip-bad: #ef4444;
       }
       body {
         margin: 0;
@@ -101,9 +291,97 @@ export class ConfigPanel {
         color: var(--text);
         font-family: var(--vscode-font-family, "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif);
       }
-      #control-center-root {
-        min-height: 100vh;
-      }
+      * { box-sizing: border-box; }
+      #app { min-height: 100vh; }
+      .container { max-width: 1440px; margin: 0 auto; padding: 24px; }
+      
+      /* Header */
+      .header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+      .header-title { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 600; }
+      .header-dot { height: 10px; width: 10px; border-radius: 999px; background: var(--accent); display: inline-block; }
+      .header-meta { font-size: 12px; color: var(--text-muted); }
+      
+      /* Tabs */
+      .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+      .tab { border: none; cursor: pointer; border-radius: 8px; padding: 8px 16px; font-size: 13px; background: transparent; color: var(--text-muted); transition: all 0.2s; }
+      .tab:hover { background: var(--bg-elevated); color: var(--text); }
+      .tab.active { background: var(--accent); color: #081018; font-weight: 600; }
+      
+      /* Tab Content */
+      .tab-panel { display: none; }
+      .tab-panel.active { display: block; }
+      
+      /* Panel Layout */
+      .panel-grid { display: grid; gap: 20px; grid-template-columns: 1fr 320px; }
+      .panel { border-radius: 16px; background: var(--bg-card); padding: 20px; }
+      .panel h2 { margin: 0 0 16px 0; font-size: 18px; font-weight: 600; }
+      .panel-subtitle { margin: -12px 0 20px 0; font-size: 13px; color: var(--text-muted); }
+      
+      /* Buttons */
+      .btn-primary { border: none; cursor: pointer; background: var(--accent); color: #081018; padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; transition: background 0.2s; }
+      .btn-primary:hover { background: var(--accent-hover); }
+      .btn-secondary { border: 1px solid var(--border); background: transparent; color: var(--text-muted); padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer; transition: all 0.2s; }
+      .btn-secondary:hover { border-color: var(--accent); color: var(--text); }
+      .btn-sm { padding: 4px 10px; font-size: 11px; }
+      .btn-block { width: 100%; margin-top: 12px; }
+      
+      /* Channel Cards */
+      .channel-list { display: grid; gap: 12px; }
+      .channel-card { border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); padding: 16px; transition: border-color 0.2s; }
+      .channel-card:hover { border-color: var(--accent); }
+      .channel-card.active { border-color: var(--accent); background: var(--bg-card); }
+      .card-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+      .card-title { font-size: 14px; font-weight: 600; text-transform: capitalize; }
+      .card-sub { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+      .card-actions { margin-top: 12px; display: flex; gap: 8px; }
+      
+      /* Status Chips */
+      .status-chip { display: flex; align-items: center; gap: 6px; border-radius: 999px; background: var(--bg); padding: 4px 10px; font-size: 11px; color: var(--text); }
+      .dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+      .chip-good { background: var(--chip-good); }
+      .chip-warn { background: var(--chip-warn); }
+      .chip-bad { background: var(--chip-bad); }
+      
+      /* Pills */
+      .pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+      .pill { padding: 4px 10px; border-radius: 999px; background: var(--bg-card); font-size: 11px; color: var(--text-muted); }
+      .pill.clickable { cursor: pointer; transition: all 0.2s; }
+      .pill.clickable:hover { background: var(--accent); color: #081018; }
+      
+      /* JSON Editor */
+      .json-editor { width: 100%; min-height: 400px; resize: vertical; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); padding: 16px; font-size: 13px; line-height: 1.6; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
+      .json-editor:focus { outline: none; border-color: var(--accent); }
+      .editor-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+      .editor-status { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+      .status-badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+      .status-badge.ok { background: var(--chip-good); color: #0f172a; }
+      .status-badge.err { background: var(--chip-bad); color: white; }
+      .status-badge.warn { background: var(--chip-warn); color: #0f172a; }
+      
+      /* Command Console */
+      .console-layout { display: grid; gap: 20px; grid-template-columns: 1fr 280px; }
+      .command-input-wrap { display: flex; gap: 12px; margin-bottom: 16px; }
+      .command-input { flex: 1; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); padding: 12px 16px; font-size: 13px; font-family: ui-monospace, monospace; }
+      .command-input:focus { outline: none; border-color: var(--accent); }
+      .quick-commands h3 { margin: 0 0 12px 0; font-size: 13px; color: var(--text-muted); font-weight: 500; }
+      .quick-grid { display: grid; gap: 8px; }
+      .quick-btn { text-align: left; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); font-size: 12px; cursor: pointer; transition: all 0.2s; }
+      .quick-btn:hover { border-color: var(--accent); background: var(--bg-card); }
+      .quick-btn strong { display: block; font-size: 12px; margin-bottom: 2px; }
+      .quick-btn span { display: block; font-size: 11px; color: var(--text-muted); }
+      
+      /* Sidebar */
+      .sidebar h3 { margin: 0 0 12px 0; font-size: 13px; color: var(--text-muted); font-weight: 500; }
+      .info-card { padding: 12px; border-radius: 10px; background: var(--bg-elevated); margin-bottom: 12px; }
+      .info-card h4 { margin: 0 0 6px 0; font-size: 12px; color: var(--text); }
+      .info-card p { margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+      .connection-status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 10px; background: var(--bg-elevated); margin-top: 16px; }
+      
+      .panel-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+      .empty-state { color: var(--text-muted); text-align: center; padding: 40px; }
+      .status-text { font-size: 12px; }
+      .hint-text { font-size: 11px; color: var(--text-muted); margin-right: 8px; }
+      .recent-row { margin-bottom: 16px; }
     `;
 
     const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; font-src ${webview.cspSource} https:; style-src 'nonce-${nonce}' ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; connect-src ${webview.cspSource} https:`;
@@ -115,12 +393,295 @@ export class ConfigPanel {
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style nonce="${nonce}">${baseStyles}</style>
-    <script nonce="${nonce}">window.__CONTROL_CENTER_DATA__ = ${serialized};</script>
-    <script nonce="${nonce}" src="${tailwindUri}"></script>
+    <script nonce="${nonce}">window.__DATA__ = ${serialized}; window.__CONFIG__ = ${serializedConfig};</script>
   </head>
   <body>
-    <div id="control-center-root"></div>
-    <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
+    <div id="app">
+      <div class="container">
+        <div class="header">
+          <div class="header-title">
+            <span class="header-dot"></span>
+            <span>OpenClaw Configuration</span>
+          </div>
+          <div class="header-meta">${connectedChannels}/${channelCount} channels connected</div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="channels">Channel Management</button>
+          <button class="tab" data-tab="config">Advanced Configuration</button>
+          <button class="tab" data-tab="console">Command Console</button>
+        </div>
+
+        <!-- TAB 1: Channel Management -->
+        <div class="tab-panel active" id="tab-channels">
+          <div class="panel-grid">
+            <div class="panel">
+              <div class="panel-header-row">
+                <div>
+                  <h2>Channels</h2>
+                  <div class="panel-subtitle">Manage your communication channels</div>
+                </div>
+                <button class="btn-primary" id="add-channel">+ Add Channel</button>
+              </div>
+              <div class="channel-list" id="channel-list">
+                ${channelCards || '<div class="empty-state">No channels configured. Add your first channel to get started.</div>'}
+              </div>
+            </div>
+            <div class="panel sidebar">
+              <h3>Quick Actions</h3>
+              <div class="info-card">
+                <h4>Add Channel</h4>
+                <p>Connect WhatsApp, Telegram, or other messaging platforms.</p>
+                <button class="btn-primary btn-block" id="sidebar-add">Add New</button>
+              </div>
+              <div class="info-card">
+                <h4>Pair Device</h4>
+                <p>Link your phone or device to start sending messages.</p>
+                <button class="btn-secondary btn-block" id="sidebar-pair">Start Pairing</button>
+              </div>
+              <div class="connection-status">
+                <span class="dot ${connectedChannels > 0 ? 'chip-good' : 'chip-warn'}"></span>
+                <span class="status-text">${connectedChannels > 0 ? 'Channels active' : 'No active channels'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Advanced Configuration -->
+        <div class="tab-panel" id="tab-config">
+          <div class="panel-grid">
+            <div class="panel">
+              <div class="editor-toolbar">
+                <div>
+                  <h2>Configuration JSON</h2>
+                  <div class="panel-subtitle">Edit ~/.openclaw/openclaw.json directly</div>
+                </div>
+                <button class="btn-primary" id="save-config">Save Changes</button>
+              </div>
+              <div class="editor-status">
+                <span class="status-badge warn" id="config-status">Loading...</span>
+                <span class="hint-text" id="config-hint">Supports JSON5 (comments + trailing commas)</span>
+              </div>
+              <textarea class="json-editor" id="config-editor" spellcheck="false"></textarea>
+            </div>
+            <div class="panel sidebar">
+              <h3>Validation</h3>
+              <div class="info-card">
+                <h4>JSON5 Support</h4>
+                <p>You can use comments (// and /* */) and trailing commas.</p>
+              </div>
+              <div class="info-card">
+                <h4>Common Issues</h4>
+                <p>• Missing quotes on keys<br>• Trailing commas in arrays<br>• Invalid escape sequences</p>
+              </div>
+              <div class="info-card">
+                <h4>After Saving</h4>
+                <p>Restart the gateway for changes to take effect.</p>
+                <button class="btn-secondary btn-block" id="restart-hint">View Status Panel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Command Console -->
+        <div class="tab-panel" id="tab-console">
+          <div class="console-layout">
+            <div class="panel">
+              <h2>Command Console</h2>
+              <div class="panel-subtitle">Run OpenClaw CLI commands</div>
+              <div class="command-input-wrap">
+                <input type="text" class="command-input" id="command-input" placeholder="Enter command (e.g., doctor, status, gateway start)" />
+                <button class="btn-primary" id="run-command">Run</button>
+              </div>
+              <div class="pill-row recent-row" id="recent-commands">
+                <span class="hint-text">Recent:</span>
+              </div>
+            </div>
+            <div class="panel sidebar">
+              <div class="quick-commands">
+                <h3>Quick Commands</h3>
+                <div class="quick-grid">
+                  <button class="quick-btn" data-cmd="doctor">
+                    <strong>doctor</strong>
+                    <span>Run health diagnostics</span>
+                  </button>
+                  <button class="quick-btn" data-cmd="status">
+                    <strong>status</strong>
+                    <span>Check overall status</span>
+                  </button>
+                  <button class="quick-btn" data-cmd="gateway status">
+                    <strong>gateway status</strong>
+                    <span>Check gateway state</span>
+                  </button>
+                  <button class="quick-btn" data-cmd="channels status --probe">
+                    <strong>channels status</strong>
+                    <span>Test channel connectivity</span>
+                  </button>
+                  <button class="quick-btn" data-cmd="logs --follow">
+                    <strong>logs --follow</strong>
+                    <span>Watch live logs</span>
+                  </button>
+                  <button class="quick-btn" data-cmd="version">
+                    <strong>version</strong>
+                    <span>Show CLI version</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script nonce="${nonce}">
+      const vscode = acquireVsCodeApi();
+      const data = window.__DATA__;
+      const rawConfig = window.__CONFIG__ || "";
+      
+      // Tab switching
+      const tabs = document.querySelectorAll('.tab');
+      const panels = document.querySelectorAll('.tab-panel');
+      
+      tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          const target = tab.dataset.tab;
+          
+          tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === target));
+          panels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + target));
+        });
+      });
+
+      // Channel Management
+      document.getElementById('add-channel') && document.getElementById('add-channel').addEventListener('click', () => {
+        vscode.postMessage({ command: 'openclaw.channelAdd' });
+      });
+      document.getElementById('sidebar-add') && document.getElementById('sidebar-add').addEventListener('click', () => {
+        vscode.postMessage({ command: 'openclaw.channelAdd' });
+      });
+      document.getElementById('sidebar-pair') && document.getElementById('sidebar-pair').addEventListener('click', () => {
+        vscode.postMessage({ command: 'openclaw.channelAdd' });
+      });
+
+      // Channel card actions
+      document.querySelectorAll('.channel-card [data-action="pair"]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const index = btn.dataset.index;
+          const channel = data.channels[index];
+          vscode.postMessage({ command: 'openclaw.channelPair', channel: channel && channel.channel || '' });
+        });
+      });
+
+      document.querySelectorAll('.channel-card [data-action="configure"]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const index = btn.dataset.index;
+          const channel = data.channels[index];
+          vscode.postMessage({ command: 'openclaw.channelConfigure', channel: channel && channel.channel || '' });
+        });
+      });
+
+      document.getElementById('restart-hint') && document.getElementById('restart-hint').addEventListener('click', () => {
+        vscode.postMessage({ command: 'openclaw.viewStatus' });
+      });
+
+      // JSON Editor
+      const configEditor = document.getElementById('config-editor');
+      const configStatus = document.getElementById('config-status');
+      const configHint = document.getElementById('config-hint');
+      
+      function sanitizeJson5(input) {
+        return input
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/(^|[^:])\/\/.*$/gm, '$1')
+          .replace(/,\s*(\}|\])/g, '$1');
+      }
+      
+      function validateConfig() {
+        if (!configEditor || !configStatus) return;
+        const value = configEditor.value || '';
+        try {
+          JSON.parse(sanitizeJson5(value));
+          configStatus.textContent = 'Valid JSON';
+          configStatus.className = 'status-badge ok';
+          configHint.textContent = 'Ready to save';
+        } catch (err) {
+          configStatus.textContent = 'Invalid JSON';
+          configStatus.className = 'status-badge err';
+          configHint.textContent = (err && err.message) || 'Parse error';
+        }
+      }
+      
+      if (configEditor) {
+        configEditor.value = rawConfig;
+        configEditor.addEventListener('input', validateConfig);
+        validateConfig();
+      }
+      
+      const btnSave = document.getElementById('save-config');
+      if (btnSave) {
+        btnSave.addEventListener('click', () => {
+          if (!configEditor) return;
+          vscode.postMessage({ command: 'openclaw.saveConfig', text: configEditor.value });
+        });
+      }
+      
+      window.addEventListener('message', (event) => {
+        const msg = event.data || {};
+        if (msg.command !== 'openclaw.saveResult') return;
+        
+        if (msg.ok) {
+          configStatus.textContent = 'Saved';
+          configStatus.className = 'status-badge ok';
+          configHint.textContent = 'Configuration updated';
+        } else {
+          configStatus.textContent = 'Save Failed';
+          configStatus.className = 'status-badge err';
+          configHint.textContent = msg.error || 'Failed to save';
+        }
+      });
+
+      // Command Console
+      const commandInput = document.getElementById('command-input');
+      const runCommand = document.getElementById('run-command');
+      
+      function runCommandInTerminal(cmd) {
+        const fullCmd = cmd.startsWith('openclaw') ? cmd : 'openclaw ' + cmd;
+        vscode.postMessage({ command: 'openclaw.runCommand', text: fullCmd });
+        
+        // Add to recent
+        const recentRow = document.getElementById('recent-commands');
+        const pill = document.createElement('span');
+        pill.className = 'pill clickable';
+        pill.textContent = cmd;
+        pill.addEventListener('click', () => {
+          if (commandInput) commandInput.value = cmd;
+        });
+        recentRow.appendChild(pill);
+      }
+      
+      runCommand && runCommand.addEventListener('click', () => {
+        const cmd = commandInput && commandInput.value.trim();
+        if (cmd) runCommandInTerminal(cmd);
+      });
+      
+      commandInput && commandInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const cmd = commandInput.value.trim();
+          if (cmd) runCommandInTerminal(cmd);
+        }
+      });
+      
+      // Quick command buttons
+      document.querySelectorAll('.quick-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cmd = btn.dataset.cmd;
+          if (commandInput) commandInput.value = cmd;
+          runCommandInTerminal(cmd);
+        });
+      });
+    </script>
   </body>
 </html>`;
   }

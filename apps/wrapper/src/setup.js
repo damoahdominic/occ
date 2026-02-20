@@ -111,7 +111,26 @@ async function setDefaults(occodeDir) {
   fs.writeFileSync(settingsFile, JSON.stringify(merged, null, 2));
 }
 
-async function launchVSCodium(codiumBinary, occodeDir) {
+function findMacAppBundle(vscodeDir, codiumBinary) {
+  if (codiumBinary) {
+    const marker = `${path.sep}VSCodium.app${path.sep}`;
+    const idx = codiumBinary.indexOf(marker);
+    if (idx !== -1) {
+      return codiumBinary.slice(0, idx + marker.length - 1);
+    }
+  }
+  if (vscodeDir && fs.existsSync(vscodeDir)) {
+    const direct = path.join(vscodeDir, 'VSCodium.app');
+    if (fs.existsSync(direct)) return direct;
+    for (const entry of fs.readdirSync(vscodeDir)) {
+      const candidate = path.join(vscodeDir, entry, 'VSCodium.app');
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+async function launchVSCodium(codiumBinary, occodeDir, vscodeDir) {
   const userDataDir = path.join(occodeDir, 'user-data');
   const extensionsDir = path.join(occodeDir, 'extensions');
   const args = [
@@ -156,6 +175,15 @@ async function launchVSCodium(codiumBinary, occodeDir) {
   };
 
   let child;
+  if (process.platform === 'darwin') {
+    const appBundle = findMacAppBundle(vscodeDir, codiumBinary);
+    if (appBundle) {
+      const openArgs = ['-n', '-a', appBundle, '--args', ...args];
+      child = spawn('open', openArgs, spawnOpts);
+      if (!debug) child.unref();
+      return;
+    }
+  }
   if (isWin && codiumBinary.toLowerCase().endsWith('.cmd')) {
     const comspec = process.env.ComSpec || 'cmd.exe';
     const quote = (s) => (/[ \t&(){}\^=;!'+,`~\[\]]/.test(s) ? `"${s}"` : s);
