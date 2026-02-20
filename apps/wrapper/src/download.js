@@ -44,8 +44,15 @@ function getBundledArchivePath(version) {
     // Dev/working tree
     path.join(__dirname, '..', 'assets', 'vscodium', filename),
   ].filter(Boolean);
+  
+  console.log(`[OCcode] Debug: process.resourcesPath = ${process.resourcesPath}`);
+  console.log(`[OCcode] Debug: __dirname = ${__dirname}`);
+  console.log(`[OCcode] Debug: Looking for bundled archive candidates: ${JSON.stringify(candidates)}`);
+  
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+    const exists = fs.existsSync(candidate);
+    console.log(`[OCcode] Debug: Checking ${candidate} - exists: ${exists}`);
+    if (exists) return candidate;
   }
   return null;
 }

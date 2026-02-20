@@ -39,6 +39,10 @@ jobs:
             platform: linux
           - os: macos-latest
             platform: mac
+            arch: arm64
+          - os: macos-13
+            platform: mac
+            arch: x64
           - os: windows-latest
             platform: win
     runs-on: ${{ matrix.os }}
@@ -62,12 +66,12 @@ jobs:
           mkdir -p apps/wrapper/assets/vscodium
           VERSION=$(jq -r '.version' apps/wrapper/vscodium-manifest.json)
           PLATFORM="${{ matrix.platform }}"
+          ARCH="${{ matrix.arch }}"
           
           if [ "$PLATFORM" = "win" ]; then
             ARCH="x64"
             FILE="VSCodium-win32-${ARCH}-${VERSION}.zip"
           elif [ "$PLATFORM" = "mac" ]; then
-            ARCH="arm64"
             FILE="VSCodium-darwin-${ARCH}-${VERSION}.zip"
           else
             ARCH="x64"
@@ -102,10 +106,12 @@ jobs:
         run: npm ci
         working-directory: apps/wrapper
       - name: Build Electron app
-        run: npm run build:${{ matrix.platform }}
+        run: npm run build:${{ matrix.platform }} -- --${{ matrix.arch }}
         working-directory: apps/wrapper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm_config_arch: ${{ matrix.arch }}
+          npm_config_target_arch: ${{ matrix.arch }}
       - name: Show dist output
         shell: bash
         run: |
@@ -114,7 +120,7 @@ jobs:
           find apps/wrapper/dist -maxdepth 3 -type f
       - uses: actions/upload-artifact@v4
         with:
-          name: occode-${{ matrix.platform }}
+          name: occode-${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }}
           path: apps/wrapper/dist/**
           if-no-files-found: error
 
