@@ -102,16 +102,65 @@ async function downloadVSCodium(version, destDir) {
   // Extract
   console.log(`[OCcode] Extracting ${archivePath} to ${destDir}...`);
   try {
-    if (p.ext === 'zip') {
-      if (process.platform === 'win32') {
-        execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force"`, { stdio: 'inherit' });
-      } else {
-        execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' });
-      }
-    } else {
-      execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
+    // Create destination directory if it doesn't exist
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
     }
-    console.log(`[OCcode] Extraction complete`);
+    
+    // Try extraction up to 3 times
+    let extractSuccess = false;
+    let attempts = 0;
+    let lastError = null;
+    
+    while (!extractSuccess && attempts < 3) {
+      attempts++;
+      try {
+        if (p.ext === 'zip') {
+          if (process.platform === 'win32') {
+            try {
+              // Try PowerShell first
+              execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force"`, { stdio: 'inherit' });
+            } catch (psErr) {
+              console.error(`[OCcode] PowerShell extraction failed: ${psErr.message}`);
+              console.log(`[OCcode] Trying Node.js extraction fallback...`);
+              
+              // Fallback to Node.js extraction
+              const AdmZip = require('adm-zip');
+              try {
+                const zip = new AdmZip(archivePath);
+                zip.extractAllTo(destDir, true);
+                console.log(`[OCcode] Extracted using Node.js AdmZip`);
+              } catch (nodeErr) {
+                throw new Error(`Both PowerShell and Node.js extraction failed: ${nodeErr.message}`);
+              }
+            }
+          } else {
+            execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' });
+          }
+        } else {
+          execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
+        }
+        
+        // Verify extraction by checking if files were created
+        const files = fs.readdirSync(destDir);
+        if (files.length > 0) {
+          extractSuccess = true;
+          console.log(`[OCcode] Extraction complete (attempt ${attempts})`);
+        } else {
+          throw new Error('No files extracted');
+        }
+      } catch (err) {
+        lastError = err;
+        console.error(`[OCcode] Extraction attempt ${attempts} failed: ${err.message}`);
+        if (attempts < 3) {
+          console.log(`[OCcode] Retrying extraction...`);
+        }
+      }
+    }
+    
+    if (!extractSuccess) {
+      throw new Error(`Failed to extract after ${attempts} attempts: ${lastError?.message}`);
+    }
     
     // Flatten: if archive created a single subdirectory, move contents up
     const extractedContents = fs.readdirSync(destDir);
@@ -133,6 +182,51 @@ async function downloadVSCodium(version, destDir) {
         // Remove empty subdirectory
         fs.rmdirSync(singleItem);
         console.log(`[OCcode] Flatten complete`);
+      }
+    }
+    
+    // Special handling for Windows: Fix codium.cmd if it exists
+    if (process.platform === 'win32') {
+      const cmdPath = path.join(destDir, 'bin', 'codium.cmd');
+      const vscodiumExe = path.join(destDir, 'VSCodium.exe');
+      
+      // If codium.cmd exists but VSCodium.exe is not in the expected location
+      if (fs.existsSync(cmdPath) && !fs.existsSync(vscodiumExe)) {
+        console.log(`[OCcode] Fixing codium.cmd script...`);
+        try {
+          // Find VSCodium.exe in the directory structure
+          let exePath = null;
+          const findExe = (dir) => {
+            for (const item of fs.readdirSync(dir)) {
+              const fullPath = path.join(dir, item);
+              if (item === 'VSCodium.exe') {
+                return fullPath;
+              }
+              if (fs.statSync(fullPath).isDirectory()) {
+                const found = findExe(fullPath);
+                if (found) return found;
+              }
+            }
+            return null;
+          };
+          
+          exePath = findExe(destDir);
+          
+          if (exePath) {
+            console.log(`[OCcode] Found VSCodium.exe at ${exePath}`);
+            // Copy it to the expected location
+            fs.copyFileSync(exePath, vscodiumExe);
+            console.log(`[OCcode] Copied VSCodium.exe to ${vscodiumExe}`);
+          } else {
+            console.error(`[OCcode] Could not find VSCodium.exe in ${destDir}`);
+            // Create a fixed version of codium.cmd that uses absolute path
+            fixCodiumCmd(cmdPath, destDir);
+          }
+        } catch (err) {
+          console.error(`[OCcode] Error fixing codium.cmd: ${err.message}`);
+          // Try to fix the cmd script as a fallback
+          fixCodiumCmd(cmdPath, destDir);
+        }
       }
     }
   } catch (err) {
@@ -203,6 +297,36 @@ async function verifyChecksum(filePath, expected) {
     });
     stream.on('error', reject);
   });
+}
+
+/**
+ * Fix the codium.cmd script to use an absolute path to VSCodium.exe
+ */
+function fixCodiumCmd(cmdPath, vscodeDir) {
+  try {
+    console.log(`[OCcode] Fixing codium.cmd script at ${cmdPath}`);
+    
+    // Read the current script
+    let content = fs.readFileSync(cmdPath, 'utf8');
+    
+    // Create the absolute path to VSCodium.exe
+    const vscodiumExePath = path.join(vscodeDir, 'VSCodium.exe');
+    
+    // Replace relative path with absolute path
+    const fixedContent = content.replace(
+      /"%~dp0\\\.\.\\VSCodium\.exe"/g,
+      `"${vscodiumExePath.replace(/\\/g, '\\\\')}"`
+    );
+    
+    // Write the fixed script
+    fs.writeFileSync(cmdPath, fixedContent, 'utf8');
+    console.log(`[OCcode] Fixed codium.cmd script to use absolute path`);
+    
+    return true;
+  } catch (err) {
+    console.error(`[OCcode] Failed to fix codium.cmd: ${err.message}`);
+    return false;
+  }
 }
 
 module.exports = {
