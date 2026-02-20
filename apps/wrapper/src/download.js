@@ -44,8 +44,15 @@ function getBundledArchivePath(version) {
     // Dev/working tree
     path.join(__dirname, '..', 'assets', 'vscodium', filename),
   ].filter(Boolean);
+  
+  console.log(`[OCcode] Debug: process.resourcesPath = ${process.resourcesPath}`);
+  console.log(`[OCcode] Debug: __dirname = ${__dirname}`);
+  console.log(`[OCcode] Debug: Looking for bundled archive candidates: ${JSON.stringify(candidates)}`);
+  
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+    const exists = fs.existsSync(candidate);
+    console.log(`[OCcode] Debug: Checking ${candidate} - exists: ${exists}`);
+    if (exists) return candidate;
   }
   return null;
 }
@@ -93,14 +100,44 @@ async function downloadVSCodium(version, destDir) {
   }
 
   // Extract
-  if (p.ext === 'zip') {
-    if (process.platform === 'win32') {
-      execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force"`);
+  console.log(`[OCcode] Extracting ${archivePath} to ${destDir}...`);
+  try {
+    if (p.ext === 'zip') {
+      if (process.platform === 'win32') {
+        execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force"`, { stdio: 'inherit' });
+      } else {
+        execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' });
+      }
     } else {
-      execSync(`unzip -o "${archivePath}" -d "${destDir}"`);
+      execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
     }
-  } else {
-    execSync(`tar -xzf "${archivePath}" -C "${destDir}"`);
+    console.log(`[OCcode] Extraction complete`);
+    
+    // Flatten: if archive created a single subdirectory, move contents up
+    const extractedContents = fs.readdirSync(destDir);
+    console.log(`[OCcode] Extracted contents: ${JSON.stringify(extractedContents)}`);
+    
+    if (extractedContents.length === 1) {
+      const singleItem = path.join(destDir, extractedContents[0]);
+      const stat = fs.statSync(singleItem);
+      if (stat.isDirectory()) {
+        console.log(`[OCcode] Flattening subdirectory: ${extractedContents[0]}`);
+        // Move all contents from subdirectory to destDir
+        const subContents = fs.readdirSync(singleItem);
+        for (const item of subContents) {
+          const src = path.join(singleItem, item);
+          const dest = path.join(destDir, item);
+          console.log(`[OCcode] Moving ${src} -> ${dest}`);
+          fs.renameSync(src, dest);
+        }
+        // Remove empty subdirectory
+        fs.rmdirSync(singleItem);
+        console.log(`[OCcode] Flatten complete`);
+      }
+    }
+  } catch (err) {
+    console.error(`[OCcode] Extraction failed: ${err.message}`);
+    throw err;
   }
 
   if (downloaded) {
@@ -109,29 +146,30 @@ async function downloadVSCodium(version, destDir) {
 }
 
 function getVSCodiumBinaryCandidates(vscodeDir) {
-  const p = getPlatformInfo();
   if (process.platform === 'win32') {
     return [
-      path.join(vscodeDir, p.dir, 'bin', 'codium.cmd'),
+      path.join(vscodeDir, 'VSCodium.exe'),
       path.join(vscodeDir, 'bin', 'codium.cmd'),
     ];
   }
   if (process.platform === 'darwin') {
     return [
       path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
-      path.join(vscodeDir, p.dir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
     ];
   }
   return [
-    path.join(vscodeDir, p.dir, 'bin', 'codium'),
     path.join(vscodeDir, 'bin', 'codium'),
   ];
 }
 
 function findVSCodiumBinary(vscodeDir) {
   const candidates = getVSCodiumBinaryCandidates(vscodeDir);
+  console.log(`[OCcode] Looking for VSCodium binary in ${vscodeDir}`);
+  console.log(`[OCcode] Candidates: ${JSON.stringify(candidates)}`);
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+    const exists = fs.existsSync(candidate);
+    console.log(`[OCcode] Checking ${candidate}: ${exists ? 'FOUND' : 'not found'}`);
+    if (exists) return candidate;
   }
   return null;
 }
