@@ -59,11 +59,11 @@ function buildControlCenterData(configPath: string): ControlCenterData {
   const channels: ChannelSummary[] = Object.entries(channelsConfig).map(
     ([channelKey]: [string, any]) => ({
       channel: channelKey,
-      description: `${channelKey} surface configuration`,
+      description: channelKey + ' surface configuration',
       accounts: [
         {
-          id: `${channelKey}-primary`,
-          title: `${channelKey} · Primary`,
+          id: channelKey + '-primary',
+          title: channelKey + ' · Primary',
           status: "connected",
         },
       ],
@@ -173,20 +173,20 @@ export class ConfigPanel {
         if (!input) return;
         const terminal = vscode.window.createTerminal("openclaw command console");
         terminal.show();
-        const command = input.startsWith("openclaw") ? input : `openclaw ${input}`;
+        const command = input.startsWith("openclaw") ? input : "openclaw " + input;
         terminal.sendText(command, true);
         return;
       }
       if (message?.command === "openclaw.channelPair") {
         const channelName = String(message?.channel ?? "").trim();
-        const terminal = vscode.window.createTerminal(`openclaw pair ${channelName || 'channel'}`);
+        const terminal = vscode.window.createTerminal("openclaw pair " + (channelName || 'channel'));
         terminal.show();
-        terminal.sendText(`openclaw channels pair ${channelName || ''}`, true);
+        terminal.sendText("openclaw channels pair " + (channelName || ''), true);
         return;
       }
       if (message?.command === "openclaw.channelConfigure") {
         const channelName = String(message?.channel ?? "").trim();
-        vscode.window.showInformationMessage(`Configure ${channelName || 'channel'} - Opening config file...`);
+        vscode.window.showInformationMessage("Configure " + (channelName || 'channel') + " - Opening config file...");
         const configPath = resolveConfigPath() || path.join(os.homedir(), ".openclaw", "openclaw.json");
         vscode.workspace.openTextDocument(configPath).then(doc => {
           vscode.window.showTextDocument(doc);
@@ -245,11 +245,11 @@ export class ConfigPanel {
         const status = connected ? "Connected" : needsReview ? "Needs review" : "Not connected";
         const chipClass = connected ? "chip-good" : needsReview ? "chip-warn" : "chip-bad";
         const accountChips = channel.accounts
-          .map((account) => `<span class="pill">${account.title}</span>`)
+          .map((account) => '<span class="pill">' + account.title + '</span>')
           .join("");
 
         return `
-          <div class="channel-card ${index === 0 ? "active" : ""}" data-index="${index}">
+          <div class="channel-card " + (index === 0 ? "active" : "") + "" data-index="" + index + "">
             <div class="card-row">
               <div>
                 <div class="card-title">${channel.channel}</div>
