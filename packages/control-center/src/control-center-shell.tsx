@@ -22,9 +22,8 @@ export function ControlCenterShell({ data }: { data: ControlCenterData }) {
   const [activeChannel, setActiveChannel] = useState(0);
 
   const vscode =
-    typeof window !== "undefined" && (window as { acquireVsCodeApi?: () => { postMessage: Function } })
-      ?.acquireVsCodeApi
-      ? (window as { acquireVsCodeApi: () => { postMessage: Function } }).acquireVsCodeApi()
+    typeof window !== "undefined" && "acquireVsCodeApi" in window
+      ? (window as unknown as { acquireVsCodeApi: () => { postMessage: Function } }).acquireVsCodeApi()
       : null;
 
   const post = (command: string, payload?: Record<string, unknown>) => {
