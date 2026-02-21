@@ -37,10 +37,13 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
+            arch: x64
           - os: macos-latest
             platform: mac
+            arch: arm64
           - os: windows-latest
             platform: win
+            arch: x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -55,14 +58,72 @@ jobs:
       - name: Verify VSIX bundled
         shell: bash
         run: ls -la apps/wrapper/extensions/*.vsix
+      - name: Download VSCodium for current platform
+        shell: bash
+        run: |
+          set -e
+          mkdir -p apps/wrapper/assets/vscodium
+          VERSION=$(jq -r '.version' apps/wrapper/vscodium-manifest.json)
+          PLATFORM="${{ matrix.platform }}"
+          ARCH="${{ matrix.arch }}"
+          
+          echo "Debug: PLATFORM=$PLATFORM, ARCH=$ARCH"
+          
+          # Determine file based on platform
+          case "$PLATFORM" in
+            win)
+              FILE="VSCodium-win32-${ARCH}-${VERSION}.zip"
+              CHECKSUM_KEY="win32-${ARCH}"
+              ;;
+            mac)
+              FILE="VSCodium-darwin-${ARCH}-${VERSION}.zip"
+              CHECKSUM_KEY="darwin-${ARCH}"
+              ;;
+            linux)
+              FILE="VSCodium-linux-${ARCH}-${VERSION}.tar.gz"
+              CHECKSUM_KEY="linux-${ARCH}"
+              ;;
+            *)
+              echo "Unknown platform: $PLATFORM"
+              exit 1
+              ;;
+          esac
+          
+          URL="https://github.com/VSCodium/vscodium/releases/download/${VERSION}/${FILE}"
+          echo "Downloading VSCodium from: $URL"
+          curl -L -o "apps/wrapper/assets/vscodium/${FILE}" "$URL"
+          
+          echo "Verifying checksum for key: $CHECKSUM_KEY"
+          EXPECTED=$(jq -r ".sha256[\"${CHECKSUM_KEY}\"]" apps/wrapper/vscodium-manifest.json)
+          ACTUAL=$(sha256sum "apps/wrapper/assets/vscodium/${FILE}" | cut -d' ' -f1)
+          
+          if [ "$EXPECTED" != "null" ] && [ "$EXPECTED" != "" ]; then
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "Checksum mismatch! Expected: $EXPECTED, Got: $ACTUAL"
+              exit 1
+            fi
+            echo "Checksum verified: $EXPECTED"
+          else
+            echo "Warning: No checksum found for $CHECKSUM_KEY"
+          fi
+          
+          ls -la apps/wrapper/assets/vscodium/
       - name: Install dependencies
         run: npm ci
         working-directory: apps/wrapper
       - name: Build Electron app
-        run: npm run build:${{ matrix.platform }}
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "mac" ]; then
+            npm run build:mac:${{ matrix.arch }}
+          else
+            npm run build:${{ matrix.platform }}
+          fi
         working-directory: apps/wrapper
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm_config_arch: ${{ matrix.arch }}
+          npm_config_target_arch: ${{ matrix.arch }}
       - name: Show dist output
         shell: bash
         run: |
@@ -71,7 +132,7 @@ jobs:
           find apps/wrapper/dist -maxdepth 3 -type f
       - uses: actions/upload-artifact@v4
         with:
-          name: occode-${{ matrix.platform }}
+          name: occode-${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) || '' }}
           path: apps/wrapper/dist/**
           if-no-files-found: error
 
