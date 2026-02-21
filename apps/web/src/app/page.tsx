@@ -568,11 +568,23 @@ export default function Home() {
               }
             >
               <Image
-                src="/screenshot.png"
+                src="/screenshot.jpeg"
                 alt="OpenClaw Code app in action"
                 width={1400}
                 height={720}
-                className="mx-auto rounded-2xl object-cover h-full object-left-top"
+                priority
+                unoptimized
+                className="mx-auto rounded-2xl object-cover h-full object-left-top hidden sm:block"
+                draggable={false}
+              />
+              <Image
+                src="/screenshot1.jpeg"
+                alt="OpenClaw Code app in action"
+                width={720}
+                height={1400}
+                priority
+                unoptimized
+                className="mx-auto rounded-2xl object-cover h-full object-left-top sm:hidden"
                 draggable={false}
               />
             </ContainerScroll>
