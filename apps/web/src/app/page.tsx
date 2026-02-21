@@ -159,9 +159,9 @@ const installEvents = [
 const N_VISIBLE = 3;
 
 function NotificationFeed() {
-  const sliderRef   = useRef<HTMLDivElement>(null);
+  const sliderRef = useRef<HTMLDivElement>(null);
   const isAnimating = useRef(false);
-  const tickerRef   = useRef(N_VISIBLE);
+  const tickerRef = useRef(N_VISIBLE);
 
   useEffect(() => {
     const slider = sliderRef.current!;
@@ -177,12 +177,12 @@ function NotificationFeed() {
     // peek upward with negative translateY and are slightly scaled down.
     const initCards = () => {
       const cs = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
-      const n  = cs.length;
+      const n = cs.length;
       gsap.to(cs, {
-        y:        (i) => (n - 1 - i) * -11,         // front=0px, mid=-11px, back=-22px
-        scale:    (i) => 1 - (n - 1 - i) * 0.06,    // front=1, mid=0.94, back=0.88
+        y: (i) => (n - 1 - i) * -11,         // front=0px, mid=-11px, back=-22px
+        scale: (i) => 1 - (n - 1 - i) * 0.06,    // front=1, mid=0.94, back=0.88
         duration: 0.5,
-        ease:     "power3.out",
+        ease: "power3.out",
         overwrite: "auto",
       });
     };
@@ -191,15 +191,15 @@ function NotificationFeed() {
       if (isAnimating.current) return;
       isAnimating.current = true;
 
-      const cs    = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
+      const cs = Array.from(slider.querySelectorAll<HTMLElement>(".nc"));
       const front = cs[cs.length - 1];
 
       // Fling front card off to the right — accelerates like a physical throw
       gsap.to(front, {
-        x:        "110%",
-        opacity:  0,
+        x: "110%",
+        opacity: 0,
         duration: 0.44,
-        ease:     "power2.in",
+        ease: "power2.in",
         onComplete: () => {
           // Recycle: move to back of DOM, load next city
           slider.prepend(front);
@@ -354,9 +354,9 @@ export default function Home() {
         smoothOffsetX.current += (targetOffX - smoothOffsetX.current) * 0.05;
         smoothOffsetY.current += (targetOffY - smoothOffsetY.current) * 0.05;
 
-        state.phi   = phi + smoothOffsetX.current;
+        state.phi = phi + smoothOffsetX.current;
         state.theta = 0.25 + smoothOffsetY.current;
-        state.width  = width * 2;
+        state.width = width * 2;
         state.height = width * 2;
       },
     });
@@ -634,7 +634,7 @@ export default function Home() {
         <section className="px-6 py-24 max-w-6xl mx-auto">
           <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">See it in action</h2>
           <p className="text-[var(--text-muted)] text-center mb-16 max-w-xl mx-auto">
-            A complete development environment built for AI — from first open to full workflow.
+            AI powered local installation and management tool for OpenClaw.
           </p>
           <ScreenshotShowcase />
         </section>
@@ -661,7 +661,7 @@ export default function Home() {
               </div>
 
               {/* Install feed — iOS push notification style */}
-              <NotificationFeed />
+              {/* <NotificationFeed /> */}
             </div>
           </div>
         </section>
