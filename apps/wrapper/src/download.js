@@ -163,26 +163,33 @@ async function downloadVSCodium(version, destDir) {
     }
     
     // Flatten: if archive created a single subdirectory, move contents up
-    const extractedContents = fs.readdirSync(destDir);
-    console.log(`[OCcode] Extracted contents: ${JSON.stringify(extractedContents)}`);
-    
-    if (extractedContents.length === 1) {
-      const singleItem = path.join(destDir, extractedContents[0]);
-      const stat = fs.statSync(singleItem);
-      if (stat.isDirectory()) {
-        console.log(`[OCcode] Flattening subdirectory: ${extractedContents[0]}`);
-        // Move all contents from subdirectory to destDir
-        const subContents = fs.readdirSync(singleItem);
-        for (const item of subContents) {
-          const src = path.join(singleItem, item);
-          const dest = path.join(destDir, item);
-          console.log(`[OCcode] Moving ${src} -> ${dest}`);
-          fs.renameSync(src, dest);
+    // Skip this on macOS - VSCodium.app must stay as a bundle
+    if (process.platform !== 'darwin') {
+      const extractedContents = fs.readdirSync(destDir);
+      console.log(`[OCcode] Extracted contents: ${JSON.stringify(extractedContents)}`);
+      
+      if (extractedContents.length === 1) {
+        const singleItem = path.join(destDir, extractedContents[0]);
+        const stat = fs.statSync(singleItem);
+        if (stat.isDirectory()) {
+          console.log(`[OCcode] Flattening subdirectory: ${extractedContents[0]}`);
+          // Move all contents from subdirectory to destDir
+          const subContents = fs.readdirSync(singleItem);
+          for (const item of subContents) {
+            const src = path.join(singleItem, item);
+            const dest = path.join(destDir, item);
+            console.log(`[OCcode] Moving ${src} -> ${dest}`);
+            fs.renameSync(src, dest);
+          }
+          // Remove empty subdirectory
+          fs.rmdirSync(singleItem);
+          console.log(`[OCcode] Flatten complete`);
         }
-        // Remove empty subdirectory
-        fs.rmdirSync(singleItem);
-        console.log(`[OCcode] Flatten complete`);
       }
+    } else {
+      // On macOS, just log what was extracted without flattening
+      const extractedContents = fs.readdirSync(destDir);
+      console.log(`[OCcode] macOS extracted contents (preserving bundle): ${JSON.stringify(extractedContents)}`);
     }
     
     // Special handling for Windows: Fix codium.cmd if it exists
