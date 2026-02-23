@@ -107,6 +107,13 @@ async function downloadVSCodium(version, destDir) {
       fs.mkdirSync(destDir, { recursive: true });
     }
     
+    // For Windows, extract to temp first then move to avoid nested dir issues
+    let extractDir = destDir;
+    if (process.platform === 'win32') {
+      extractDir = path.join(os.tmpdir(), `vscodium-extract-${Date.now()}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+    }
+    
     // Try extraction up to 3 times
     let extractSuccess = false;
     let attempts = 0;
@@ -119,7 +126,7 @@ async function downloadVSCodium(version, destDir) {
           if (process.platform === 'win32') {
             try {
               // Try PowerShell first
-              execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force"`, { stdio: 'inherit' });
+              execSync(`powershell -Command "Expand-Archive -Path '${archivePath}' -DestinationPath '${extractDir}' -Force"`, { stdio: 'inherit' });
             } catch (psErr) {
               console.error(`[OCcode] PowerShell extraction failed: ${psErr.message}`);
               console.log(`[OCcode] Trying Node.js extraction fallback...`);
@@ -128,21 +135,21 @@ async function downloadVSCodium(version, destDir) {
               const AdmZip = require('adm-zip');
               try {
                 const zip = new AdmZip(archivePath);
-                zip.extractAllTo(destDir, true);
+                zip.extractAllTo(extractDir, true);
                 console.log(`[OCcode] Extracted using Node.js AdmZip`);
               } catch (nodeErr) {
                 throw new Error(`Both PowerShell and Node.js extraction failed: ${nodeErr.message}`);
               }
             }
           } else {
-            execSync(`unzip -o "${archivePath}" -d "${destDir}"`, { stdio: 'inherit' });
+            execSync(`unzip -o "${archivePath}" -d "${extractDir}"`, { stdio: 'inherit' });
           }
         } else {
-          execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
+          execSync(`tar -xzf "${archivePath}" -C "${extractDir}"`, { stdio: 'inherit' });
         }
         
         // Verify extraction by checking if files were created
-        const files = fs.readdirSync(destDir);
+        const files = fs.readdirSync(extractDir);
         if (files.length > 0) {
           extractSuccess = true;
           console.log(`[OCcode] Extraction complete (attempt ${attempts})`);
@@ -162,9 +169,57 @@ async function downloadVSCodium(version, destDir) {
       throw new Error(`Failed to extract after ${attempts} attempts: ${lastError?.message}`);
     }
     
+    // For Windows: move contents from extracted subdir to actual destDir
+    if (process.platform === 'win32') {
+      const extractedContents = fs.readdirSync(extractDir);
+      console.log(`[OCcode] Windows extracted to temp dir: ${JSON.stringify(extractedContents)}`);
+      
+      // Find the VSCodium folder (e.g., VSCodium-win32-x64)
+      const vscodiumFolder = extractedContents.find(item => {
+        const fullPath = path.join(extractDir, item);
+        return fs.statSync(fullPath).isDirectory() && item.startsWith('VSCodium');
+      });
+      
+      if (vscodiumFolder) {
+        const sourceDir = path.join(extractDir, vscodiumFolder);
+        console.log(`[OCcode] Moving contents from ${sourceDir} to ${destDir}`);
+        
+        // Move all contents from the VSCodium folder to destDir
+        const subContents = fs.readdirSync(sourceDir);
+        for (const item of subContents) {
+          const src = path.join(sourceDir, item);
+          const dest = path.join(destDir, item);
+          console.log(`[OCcode] Moving ${src} -> ${dest}`);
+          fs.renameSync(src, dest);
+        }
+        
+        // Clean up temp directory
+        fs.rmSync(extractDir, { recursive: true, force: true });
+        console.log(`[OCcode] Windows extraction complete to ${destDir}`);
+      } else {
+        // If no VSCodium folder found, move everything from temp to dest
+        for (const item of extractedContents) {
+          const src = path.join(extractDir, item);
+          const dest = path.join(destDir, item);
+          fs.renameSync(src, dest);
+        }
+        fs.rmSync(extractDir, { recursive: true, force: true });
+      }
+      
+      // Verify VSCodium.exe is in place
+      const vscodiumExe = path.join(destDir, 'VSCodium.exe');
+      if (!fs.existsSync(vscodiumExe)) {
+        console.error(`[OCcode] VSCodium.exe not found after extraction at ${vscodiumExe}`);
+        console.error(`[OCcode] destDir contents: ${JSON.stringify(fs.readdirSync(destDir))}`);
+      } else {
+        console.log(`[OCcode] VSCodium.exe confirmed at ${vscodiumExe}`);
+      }
+    }
+    
     // Flatten: if archive created a single subdirectory, move contents up
     // Skip this on macOS - VSCodium.app must stay as a bundle
-    if (process.platform !== 'darwin') {
+    // Skip on Windows - we already handled it above
+    if (process.platform !== 'darwin' && process.platform !== 'win32') {
       const extractedContents = fs.readdirSync(destDir);
       console.log(`[OCcode] Extracted contents: ${JSON.stringify(extractedContents)}`);
       
@@ -186,54 +241,17 @@ async function downloadVSCodium(version, destDir) {
           console.log(`[OCcode] Flatten complete`);
         }
       }
-    } else {
+    } else if (process.platform === 'darwin') {
       // On macOS, just log what was extracted without flattening
       const extractedContents = fs.readdirSync(destDir);
       console.log(`[OCcode] macOS extracted contents (preserving bundle): ${JSON.stringify(extractedContents)}`);
     }
     
-    // Special handling for Windows: Fix codium.cmd if it exists
+    // Special handling for Windows: Fix codium.cmd to use absolute path
     if (process.platform === 'win32') {
       const cmdPath = path.join(destDir, 'bin', 'codium.cmd');
-      const vscodiumExe = path.join(destDir, 'VSCodium.exe');
-      
-      // If codium.cmd exists but VSCodium.exe is not in the expected location
-      if (fs.existsSync(cmdPath) && !fs.existsSync(vscodiumExe)) {
-        console.log(`[OCcode] Fixing codium.cmd script...`);
-        try {
-          // Find VSCodium.exe in the directory structure
-          let exePath = null;
-          const findExe = (dir) => {
-            for (const item of fs.readdirSync(dir)) {
-              const fullPath = path.join(dir, item);
-              if (item === 'VSCodium.exe') {
-                return fullPath;
-              }
-              if (fs.statSync(fullPath).isDirectory()) {
-                const found = findExe(fullPath);
-                if (found) return found;
-              }
-            }
-            return null;
-          };
-          
-          exePath = findExe(destDir);
-          
-          if (exePath) {
-            console.log(`[OCcode] Found VSCodium.exe at ${exePath}`);
-            // Copy it to the expected location
-            fs.copyFileSync(exePath, vscodiumExe);
-            console.log(`[OCcode] Copied VSCodium.exe to ${vscodiumExe}`);
-          } else {
-            console.error(`[OCcode] Could not find VSCodium.exe in ${destDir}`);
-            // Create a fixed version of codium.cmd that uses absolute path
-            fixCodiumCmd(cmdPath, destDir);
-          }
-        } catch (err) {
-          console.error(`[OCcode] Error fixing codium.cmd: ${err.message}`);
-          // Try to fix the cmd script as a fallback
-          fixCodiumCmd(cmdPath, destDir);
-        }
+      if (fs.existsSync(cmdPath)) {
+        fixCodiumCmd(cmdPath, destDir);
       }
     }
   } catch (err) {
@@ -311,6 +329,11 @@ async function verifyChecksum(filePath, expected) {
  */
 function fixCodiumCmd(cmdPath, vscodeDir) {
   try {
+    if (!fs.existsSync(cmdPath)) {
+      console.warn(`[OCcode] codium.cmd not found at ${cmdPath}`);
+      return false;
+    }
+    
     console.log(`[OCcode] Fixing codium.cmd script at ${cmdPath}`);
     
     // Read the current script
@@ -319,15 +342,26 @@ function fixCodiumCmd(cmdPath, vscodeDir) {
     // Create the absolute path to VSCodium.exe
     const vscodiumExePath = path.join(vscodeDir, 'VSCodium.exe');
     
-    // Replace relative path with absolute path
+    // Check if VSCodium.exe exists at the target location
+    if (!fs.existsSync(vscodiumExePath)) {
+      console.error(`[OCcode] Cannot fix codium.cmd - VSCodium.exe not found at ${vscodiumExePath}`);
+      return false;
+    }
+    
+    // Replace the relative path pattern "%~dp0\..\VSCodium.exe" with absolute path
+    // The pattern matches: "%~dp0\..\VSCodium.exe" (with various quote styles)
     const fixedContent = content.replace(
-      /"%~dp0\\\.\.\\VSCodium\.exe"/g,
-      `"${vscodiumExePath.replace(/\\/g, '\\\\')}"`
+      /"%~dp0\\+\.\.\\+VSCodium\.exe"/g,
+      `"${vscodiumExePath}"`
     );
     
-    // Write the fixed script
-    fs.writeFileSync(cmdPath, fixedContent, 'utf8');
-    console.log(`[OCcode] Fixed codium.cmd script to use absolute path`);
+    if (content !== fixedContent) {
+      // Write the fixed script
+      fs.writeFileSync(cmdPath, fixedContent, 'utf8');
+      console.log(`[OCcode] Fixed codium.cmd script to use absolute path: ${vscodiumExePath}`);
+    } else {
+      console.log(`[OCcode] codium.cmd already uses correct path or pattern not found`);
+    }
     
     return true;
   } catch (err) {
