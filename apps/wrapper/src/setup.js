@@ -22,6 +22,18 @@ async function installExtension(codiumBinary, occodeDir) {
   const extensionsDir = path.join(occodeDir, 'extensions');
   fs.mkdirSync(extensionsDir, { recursive: true });
 
+  // Find the actual VSCodium binary to use for installation
+  // On Windows, prefer VSCodium.exe over codium.cmd for installation
+  let installBinary = codiumBinary;
+  if (process.platform === 'win32') {
+    const vscodeDir = path.dirname(path.dirname(codiumBinary)); // go up from bin/codium.cmd
+    const vscodiumExe = path.join(vscodeDir, 'VSCodium.exe');
+    if (fs.existsSync(vscodiumExe)) {
+      installBinary = vscodiumExe;
+      console.log('[OCcode] Using VSCodium.exe for extension installation:', vscodiumExe);
+    }
+  }
+
   let installedAny = false;
   for (const dir of searchPaths) {
     if (!fs.existsSync(dir)) continue;
@@ -32,13 +44,15 @@ async function installExtension(codiumBinary, occodeDir) {
       const userDataDir = path.join(occodeDir, 'user-data');
       try {
         // Use execSync with shell:true — codium binary is a shell script on Linux/Mac
-        const cmd = `"${codiumBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --extensions-dir "${extensionsDir}" --force`;
+        const cmd = `"${installBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --extensions-dir "${extensionsDir}" --force`;
         console.log('[OCcode] Running:', cmd);
         const output = execSync(cmd, { timeout: 120000, shell: true, encoding: 'utf8' });
         console.log('[OCcode] Install result:', output.trim());
         installedAny = true;
       } catch (err) {
         console.warn(`[OCcode] Failed to install ${vsix}:`, err.message);
+        if (err.stderr) console.warn('[OCcode] stderr:', err.stderr);
+        if (err.stdout) console.warn('[OCcode] stdout:', err.stdout);
       }
     }
   }
