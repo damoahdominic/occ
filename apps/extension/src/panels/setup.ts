@@ -1,8 +1,4 @@
 import * as vscode from "vscode";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import { resolveConfigPath, overrideConfigPath } from "./config-path";
 
 type ChannelAccount = {
   id: string;
@@ -23,80 +19,74 @@ type ControlCenterData = {
   maintenance: { doctor: { status: "healthy" | "warning" | "error" } };
 };
 
-function sanitizeJson5(input: string) {
-  return input
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1")
-    .replace(/,\s*(\}|\])/g, "$1");
-}
-
-function readOpenClawConfig(configPath: string) {
-  try {
-    const contents = fs.readFileSync(configPath, "utf-8");
-    return JSON.parse(sanitizeJson5(contents));
-  } catch (error) {
-    console.warn("OpenClaw Config: unable to read openclaw.json", error);
-    return null;
-  }
-}
-
-function readOpenClawConfigRaw(configPath: string) {
-  try {
-    return fs.readFileSync(configPath, "utf-8");
-  } catch (error) {
-    console.warn("OpenClaw Config: unable to read raw openclaw.json", error);
-    return "";
-  }
-}
-
-function buildControlCenterData(configPath: string): ControlCenterData {
-  const resolvedPath =
-    configPath || path.join(os.homedir(), ".openclaw", "openclaw.json");
-  const rawConfig = readOpenClawConfig(resolvedPath);
-  const agents = rawConfig?.agents?.list ?? [];
-  const channelsConfig = rawConfig?.channels ?? {};
-
-  const channels: ChannelSummary[] = Object.entries(channelsConfig).map(
-    ([channelKey]: [string, any]) => ({
-      channel: channelKey,
-      description: channelKey + ' surface configuration',
-      accounts: [
-        {
-          id: channelKey + '-primary',
-          title: channelKey + ' · Primary',
-          status: "connected",
-        },
-      ],
-    })
-  );
-
-  if (channels.length === 0) {
-    channels.push({
+const DUMMY_DATA: ControlCenterData = {
+  agents: [
+    { id: "agent-alpha" },
+    { id: "agent-beta" },
+    { id: "agent-gamma" },
+  ],
+  channels: [
+    {
       channel: "whatsapp",
       description: "WhatsApp surface configuration",
       accounts: [
-        {
-          id: "whatsapp-primary",
-          title: "WhatsApp · Primary",
-          status: "needs-relink",
-        },
+        { id: "whatsapp-primary", title: "WhatsApp · Primary", status: "connected" },
+        { id: "whatsapp-business", title: "WhatsApp · Business", status: "connected" },
       ],
-    });
-  }
+    },
+    {
+      channel: "telegram",
+      description: "Telegram surface configuration",
+      accounts: [
+        { id: "telegram-primary", title: "Telegram · Primary", status: "connected" },
+      ],
+    },
+    {
+      channel: "slack",
+      description: "Slack surface configuration",
+      accounts: [
+        { id: "slack-workspace", title: "Slack · Workspace", status: "needs-relink" },
+      ],
+    },
+  ],
+  automation: {
+    cronJobs: [
+      { status: "enabled" },
+      { status: "enabled" },
+      { status: "paused" },
+    ],
+  },
+  maintenance: {
+    doctor: { status: "healthy" },
+  },
+};
 
-  return {
-    agents: agents.map((agent: any) => ({ id: agent.id ?? "agent" })),
-    channels,
-    automation: {
-      cronJobs: rawConfig?.automation?.cronJobs ?? [],
-    },
-    maintenance: {
-      doctor: {
-        status: rawConfig?.doctor?.status ?? "warning",
-      },
-    },
-  };
-}
+const DUMMY_RAW_CONFIG = `{
+  // OpenClaw configuration
+  "agents": {
+    "list": [
+      { "id": "agent-alpha", "model": "gpt-4o", "role": "assistant" },
+      { "id": "agent-beta",  "model": "gpt-4o-mini", "role": "responder" },
+      { "id": "agent-gamma", "model": "claude-3-5-sonnet", "role": "analyst" }
+    ]
+  },
+  "channels": {
+    "whatsapp": { "enabled": true, "phoneNumber": "+1-555-0100" },
+    "telegram": { "enabled": true, "botToken": "demo-token-xxxx" },
+    "slack":    { "enabled": false, "webhookUrl": "" }
+  },
+  "automation": {
+    "cronJobs": [
+      { "id": "daily-report",  "schedule": "0 8 * * *",  "status": "enabled" },
+      { "id": "hourly-sync",   "schedule": "0 * * * *",   "status": "enabled" },
+      { "id": "weekly-digest", "schedule": "0 9 * * MON", "status": "paused"  }
+    ]
+  },
+  "gateway": {
+    "port": 3000,
+    "host": "localhost"
+  }
+}`;
 
 function getNonce() {
   let text = "";
@@ -112,13 +102,6 @@ export class ConfigPanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
-
-  public static overrideConfigPath(p: string | undefined) {
-    overrideConfigPath(p);
-    if (ConfigPanel.currentPanel) {
-      void ConfigPanel.currentPanel._update();
-    }
-  }
 
   public static createOrShow(extensionUri: vscode.Uri) {
     if (ConfigPanel.currentPanel) {
@@ -142,6 +125,15 @@ export class ConfigPanel {
     this._extensionUri = extensionUri;
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage((message) => {
+      // Webview signals it has loaded the external script and is ready for data
+      if (message?.command === "ready") {
+        void this._panel.webview.postMessage({
+          command: "init",
+          data: DUMMY_DATA,
+          config: DUMMY_RAW_CONFIG,
+        });
+        return;
+      }
       if (message?.command === "refresh") {
         void this._update();
         return;
@@ -151,21 +143,8 @@ export class ConfigPanel {
         return;
       }
       if (message?.command === "openclaw.saveConfig") {
-        const configPath = resolveConfigPath();
-        const resolvedPath =
-          configPath || path.join(os.homedir(), ".openclaw", "openclaw.json");
-        try {
-          fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-          fs.writeFileSync(resolvedPath, message?.text ?? "", "utf-8");
-          this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
-        } catch (error) {
-          console.warn("OpenClaw Config: unable to write openclaw.json", error);
-          this._panel.webview.postMessage({
-            command: "openclaw.saveResult",
-            ok: false,
-            error: (error as Error)?.message ?? "Failed to save config",
-          });
-        }
+        // Dummy mode: simulate a successful save without writing to disk
+        this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
         return;
       }
       if (message?.command === "openclaw.runCommand") {
@@ -186,11 +165,9 @@ export class ConfigPanel {
       }
       if (message?.command === "openclaw.channelConfigure") {
         const channelName = String(message?.channel ?? "").trim();
-        vscode.window.showInformationMessage("Configure " + (channelName || 'channel') + " - Opening config file...");
-        const configPath = resolveConfigPath() || path.join(os.homedir(), ".openclaw", "openclaw.json");
-        vscode.workspace.openTextDocument(configPath).then(doc => {
-          vscode.window.showTextDocument(doc);
-        });
+        vscode.window.showInformationMessage(
+          "Configure " + (channelName || "channel") + " — edit the config JSON in the Advanced Configuration tab."
+        );
         return;
       }
       if (message?.command === "openclaw.viewStatus") {
@@ -213,12 +190,7 @@ export class ConfigPanel {
   }
 
   private async _update() {
-    const configPath = resolveConfigPath();
-    const data = buildControlCenterData(configPath);
-    const rawConfig = readOpenClawConfigRaw(
-      configPath || path.join(os.homedir(), ".openclaw", "openclaw.json")
-    );
-    this._panel.webview.html = this._getHtml(data, rawConfig);
+    this._panel.webview.html = this._getHtml(DUMMY_DATA, DUMMY_RAW_CONFIG);
   }
 
   private _openChannelInstallerTerminal() {
@@ -229,7 +201,22 @@ export class ConfigPanel {
 
   private _getHtml(data: ControlCenterData, rawConfig: string) {
     const webview = this._panel.webview;
-    const nonce = getNonce();
+
+    // External script loaded via webview URI — this is the ONLY reliable way
+    // to run JS in modern VS Code / VSCodium because the frame-level CSP requires
+    // resources to come from webview.cspSource (extension media folder).
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, "media", "setup-panel.js")
+    );
+    const csp = [
+      `default-src 'none'`,
+      `style-src ${webview.cspSource} 'unsafe-inline'`,
+      `script-src ${webview.cspSource}`,
+      `connect-src ${webview.cspSource} https:`,
+      `img-src ${webview.cspSource} https: data:`,
+      `font-src ${webview.cspSource} https:`,
+    ].join("; ");
+
     const serialized = JSON.stringify(data).replace(/</g, "\\u003c");
     const serializedConfig = JSON.stringify(rawConfig || "").replace(/</g, "\\u003c");
 
@@ -249,7 +236,7 @@ export class ConfigPanel {
           .join("");
 
         return `
-          <div class="channel-card " + (index === 0 ? "active" : "") + "" data-index="" + index + "">
+          <div class="channel-card${index === 0 ? " active" : ""}" data-index="${index}">
             <div class="card-row">
               <div>
                 <div class="card-title">${channel.channel}</div>
@@ -384,16 +371,13 @@ export class ConfigPanel {
       .recent-row { margin-bottom: 16px; }
     `;
 
-    const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; font-src ${webview.cspSource} https:; style-src 'nonce-${nonce}' ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; connect-src ${webview.cspSource} https:`;
-
     return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style nonce="${nonce}">${baseStyles}</style>
-    <script nonce="${nonce}">window.__DATA__ = ${serialized}; window.__CONFIG__ = ${serializedConfig};</script>
+    <style>${baseStyles}</style>
   </head>
   <body>
     <div id="app">
@@ -433,11 +417,6 @@ export class ConfigPanel {
                 <h4>Add Channel</h4>
                 <p>Connect WhatsApp, Telegram, or other messaging platforms.</p>
                 <button class="btn-primary btn-block" id="sidebar-add">Add New</button>
-              </div>
-              <div class="info-card">
-                <h4>Pair Device</h4>
-                <p>Link your phone or device to start sending messages.</p>
-                <button class="btn-secondary btn-block" id="sidebar-pair">Start Pairing</button>
               </div>
               <div class="connection-status">
                 <span class="dot ${connectedChannels > 0 ? 'chip-good' : 'chip-warn'}"></span>
@@ -533,155 +512,7 @@ export class ConfigPanel {
       </div>
     </div>
 
-    <script nonce="${nonce}">
-      const vscode = acquireVsCodeApi();
-      const data = window.__DATA__;
-      const rawConfig = window.__CONFIG__ || "";
-      
-      // Tab switching
-      const tabs = document.querySelectorAll('.tab');
-      const panels = document.querySelectorAll('.tab-panel');
-      
-      tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-          const target = tab.dataset.tab;
-          
-          tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === target));
-          panels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + target));
-        });
-      });
-
-      // Channel Management
-      document.getElementById('add-channel') && document.getElementById('add-channel').addEventListener('click', () => {
-        vscode.postMessage({ command: 'openclaw.channelAdd' });
-      });
-      document.getElementById('sidebar-add') && document.getElementById('sidebar-add').addEventListener('click', () => {
-        vscode.postMessage({ command: 'openclaw.channelAdd' });
-      });
-      document.getElementById('sidebar-pair') && document.getElementById('sidebar-pair').addEventListener('click', () => {
-        vscode.postMessage({ command: 'openclaw.channelAdd' });
-      });
-
-      // Channel card actions
-      document.querySelectorAll('.channel-card [data-action="pair"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const index = btn.dataset.index;
-          const channel = data.channels[index];
-          vscode.postMessage({ command: 'openclaw.channelPair', channel: channel && channel.channel || '' });
-        });
-      });
-
-      document.querySelectorAll('.channel-card [data-action="configure"]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const index = btn.dataset.index;
-          const channel = data.channels[index];
-          vscode.postMessage({ command: 'openclaw.channelConfigure', channel: channel && channel.channel || '' });
-        });
-      });
-
-      document.getElementById('restart-hint') && document.getElementById('restart-hint').addEventListener('click', () => {
-        vscode.postMessage({ command: 'openclaw.viewStatus' });
-      });
-
-      // JSON Editor
-      const configEditor = document.getElementById('config-editor');
-      const configStatus = document.getElementById('config-status');
-      const configHint = document.getElementById('config-hint');
-      
-      function sanitizeJson5(input) {
-        return input
-          .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/(^|[^:])\/\/.*$/gm, '$1')
-          .replace(/,\s*(\}|\])/g, '$1');
-      }
-      
-      function validateConfig() {
-        if (!configEditor || !configStatus) return;
-        const value = configEditor.value || '';
-        try {
-          JSON.parse(sanitizeJson5(value));
-          configStatus.textContent = 'Valid JSON';
-          configStatus.className = 'status-badge ok';
-          configHint.textContent = 'Ready to save';
-        } catch (err) {
-          configStatus.textContent = 'Invalid JSON';
-          configStatus.className = 'status-badge err';
-          configHint.textContent = (err && err.message) || 'Parse error';
-        }
-      }
-      
-      if (configEditor) {
-        configEditor.value = rawConfig;
-        configEditor.addEventListener('input', validateConfig);
-        validateConfig();
-      }
-      
-      const btnSave = document.getElementById('save-config');
-      if (btnSave) {
-        btnSave.addEventListener('click', () => {
-          if (!configEditor) return;
-          vscode.postMessage({ command: 'openclaw.saveConfig', text: configEditor.value });
-        });
-      }
-      
-      window.addEventListener('message', (event) => {
-        const msg = event.data || {};
-        if (msg.command !== 'openclaw.saveResult') return;
-        
-        if (msg.ok) {
-          configStatus.textContent = 'Saved';
-          configStatus.className = 'status-badge ok';
-          configHint.textContent = 'Configuration updated';
-        } else {
-          configStatus.textContent = 'Save Failed';
-          configStatus.className = 'status-badge err';
-          configHint.textContent = msg.error || 'Failed to save';
-        }
-      });
-
-      // Command Console
-      const commandInput = document.getElementById('command-input');
-      const runCommand = document.getElementById('run-command');
-      
-      function runCommandInTerminal(cmd) {
-        const fullCmd = cmd.startsWith('openclaw') ? cmd : 'openclaw ' + cmd;
-        vscode.postMessage({ command: 'openclaw.runCommand', text: fullCmd });
-        
-        // Add to recent
-        const recentRow = document.getElementById('recent-commands');
-        const pill = document.createElement('span');
-        pill.className = 'pill clickable';
-        pill.textContent = cmd;
-        pill.addEventListener('click', () => {
-          if (commandInput) commandInput.value = cmd;
-        });
-        recentRow.appendChild(pill);
-      }
-      
-      runCommand && runCommand.addEventListener('click', () => {
-        const cmd = commandInput && commandInput.value.trim();
-        if (cmd) runCommandInTerminal(cmd);
-      });
-      
-      commandInput && commandInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const cmd = commandInput.value.trim();
-          if (cmd) runCommandInTerminal(cmd);
-        }
-      });
-      
-      // Quick command buttons
-      document.querySelectorAll('.quick-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const cmd = btn.dataset.cmd;
-          if (commandInput) commandInput.value = cmd;
-          runCommandInTerminal(cmd);
-        });
-      });
-    </script>
+  <script src="${scriptUri}"></script>
   </body>
 </html>`;
   }
