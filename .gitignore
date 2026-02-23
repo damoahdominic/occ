@@ -3,3 +3,4 @@ out/
 dist/
 *.vsix
 .DS_Store
+apps/wrapper/assets/vscodium/

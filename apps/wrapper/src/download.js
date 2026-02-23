@@ -343,6 +343,8 @@ function fixCodiumCmd(cmdPath, vscodeDir) {
     // Read the current script
     let content = fs.readFileSync(cmdPath, 'utf8');
     
+    console.log(`[OCcode] Original codium.cmd content (first 500 chars): ${content.slice(0, 500)}`);
+    
     // Create the absolute path to VSCodium.exe
     const vscodiumExePath = path.join(vscodeDir, 'VSCodium.exe');
     
@@ -352,10 +354,10 @@ function fixCodiumCmd(cmdPath, vscodeDir) {
       return false;
     }
     
-    // Replace the relative path pattern "%~dp0\..\VSCodium.exe" with absolute path
-    // The pattern matches: "%~dp0\..\VSCodium.exe" (with various quote styles)
+    // Replace the relative path pattern with absolute path
+    // Match patterns like: %~dp0\..\VSCodium.exe or %~dp0..\VSCodium.exe or %~dp0\..\..\VSCodium.exe
     const fixedContent = content.replace(
-      /"%~dp0\\+\.\.\\+VSCodium\.exe"/g,
+      /"%~dp0[^"]*\\VSCodium\.exe"/g,
       `"${vscodiumExePath}"`
     );
     
@@ -363,6 +365,7 @@ function fixCodiumCmd(cmdPath, vscodeDir) {
       // Write the fixed script
       fs.writeFileSync(cmdPath, fixedContent, 'utf8');
       console.log(`[OCcode] Fixed codium.cmd script to use absolute path: ${vscodiumExePath}`);
+      console.log(`[OCcode] New codium.cmd content (first 500 chars): ${fixedContent.slice(0, 500)}`);
     } else {
       console.log(`[OCcode] codium.cmd already uses correct path or pattern not found`);
     }
