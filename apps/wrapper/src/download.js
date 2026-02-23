@@ -245,6 +245,10 @@ async function downloadVSCodium(version, destDir) {
       // On macOS, just log what was extracted without flattening
       const extractedContents = fs.readdirSync(destDir);
       console.log(`[OCcode] macOS extracted contents (preserving bundle): ${JSON.stringify(extractedContents)}`);
+    } else if (process.platform === 'win32') {
+      // Windows already handled above - just verify contents
+      const extractedContents = fs.readdirSync(destDir);
+      console.log(`[OCcode] Windows final contents: ${JSON.stringify(extractedContents)}`);
     }
     
     // Special handling for Windows: Fix codium.cmd to use absolute path
