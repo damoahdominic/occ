@@ -22,37 +22,87 @@ async function installExtension(codiumBinary, occodeDir) {
   const extensionsDir = path.join(occodeDir, 'extensions');
   fs.mkdirSync(extensionsDir, { recursive: true });
 
-  // Find the actual VSCodium binary to use for installation
-  // On Windows, prefer VSCodium.exe over codium.cmd for installation
-  let installBinary = codiumBinary;
-  if (process.platform === 'win32') {
-    const vscodeDir = path.dirname(path.dirname(codiumBinary)); // go up from bin/codium.cmd
-    const vscodiumExe = path.join(vscodeDir, 'VSCodium.exe');
-    if (fs.existsSync(vscodiumExe)) {
-      installBinary = vscodiumExe;
-      console.log('[OCcode] Using VSCodium.exe for extension installation:', vscodiumExe);
-    }
-  }
-
   let installedAny = false;
   for (const dir of searchPaths) {
     if (!fs.existsSync(dir)) continue;
     const vsixFiles = fs.readdirSync(dir).filter(f => f.endsWith('.vsix'));
     console.log('[OCcode] Found VSIX in', dir, ':', vsixFiles);
+    
     for (const vsix of vsixFiles) {
       const vsixPath = path.join(dir, vsix);
-      const userDataDir = path.join(occodeDir, 'user-data');
+      
       try {
-        // Use execSync with shell:true — codium binary is a shell script on Linux/Mac
-        const cmd = `"${installBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --extensions-dir "${extensionsDir}" --force`;
-        console.log('[OCcode] Running:', cmd);
-        const output = execSync(cmd, { timeout: 120000, shell: true, encoding: 'utf8' });
-        console.log('[OCcode] Install result:', output.trim());
+        // Extract VSIX manually (it's just a ZIP file)
+        // The extension folder name should be publisher.name-version
+        const AdmZip = require('adm-zip');
+        const zip = new AdmZip(vsixPath);
+        
+        // Read package.json from the VSIX to get the extension ID
+        const zipEntries = zip.getEntries();
+        const packageJsonEntry = zipEntries.find(e => e.entryName === 'extension/package.json');
+        
+        if (!packageJsonEntry) {
+          console.warn(`[OCcode] No package.json found in ${vsix}`);
+          continue;
+        }
+        
+        const pkg = JSON.parse(packageJsonEntry.getData().toString('utf8'));
+        const extensionId = `${pkg.publisher}.${pkg.name}-${pkg.version}`;
+        const targetDir = path.join(extensionsDir, extensionId);
+        
+        console.log(`[OCcode] Installing extension ${extensionId} to ${targetDir}`);
+        
+        // Remove existing installation if present
+        if (fs.existsSync(targetDir)) {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+        }
+        
+        // Extract to target directory
+        fs.mkdirSync(targetDir, { recursive: true });
+        
+        // Extract only the 'extension' folder contents (not the extension folder itself)
+        for (const entry of zipEntries) {
+          if (entry.entryName.startsWith('extension/')) {
+            const relativePath = entry.entryName.slice('extension/'.length);
+            if (!relativePath) continue;
+            
+            const targetPath = path.join(targetDir, relativePath);
+            
+            if (entry.isDirectory) {
+              fs.mkdirSync(targetPath, { recursive: true });
+            } else {
+              fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+              fs.writeFileSync(targetPath, entry.getData());
+            }
+          }
+        }
+        
+        console.log(`[OCcode] Extension ${extensionId} installed successfully`);
         installedAny = true;
+        
       } catch (err) {
-        console.warn(`[OCcode] Failed to install ${vsix}:`, err.message);
-        if (err.stderr) console.warn('[OCcode] stderr:', err.stderr);
-        if (err.stdout) console.warn('[OCcode] stdout:', err.stdout);
+        console.error(`[OCcode] Failed to install ${vsix}:`, err.message);
+        console.error(err.stack);
+        
+        // Fallback: try CLI installation
+        try {
+          console.log(`[OCcode] Trying CLI fallback for ${vsix}`);
+          let installBinary = codiumBinary;
+          if (process.platform === 'win32') {
+            const vscodeDir = path.dirname(path.dirname(codiumBinary));
+            const vscodiumExe = path.join(vscodeDir, 'VSCodium.exe');
+            if (fs.existsSync(vscodiumExe)) {
+              installBinary = vscodiumExe;
+            }
+          }
+          
+          const userDataDir = path.join(occodeDir, 'user-data');
+          const cmd = `"${installBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --extensions-dir "${extensionsDir}" --force`;
+          const output = execSync(cmd, { timeout: 120000, encoding: 'utf8', stdio: 'pipe' });
+          console.log('[OCcode] CLI install result:', output.trim());
+        } catch (cliErr) {
+          console.error(`[OCcode] CLI fallback also failed:`, cliErr.message);
+        }
       }
     }
   }
