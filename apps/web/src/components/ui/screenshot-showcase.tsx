@@ -11,24 +11,24 @@ const tabs = [
     label: "Editor",
     caption:
       "A full VSCodium editor with OpenClaw pre-configured — open it and start coding immediately.",
-    imagePath: "/editor.jpeg" as string | null,
-    mobileImagePath: "/editor1.jpeg" as string | null,
+    imagePath: "/editor.png" as string | null,
+    mobileImagePath: "/editor1.png" as string | null,
   },
   {
     id: "control-center",
     label: "Control Center",
     caption:
       "Monitor your agents, manage routing, and track automation — all in one dashboard.",
-    imagePath: "/configuration.jpeg" as string | null,
-    mobileImagePath: "/configuration1.jpeg" as string | null,
+    imagePath: "/configuration.png" as string | null,
+    mobileImagePath: "/configuration1.png" as string | null,
   },
   {
     id: "terminal",
     label: "Terminal",
     caption:
       "Built-in terminal with agent output streaming in real time as your workflows run.",
-    imagePath: "/terminal.jpeg" as string | null,
-    mobileImagePath: "/terminal1.jpeg" as string | null,
+    imagePath: "/terminal.png" as string | null,
+    mobileImagePath: "/terminal1.png" as string | null,
   },
 ];
 
