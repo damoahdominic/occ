@@ -481,6 +481,56 @@ export class ConfigPanel {
       .status-text { font-size: 12px; }
       .hint-text { font-size: 11px; color: var(--text-muted); margin-right: 8px; }
       .recent-row { margin-bottom: 16px; }
+
+      /* ── Responsive ──────────────────────────────────────────── */
+
+      /* Collapse sidebars on medium-width panels */
+      @media (max-width: 820px) {
+        .panel-grid { grid-template-columns: 1fr; }
+        .console-layout { grid-template-columns: 1fr; }
+        .sidebar { order: -1; }
+        /* Make quick-commands horizontal on medium */
+        .quick-grid { grid-template-columns: repeat(2, 1fr); }
+      }
+
+      /* Compact spacing on narrow panels */
+      @media (max-width: 640px) {
+        .container { padding: 14px; }
+        .tabs { gap: 4px; padding-bottom: 10px; flex-wrap: wrap; }
+        .tab { padding: 6px 10px; font-size: 12px; }
+        .panel { padding: 14px; border-radius: 12px; }
+        .panel h2 { font-size: 15px; }
+        .panel-grid { gap: 14px; }
+        .console-layout { gap: 14px; }
+        .header-title { font-size: 17px; }
+        .json-editor { min-height: 260px; }
+        .quick-grid { grid-template-columns: 1fr; }
+        .command-input-wrap { flex-wrap: wrap; }
+        .command-input { min-width: 0; width: 100%; }
+        .card-row { flex-wrap: wrap; }
+      }
+
+      /* Very narrow panels (sidebar panel view) */
+      @media (max-width: 400px) {
+        .container { padding: 10px; }
+        .tabs { gap: 4px; }
+        .tab { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
+        .panel { padding: 10px; border-radius: 10px; }
+        .panel h2 { font-size: 14px; margin-bottom: 12px; }
+        .header { gap: 8px; margin-bottom: 14px; }
+        .header-title { font-size: 15px; gap: 8px; }
+        .channel-card { padding: 12px; }
+        .card-actions { flex-wrap: wrap; }
+        .btn-primary, .btn-secondary { font-size: 11px; }
+        .editor-toolbar { flex-wrap: wrap; gap: 8px; }
+        .editor-toolbar > div { flex: 1 1 100%; }
+        .panel-header-row { flex-wrap: wrap; gap: 8px; }
+        .panel-header-row > div { flex: 1 1 100%; }
+        .panel-header-row .btn-primary { width: 100%; }
+        .json-editor { min-height: 200px; font-size: 12px; }
+        .status-chip { font-size: 10px; padding: 3px 8px; }
+        .info-card { padding: 10px; }
+      }
     `;
 
     return `<!DOCTYPE html>

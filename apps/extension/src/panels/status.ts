@@ -52,6 +52,7 @@ export class StatusPanel {
   private constructor(panel: vscode.WebviewPanel) {
     this._panel = panel;
     this._isVisible = panel.visible;
+    this._panel.webview.html = this._getLoadingHtml();
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.onDidChangeViewState(e => {
@@ -742,6 +743,63 @@ export class StatusPanel {
       .replace(/'/g, '&#39;');
   }
 
+  private _getLoadingHtml(): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, sans-serif);
+      background: radial-gradient(900px 600px at -10% -10%, rgba(220,40,40,0.2), transparent),
+                  radial-gradient(800px 400px at 120% 0%, rgba(220,40,40,0.12), transparent),
+                  #121212;
+      color: #ededed;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      gap: 20px;
+    }
+    h2 { color: #ff4b4b; letter-spacing: 0.2px; }
+    .spinner {
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(220, 40, 40, 0.15);
+      border-top-color: #dc2828;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      font-size: 13px;
+      color: #666;
+      letter-spacing: 0.02em;
+    }
+    .loading-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+      100% { content: ''; }
+    }
+  </style>
+</head>
+<body>
+  <h2>OpenClaw Gateway</h2>
+  <div class="spinner"></div>
+  <span class="loading-text">Fetching status<span class="loading-dots"></span></span>
+</body>
+</html>`;
+  }
+
   private _getHtml(status: GatewayStatus): string {
     const { running, installed, dashboard, updatedAt } = status;
     const safeDashboard = this._escapeHtml(dashboard || '—');
@@ -789,10 +847,26 @@ export class StatusPanel {
     .kv {
       display: flex;
       justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
       font-size: 13px;
       color: #d2d2d2;
+      min-width: 0;
     }
-    .kv span:first-child { color: #9a9a9a; }
+    .kv span:first-child {
+      color: #9a9a9a;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .kv span:last-child,
+    .kv a {
+      text-align: right;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
     button {
       padding: 8px 18px;
@@ -824,9 +898,7 @@ export class StatusPanel {
     <span class="pill">${running ? 'Healthy' : installed ? 'Offline' : 'Missing'}</span>
   </div>
   <div class="card">
-    <div class="grid">
-      <div class="kv"><span>Status</span><span>${running ? 'Running' : installed ? 'Stopped' : 'Missing'}</span></div>
-    </div>
+    <div class="kv"><span>Status</span><span>${running ? 'Running' : installed ? 'Stopped' : 'Missing'}</span></div>
   </div>
   <div class="card">
     <div class="kv">
