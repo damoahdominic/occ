@@ -11,29 +11,21 @@ const tabs = [
     label: "Editor",
     caption:
       "A full VSCodium editor with OpenClaw pre-configured — open it and start coding immediately.",
-    // Set imagePath to the real screenshot when ready, e.g. "/screenshots/editor.png"
-    imagePath: null as string | null,
+    imagePath: "/editor.jpeg" as string | null,
   },
   {
     id: "control-center",
     label: "Control Center",
     caption:
       "Monitor your agents, manage routing, and track automation — all in one dashboard.",
-    imagePath: null as string | null,
+    imagePath: "/configuration.jpeg" as string | null,
   },
   {
     id: "terminal",
     label: "Terminal",
     caption:
       "Built-in terminal with agent output streaming in real time as your workflows run.",
-    imagePath: null as string | null,
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    caption:
-      "Simple settings panel — tweak your workspace without touching config files.",
-    imagePath: null as string | null,
+    imagePath: "/terminal.jpeg" as string | null,
   },
 ];
 
@@ -46,9 +38,7 @@ function Placeholder({ tab }: { tab: Tab }) {
       ? "#3B82F6"
       : tab.id === "control-center"
       ? "#EF4444"
-      : tab.id === "terminal"
-      ? "#10B981"
-      : "#8B5CF6";
+      : "#10B981";
 
   return (
     <div

@@ -451,7 +451,7 @@ export class ConfigPanel {
       .json-editor { width: 100%; min-height: 400px; resize: vertical; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); padding: 16px; font-size: 13px; line-height: 1.6; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
       .json-editor:focus { outline: none; border-color: var(--accent); }
       .editor-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-      .editor-status { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+      .editor-status { display: flex; align-items: center; gap: 12px; font-size: 12px; margin-bottom: 10px; }
       .status-badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
       .status-badge.ok { background: var(--chip-good); color: #0f172a; }
       .status-badge.err { background: var(--chip-bad); color: white; }
