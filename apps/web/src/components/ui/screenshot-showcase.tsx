@@ -12,6 +12,7 @@ const tabs = [
     caption:
       "A full VSCodium editor with OpenClaw pre-configured — open it and start coding immediately.",
     imagePath: "/editor.jpeg" as string | null,
+    mobileImagePath: "/editor1.jpeg" as string | null,
   },
   {
     id: "control-center",
@@ -19,6 +20,7 @@ const tabs = [
     caption:
       "Monitor your agents, manage routing, and track automation — all in one dashboard.",
     imagePath: "/configuration.jpeg" as string | null,
+    mobileImagePath: "/configuration1.jpeg" as string | null,
   },
   {
     id: "terminal",
@@ -26,6 +28,7 @@ const tabs = [
     caption:
       "Built-in terminal with agent output streaming in real time as your workflows run.",
     imagePath: "/terminal.jpeg" as string | null,
+    mobileImagePath: "/terminal1.jpeg" as string | null,
   },
 ];
 
@@ -156,17 +159,33 @@ export function ScreenshotShowcase() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
             >
+              {active.mobileImagePath ? (
+                <Image
+                  src={active.mobileImagePath}
+                  alt={`OCCode ${active.label} mobile`}
+                  width={800}
+                  height={1000}
+                  className="w-full h-auto block md:hidden"
+                  draggable={false}
+                />
+              ) : (
+                <div className="md:hidden">
+                  <Placeholder tab={active} />
+                </div>
+              )}
               {active.imagePath ? (
                 <Image
                   src={active.imagePath}
                   alt={`OCCode ${active.label}`}
                   width={1400}
                   height={720}
-                  className="w-full h-auto block"
+                  className="w-full h-auto hidden md:block"
                   draggable={false}
                 />
               ) : (
-                <Placeholder tab={active} />
+                <div className="hidden md:block">
+                  <Placeholder tab={active} />
+                </div>
               )}
             </motion.div>
           </AnimatePresence>
