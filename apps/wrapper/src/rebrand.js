@@ -39,26 +39,86 @@ async function rebrandVSCodium(vscodeDir) {
 
 async function rebrandWindows(vscodeDir) {
   // After flattening, files should be directly in vscodeDir
-  const dir = fs.existsSync(path.join(vscodeDir, 'VSCodium.exe')) 
+  const dir = fs.existsSync(path.join(vscodeDir, 'VSCodium.exe'))
     ? vscodeDir
     : path.join(vscodeDir, 'VSCodium-win32-x64');
   if (!fs.existsSync(dir)) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
 
-  // 1. Replace code.ico for file associations
-  const codeIco = path.join(dir, 'resources', 'app', 'resources', 'win32', 'code.ico');
   const srcIco = getAssetPath('icon.ico');
-  safeCopy(srcIco, codeIco);
+  const srcPng = getAssetPath('icon.png');
+  const win32Dir = path.join(dir, 'resources', 'app', 'resources', 'win32');
 
-  // 2. Patch codium.exe icon via rcedit
-  const exePath = path.join(dir, 'codium.exe');
-  if (fs.existsSync(exePath) && fs.existsSync(srcIco)) {
+  // 1. Replace code.ico (file-association icon + fallback)
+  safeCopy(srcIco, path.join(win32Dir, 'code.ico'));
+
+  // 2. Replace the PNG icons that VSCodium's BrowserWindow uses as the
+  //    window/taskbar icon on Windows (resources/win32/code_150x150.png and
+  //    code_70x70.png). VSCodium reads these at runtime to set window.icon.
+  safeCopy(srcPng, path.join(win32Dir, 'code_150x150.png'));
+  safeCopy(srcPng, path.join(win32Dir, 'code_70x70.png'));
+
+  // 3. Patch VSCodium's compiled main.js so the icon is always applied.
+  //    In production builds VSCodium only sets the BrowserWindow icon in
+  //    dev mode (!isBuilt guard). We remove that guard so our PNG above is
+  //    always used, making it show in the OS taskbar.
+  patchMainJsIcon(dir);
+
+  // 4. Try rcedit if available (patches the exe's embedded PE icon resource)
+  const mainExePath = path.join(dir, 'VSCodium.exe');
+  if (fs.existsSync(mainExePath) && fs.existsSync(srcIco)) {
     try {
       const rcedit = require('@electron/rcedit');
-      await rcedit(exePath, { icon: srcIco });
-      console.log('[rebrand] Patched codium.exe icon via rcedit');
-    } catch (err) {
-      console.warn('[rebrand] rcedit patch skipped:', err.message);
+      await rcedit(mainExePath, { icon: srcIco });
+      console.log('[rebrand] Patched VSCodium.exe embedded icon via rcedit');
+    } catch (_) {
+      // rcedit is optional — silently skip if not installed
     }
+  }
+}
+
+/**
+ * Remove the `!isBuilt` guard in VSCodium's compiled main.js so that the
+ * BrowserWindow icon (code_150x150.png → our OCcode icon) is always set on
+ * Windows, making the correct icon appear in the OS taskbar.
+ *
+ * The minified pattern looks like:
+ *   $&&!a.isBuilt&&(l.icon=O(a.appRoot,"resources/win32/code_150x150.png"))
+ * We replace it with:
+ *   $&&(l.icon=O(a.appRoot,"resources/win32/code_150x150.png"))
+ */
+function patchMainJsIcon(dir) {
+  const mainJsPath = path.join(dir, 'resources', 'app', 'out', 'main.js');
+  if (!fs.existsSync(mainJsPath)) {
+    console.warn('[rebrand] main.js not found, skipping icon patch');
+    return;
+  }
+  try {
+    let src = fs.readFileSync(mainJsPath, 'utf8');
+
+    // Pattern: any variable followed by &&!<var>.isBuilt&&(l.icon=
+    // We drop the !<var>.isBuilt&& part so the icon is always set.
+    const before = src;
+    src = src.replace(
+      /(\$&&)![\w$]+\.isBuilt&&(\(l\.icon=)/g,
+      '$1$2'
+    );
+
+    if (src === before) {
+      // Try a looser pattern in case variable names differ between builds
+      src = src.replace(
+        /&&![\w$]+\.isBuilt&&(\([\w$]+\.icon=[\w$]+\([\w$]+\.appRoot,"resources\/win32\/code_150x150\.png"\)\))/g,
+        '&&$1'
+      );
+    }
+
+    if (src !== before) {
+      fs.writeFileSync(mainJsPath, src, 'utf8');
+      console.log('[rebrand] Patched main.js: removed isBuilt icon guard (taskbar icon will now show)');
+    } else {
+      console.log('[rebrand] main.js icon guard already removed or pattern not matched — skipping');
+    }
+  } catch (err) {
+    console.warn('[rebrand] main.js icon patch failed (non-fatal):', err.message);
   }
 }
 
