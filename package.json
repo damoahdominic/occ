@@ -10,10 +10,13 @@
     "packages/control-center"
   ],
   "scripts": {
+    "dev": "npm run --workspace=apps/extension watch & npm run --workspace=apps/wrapper start",
+    "web": "npm run --workspace=apps/web dev",
     "compile": "npm run ext:compile",
     "build-electron": "npm run --workspace=apps/wrapper build",
     "wrapper": "npm run --workspace=apps/wrapper start",
     "ext:compile": "npm run --workspace=apps/extension compile",
+    "ext:watch": "npm run --workspace=apps/extension watch",
     "ext:package": "npm run --workspace=apps/extension package",
     "ext:bundle": "bash ./scripts/package-extension.sh",
     "vscodium:update": "node ./scripts/update-vscodium.mjs"

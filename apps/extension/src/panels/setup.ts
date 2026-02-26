@@ -1,4 +1,10 @@
 import * as vscode from "vscode";
+<<<<<<< HEAD
+=======
+import * as fs from "fs";
+import * as path from "path";
+import { resolveConfigPath } from "./config-path";
+>>>>>>> main
 
 type ChannelAccount = {
   id: string;
@@ -19,6 +25,7 @@ type ControlCenterData = {
   maintenance: { doctor: { status: "healthy" | "warning" | "error" } };
 };
 
+<<<<<<< HEAD
 const DUMMY_DATA: ControlCenterData = {
   agents: [
     { id: "agent-alpha" },
@@ -87,6 +94,99 @@ const DUMMY_RAW_CONFIG = `{
     "host": "localhost"
   }
 }`;
+=======
+function sanitizeJson5(input: string): string {
+  return input
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/,\s*(\}|\])/g, "$1");
+}
+
+function readOpenClawConfig(configPath: string): any | null {
+  try {
+    const contents = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(sanitizeJson5(contents));
+  } catch (error) {
+    console.warn("[OpenClaw] Unable to read openclaw.json:", error);
+    return null;
+  }
+}
+
+function readOpenClawConfigRaw(configPath: string): string {
+  try {
+    return fs.readFileSync(configPath, "utf-8");
+  } catch (error) {
+    console.warn("[OpenClaw] Unable to read raw openclaw.json:", error);
+    return getDefaultConfig();
+  }
+}
+
+function getDefaultConfig(): string {
+  return `{
+  // OpenClaw configuration
+  "agents": {
+    "list": []
+  },
+  "channels": {},
+  "automation": {
+    "cronJobs": []
+  },
+  "gateway": {
+    "port": 3000,
+    "host": "localhost"
+  }
+}`;
+}
+
+function buildControlCenterData(configPath: string): ControlCenterData {
+  const rawConfig = readOpenClawConfig(configPath);
+  
+  if (!rawConfig) {
+    // Return empty state if no config exists
+    return {
+      agents: [],
+      channels: [],
+      automation: { cronJobs: [] },
+      maintenance: { doctor: { status: "healthy" } },
+    };
+  }
+
+  const agents = rawConfig?.agents?.list?.map((a: any) => ({ id: a.id || "unknown" })) ?? [];
+  const channelsConfig = rawConfig?.channels ?? {};
+
+  const channels: ChannelSummary[] = Object.entries(channelsConfig).map(
+    ([channelKey, channelData]: [string, any]) => {
+      const enabled = channelData?.enabled ?? false;
+      return {
+        channel: channelKey,
+        description: `${channelKey} surface configuration`,
+        accounts: [
+          { 
+            id: `${channelKey}-primary`, 
+            title: `${channelKey} · Primary`, 
+            status: enabled ? "connected" : "needs-relink" 
+          },
+        ],
+      };
+    }
+  );
+
+  const cronJobs = rawConfig?.automation?.cronJobs ?? [];
+
+  return {
+    agents,
+    channels,
+    automation: {
+      cronJobs: cronJobs.map((j: any) => ({ 
+        status: j?.status === "paused" ? "paused" : "enabled" 
+      })),
+    },
+    maintenance: {
+      doctor: { status: "healthy" },
+    },
+  };
+}
+>>>>>>> main
 
 function getNonce() {
   let text = "";
@@ -102,6 +202,11 @@ export class ConfigPanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
+<<<<<<< HEAD
+=======
+  private _fileWatcher: vscode.FileSystemWatcher | undefined;
+  private _lastModified: number = 0;
+>>>>>>> main
 
   public static createOrShow(extensionUri: vscode.Uri) {
     if (ConfigPanel.currentPanel) {
@@ -124,13 +229,22 @@ export class ConfigPanel {
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    
+    // Set up file watcher for auto-refresh
+    this._setupFileWatcher();
+    
     this._panel.webview.onDidReceiveMessage((message) => {
       // Webview signals it has loaded the external script and is ready for data
       if (message?.command === "ready") {
         void this._panel.webview.postMessage({
           command: "init",
+<<<<<<< HEAD
           data: DUMMY_DATA,
           config: DUMMY_RAW_CONFIG,
+=======
+          data: buildControlCenterData(resolveConfigPath()),
+          config: readOpenClawConfigRaw(resolveConfigPath()),
+>>>>>>> main
         });
         return;
       }
@@ -143,8 +257,40 @@ export class ConfigPanel {
         return;
       }
       if (message?.command === "openclaw.saveConfig") {
+<<<<<<< HEAD
         // Dummy mode: simulate a successful save without writing to disk
         this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
+=======
+        const configPath = resolveConfigPath();
+        const text = message?.text || "";
+        
+        try {
+          // Validate JSON5 before saving
+          JSON.parse(sanitizeJson5(text));
+          
+          // Ensure directory exists
+          const configDir = path.dirname(configPath);
+          if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+          }
+          
+          // Write the config
+          fs.writeFileSync(configPath, text, "utf-8");
+          console.log("[OpenClaw] Config saved to:", configPath);
+          
+          this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
+          
+          // Refresh the view with new data
+          void this._update();
+        } catch (err: any) {
+          console.error("[OpenClaw] Failed to save config:", err);
+          this._panel.webview.postMessage({ 
+            command: "openclaw.saveResult", 
+            ok: false, 
+            error: err.message || "Failed to save configuration" 
+          });
+        }
+>>>>>>> main
         return;
       }
       if (message?.command === "openclaw.runCommand") {
@@ -190,7 +336,64 @@ export class ConfigPanel {
   }
 
   private async _update() {
+<<<<<<< HEAD
     this._panel.webview.html = this._getHtml(DUMMY_DATA, DUMMY_RAW_CONFIG);
+=======
+    const configPath = resolveConfigPath();
+    const data = buildControlCenterData(configPath);
+    const rawConfig = readOpenClawConfigRaw(configPath);
+    this._panel.webview.html = this._getHtml(data, rawConfig);
+>>>>>>> main
+  }
+
+  private _setupFileWatcher() {
+    const configPath = resolveConfigPath();
+    
+    // Watch the config file for changes
+    this._fileWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(path.dirname(configPath)), path.basename(configPath))
+    );
+    
+    // Debounced refresh on change
+    const debouncedRefresh = this._debounce(() => {
+      const stats = fs.statSync(configPath);
+      if (stats.mtimeMs > this._lastModified) {
+        this._lastModified = stats.mtimeMs;
+        console.log("[OpenClaw] Config file changed, refreshing...");
+        void this._pushRefresh();
+      }
+    }, 300);
+    
+    this._fileWatcher.onDidChange(debouncedRefresh, null, this._disposables);
+    this._fileWatcher.onDidCreate(debouncedRefresh, null, this._disposables);
+    
+    // Set initial modified time
+    try {
+      const stats = fs.statSync(configPath);
+      this._lastModified = stats.mtimeMs;
+    } catch {
+      this._lastModified = 0;
+    }
+  }
+
+  private _debounce(fn: () => void, ms: number) {
+    let timer: NodeJS.Timeout | undefined;
+    return () => {
+      clearTimeout(timer);
+      timer = setTimeout(fn, ms);
+    };
+  }
+
+  private async _pushRefresh() {
+    const configPath = resolveConfigPath();
+    const data = buildControlCenterData(configPath);
+    const rawConfig = readOpenClawConfigRaw(configPath);
+    
+    await this._panel.webview.postMessage({
+      command: "refresh",
+      data,
+      config: rawConfig,
+    });
   }
 
   private _openChannelInstallerTerminal() {
@@ -339,7 +542,7 @@ export class ConfigPanel {
       .json-editor { width: 100%; min-height: 400px; resize: vertical; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); padding: 16px; font-size: 13px; line-height: 1.6; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
       .json-editor:focus { outline: none; border-color: var(--accent); }
       .editor-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-      .editor-status { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+      .editor-status { display: flex; align-items: center; gap: 12px; font-size: 12px; margin-bottom: 10px; }
       .status-badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
       .status-badge.ok { background: var(--chip-good); color: #0f172a; }
       .status-badge.err { background: var(--chip-bad); color: white; }
@@ -369,8 +572,61 @@ export class ConfigPanel {
       .status-text { font-size: 12px; }
       .hint-text { font-size: 11px; color: var(--text-muted); margin-right: 8px; }
       .recent-row { margin-bottom: 16px; }
+
+<<<<<<< HEAD
+=======
+      /* ── Responsive ──────────────────────────────────────────── */
+
+      /* Collapse sidebars on medium-width panels */
+      @media (max-width: 820px) {
+        .panel-grid { grid-template-columns: 1fr; }
+        .console-layout { grid-template-columns: 1fr; }
+        .sidebar { order: -1; }
+        /* Make quick-commands horizontal on medium */
+        .quick-grid { grid-template-columns: repeat(2, 1fr); }
+      }
+
+      /* Compact spacing on narrow panels */
+      @media (max-width: 640px) {
+        .container { padding: 14px; }
+        .tabs { gap: 4px; padding-bottom: 10px; flex-wrap: wrap; }
+        .tab { padding: 6px 10px; font-size: 12px; }
+        .panel { padding: 14px; border-radius: 12px; }
+        .panel h2 { font-size: 15px; }
+        .panel-grid { gap: 14px; }
+        .console-layout { gap: 14px; }
+        .header-title { font-size: 17px; }
+        .json-editor { min-height: 260px; }
+        .quick-grid { grid-template-columns: 1fr; }
+        .command-input-wrap { flex-wrap: wrap; }
+        .command-input { min-width: 0; width: 100%; }
+        .card-row { flex-wrap: wrap; }
+      }
+
+      /* Very narrow panels (sidebar panel view) */
+      @media (max-width: 400px) {
+        .container { padding: 10px; }
+        .tabs { gap: 4px; }
+        .tab { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
+        .panel { padding: 10px; border-radius: 10px; }
+        .panel h2 { font-size: 14px; margin-bottom: 12px; }
+        .header { gap: 8px; margin-bottom: 14px; }
+        .header-title { font-size: 15px; gap: 8px; }
+        .channel-card { padding: 12px; }
+        .card-actions { flex-wrap: wrap; }
+        .btn-primary, .btn-secondary { font-size: 11px; }
+        .editor-toolbar { flex-wrap: wrap; gap: 8px; }
+        .editor-toolbar > div { flex: 1 1 100%; }
+        .panel-header-row { flex-wrap: wrap; gap: 8px; }
+        .panel-header-row > div { flex: 1 1 100%; }
+        .panel-header-row .btn-primary { width: 100%; }
+        .json-editor { min-height: 200px; font-size: 12px; }
+        .status-chip { font-size: 10px; padding: 3px 8px; }
+        .info-card { padding: 10px; }
+      }
     `;
 
+>>>>>>> main
     return `<!DOCTYPE html>
 <html lang="en">
   <head>

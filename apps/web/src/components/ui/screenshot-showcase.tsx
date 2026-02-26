@@ -11,29 +11,24 @@ const tabs = [
     label: "Editor",
     caption:
       "A full VSCodium editor with OpenClaw pre-configured — open it and start coding immediately.",
-    // Set imagePath to the real screenshot when ready, e.g. "/screenshots/editor.png"
-    imagePath: null as string | null,
+    imagePath: "/editor.png" as string | null,
+    mobileImagePath: "/editor1.png" as string | null,
   },
   {
     id: "control-center",
     label: "Control Center",
     caption:
       "Monitor your agents, manage routing, and track automation — all in one dashboard.",
-    imagePath: null as string | null,
+    imagePath: "/configuration.png" as string | null,
+    mobileImagePath: "/configuration1.png" as string | null,
   },
   {
     id: "terminal",
     label: "Terminal",
     caption:
       "Built-in terminal with agent output streaming in real time as your workflows run.",
-    imagePath: null as string | null,
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    caption:
-      "Simple settings panel — tweak your workspace without touching config files.",
-    imagePath: null as string | null,
+    imagePath: "/terminal.png" as string | null,
+    mobileImagePath: "/terminal1.png" as string | null,
   },
 ];
 
@@ -46,9 +41,7 @@ function Placeholder({ tab }: { tab: Tab }) {
       ? "#3B82F6"
       : tab.id === "control-center"
       ? "#EF4444"
-      : tab.id === "terminal"
-      ? "#10B981"
-      : "#8B5CF6";
+      : "#10B981";
 
   return (
     <div
@@ -166,17 +159,33 @@ export function ScreenshotShowcase() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
             >
+              {active.mobileImagePath ? (
+                <Image
+                  src={active.mobileImagePath}
+                  alt={`OCCode ${active.label} mobile`}
+                  width={800}
+                  height={1000}
+                  className="w-full h-auto block md:hidden"
+                  draggable={false}
+                />
+              ) : (
+                <div className="md:hidden">
+                  <Placeholder tab={active} />
+                </div>
+              )}
               {active.imagePath ? (
                 <Image
                   src={active.imagePath}
                   alt={`OCCode ${active.label}`}
                   width={1400}
                   height={720}
-                  className="w-full h-auto block"
+                  className="w-full h-auto hidden md:block"
                   draggable={false}
                 />
               ) : (
-                <Placeholder tab={active} />
+                <div className="hidden md:block">
+                  <Placeholder tab={active} />
+                </div>
               )}
             </motion.div>
           </AnimatePresence>
