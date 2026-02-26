@@ -69,7 +69,7 @@ function buildControlCenterData(configPath: string): ControlCenterData {
   const rawConfig = readOpenClawConfig(configPath);
   
   if (!rawConfig) {
-    // Return empty state if no config exists
+    // Return empty state if no config exists or is invalid
     return {
       agents: [],
       channels: [],
