@@ -24,21 +24,27 @@ async function installExtension(codiumBinary, occodeDir) {
 
   let installedAny = false;
   for (const dir of searchPaths) {
-    if (!fs.existsSync(dir)) continue;
+    if (!fs.existsSync(dir)) {
+      console.log(`[OCcode] Extension search path does not exist: ${dir}`);
+      continue;
+    }
     const vsixFiles = fs.readdirSync(dir).filter(f => f.endsWith('.vsix'));
     console.log('[OCcode] Found VSIX in', dir, ':', vsixFiles);
     
     for (const vsix of vsixFiles) {
       const vsixPath = path.join(dir, vsix);
+      console.log(`[OCcode] Processing VSIX: ${vsixPath}`);
       
       try {
-        // Extract VSIX manually (it's just a ZIP file)
-        // The extension folder name should be publisher.name-version
+        console.log('[OCcode] Reading VSIX entries...');
         const AdmZip = require('adm-zip');
         const zip = new AdmZip(vsixPath);
         
         // Read package.json from the VSIX to get the extension ID
+        console.log('[OCcode] Getting zip entries...');
         const zipEntries = zip.getEntries();
+        console.log(`[OCcode] Found ${zipEntries.length} entries in VSIX`);
+        
         const packageJsonEntry = zipEntries.find(e => e.entryName === 'extension/package.json');
         
         if (!packageJsonEntry) {
@@ -46,6 +52,7 @@ async function installExtension(codiumBinary, occodeDir) {
           continue;
         }
         
+        console.log('[OCcode] Parsing package.json...');
         const pkg = JSON.parse(packageJsonEntry.getData().toString('utf8'));
         const extensionId = `${pkg.publisher}.${pkg.name}-${pkg.version}`;
         const targetDir = path.join(extensionsDir, extensionId);
@@ -54,30 +61,38 @@ async function installExtension(codiumBinary, occodeDir) {
         
         // Remove existing installation if present
         if (fs.existsSync(targetDir)) {
+          console.log(`[OCcode] Removing existing extension at ${targetDir}`);
           fs.rmSync(targetDir, { recursive: true, force: true });
         }
         
         // Extract to target directory
         fs.mkdirSync(targetDir, { recursive: true });
         
-        // Extract only the 'extension' folder contents (not the extension folder itself)
-        for (const entry of zipEntries) {
-          if (entry.entryName.startsWith('extension/')) {
-            const relativePath = entry.entryName.slice('extension/'.length);
-            if (!relativePath) continue;
-            
-            const targetPath = path.join(targetDir, relativePath);
-            
-            if (entry.isDirectory) {
-              fs.mkdirSync(targetPath, { recursive: true });
-            } else {
-              fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-              fs.writeFileSync(targetPath, entry.getData());
-            }
+        // Extract only the 'extension' folder contents
+        console.log('[OCcode] Extracting extension files...');
+        let extractedCount = 0;
+        const extensionEntries = zipEntries.filter(e => e.entryName.startsWith('extension/'));
+        console.log(`[OCcode] Found ${extensionEntries.length} extension entries to extract`);
+        
+        for (const entry of extensionEntries) {
+          const relativePath = entry.entryName.slice('extension/'.length);
+          if (!relativePath) continue;
+          
+          const targetPath = path.join(targetDir, relativePath);
+          
+          if (entry.isDirectory) {
+            fs.mkdirSync(targetPath, { recursive: true });
+          } else {
+            fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+            fs.writeFileSync(targetPath, entry.getData());
+          }
+          extractedCount++;
+          if (extractedCount % 100 === 0) {
+            console.log(`[OCcode] Extracted ${extractedCount}/${extensionEntries.length} files...`);
           }
         }
         
-        console.log(`[OCcode] Extension ${extensionId} installed successfully`);
+        console.log(`[OCcode] Extension ${extensionId} installed successfully (${extractedCount} files)`);
         installedAny = true;
         
       } catch (err) {
@@ -98,6 +113,7 @@ async function installExtension(codiumBinary, occodeDir) {
           
           const userDataDir = path.join(occodeDir, 'user-data');
           const cmd = `"${installBinary}" --install-extension "${vsixPath}" --user-data-dir "${userDataDir}" --extensions-dir "${extensionsDir}" --force`;
+          console.log(`[OCcode] Running: ${cmd}`);
           const output = execSync(cmd, { timeout: 120000, encoding: 'utf8', stdio: 'pipe' });
           console.log('[OCcode] CLI install result:', output.trim());
         } catch (cliErr) {
