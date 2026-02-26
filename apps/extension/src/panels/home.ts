@@ -270,11 +270,7 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-<<<<<<< HEAD
   <p class="tagline">AI powered local installation for OpenClaw</p>
-=======
-  <p class="tagline">AI powered local installation and management tool for OpenClaw.</p>
->>>>>>> main
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row">

@@ -10,13 +10,6 @@ const DEFAULT_SETTINGS = {
   "telemetry.telemetryLevel": "off",
 };
 
-// IDs to remove from the activity bar (set pinned:false in state.vscdb)
-const ACTIVITY_BAR_HIDDEN_IDS = new Set([
-  'workbench.view.scm',
-  'workbench.view.debug',
-  'workbench.view.extensions',
-]);
-
 async function installExtension(codiumBinary, occodeDir) {
   // Look for bundled .vsix files in the app's resources or local extensions/ dir
   const searchPaths = [
@@ -182,101 +175,6 @@ async function setDefaults(occodeDir) {
   fs.writeFileSync(settingsFile, JSON.stringify(merged, null, 2));
 }
 
-<<<<<<< HEAD
-/**
- * Patches state.vscdb to hide the unwanted activity bar icons.
- * Uses sql.js (pure-JS SQLite — no native bindings required).
- * Only runs once per install; skips if the flag file already exists.
- */
-async function patchActivityBarState(occodeDir) {
-  const flagFile = path.join(occodeDir, '.activity-bar-patched');
-
-  // For the seed-copy path (fresh install): state.vscdb doesn't exist yet,
-  // so copy our pre-seeded database into place so VSCodium starts with the
-  // correct pinned state from the very first launch.
-  const globalStorageDir = path.join(occodeDir, 'user-data', 'User', 'globalStorage');
-  const stateDbPath = path.join(globalStorageDir, 'state.vscdb');
-
-  if (!fs.existsSync(stateDbPath)) {
-    // Fresh install — copy the seed database.
-    const seedPaths = [
-      path.join(__dirname, '..', 'assets', 'seed-state.vscdb'),
-      path.join(process.resourcesPath || '', 'assets', 'seed-state.vscdb'),
-    ];
-    for (const seedPath of seedPaths) {
-      if (fs.existsSync(seedPath)) {
-        fs.mkdirSync(globalStorageDir, { recursive: true });
-        fs.copyFileSync(seedPath, stateDbPath);
-        console.log('[OCcode] Seeded activity bar state from:', seedPath);
-        fs.writeFileSync(flagFile, '1');
-        return;
-      }
-    }
-    // No seed found — VSCodium will create defaults on first launch; we'll
-    // patch on next wrapper run (flag file won't exist yet).
-    console.warn('[OCcode] seed-state.vscdb not found; skipping activity bar seed.');
-    return;
-  }
-
-  // Already patched on a previous run — leave the user's layout alone.
-  if (fs.existsSync(flagFile)) return;
-
-  // Existing install: use sql.js to patch the live state.vscdb.
-  try {
-    const initSqlJs = require('sql.js');
-    // Locate the WASM file bundled alongside sql.js in node_modules.
-    const wasmSearchPaths = [
-      path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist'),
-      path.join(process.resourcesPath || '', 'node_modules', 'sql.js', 'dist'),
-    ];
-    const wasmDir = wasmSearchPaths.find(p => fs.existsSync(path.join(p, 'sql-wasm.wasm')));
-    const SQL = await initSqlJs({
-      locateFile: file => wasmDir ? path.join(wasmDir, file) : file,
-    });
-
-    const dbBuffer = fs.readFileSync(stateDbPath);
-    const db = new SQL.Database(dbBuffer);
-
-    // Read the current pinned viewlets value.
-    const stmt = db.prepare(
-      "SELECT value FROM ItemTable WHERE key='workbench.activity.pinnedViewlets2'"
-    );
-    let viewlets = [];
-    if (stmt.step()) {
-      try { viewlets = JSON.parse(stmt.getAsObject().value); } catch {}
-    }
-    stmt.free();
-
-    // Apply pinned:false for the hidden IDs; add entries for any that are missing.
-    const seen = new Set();
-    viewlets = viewlets.map(v => {
-      seen.add(v.id);
-      if (ACTIVITY_BAR_HIDDEN_IDS.has(v.id)) return { ...v, pinned: false };
-      return v;
-    });
-    for (const id of ACTIVITY_BAR_HIDDEN_IDS) {
-      if (!seen.has(id)) {
-        viewlets.push({ id, pinned: false, visible: false, order: 99 });
-      }
-    }
-
-    db.run(
-      "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)",
-      ['workbench.activity.pinnedViewlets2', JSON.stringify(viewlets)]
-    );
-
-    const data = db.export();
-    db.close();
-    fs.writeFileSync(stateDbPath, Buffer.from(data));
-    fs.writeFileSync(flagFile, '1');
-    console.log('[OCcode] Patched activity bar state in state.vscdb');
-  } catch (err) {
-    console.warn('[OCcode] Failed to patch activity bar state (non-fatal):', err.message);
-  }
-}
-
-=======
->>>>>>> main
 function findMacAppBundle(vscodeDir, codiumBinary) {
   if (codiumBinary) {
     const marker = `${path.sep}VSCodium.app${path.sep}`;
@@ -389,4 +287,4 @@ async function launchVSCodium(codiumBinary, occodeDir, vscodeDir) {
   }
 }
 
-module.exports = { installExtension, setDefaults, patchActivityBarState, launchVSCodium };
+module.exports = { installExtension, setDefaults, launchVSCodium };
