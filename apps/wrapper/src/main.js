@@ -44,10 +44,16 @@ function createWindow() {
   });
   mainWindow.loadFile(path.join(__dirname, 'splash.html'));
   mainWindow.webContents.once('did-finish-load', () => {
-    const logoUrl = pathToFileURL(ICON_PATH).toString();
-    mainWindow.webContents.executeJavaScript(
-      `const img = document.getElementById('logo-img'); if (img) { img.src = ${JSON.stringify(logoUrl)}; }`
-    );
+    const fs = require('fs');
+    if (fs.existsSync(ICON_PATH)) {
+      const logoUrl = pathToFileURL(ICON_PATH).toString();
+      console.log(`[OCcode] Setting splash icon: ${logoUrl}`);
+      mainWindow.webContents.executeJavaScript(
+        `const img = document.getElementById('logo-img'); if (img) { img.src = ${JSON.stringify(logoUrl)}; }`
+      ).catch(err => console.error('[OCcode] Failed to set splash icon:', err));
+    } else {
+      console.warn(`[OCcode] Icon not found at: ${ICON_PATH}`);
+    }
   });
   mainWindow.setMenuBarVisibility(false);
 }

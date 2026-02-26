@@ -15,11 +15,26 @@
       justify-content: center;
       height: 100vh;
     }
-    .logo {
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    #logo-img {
+      width: 80px;
+      height: 80px;
+      border-radius: 16px;
+      object-fit: contain;
+      display: none;
+    }
+    #logo-img.loaded {
+      display: block;
+    }
+    .logo-text {
       font-size: 48px;
       font-weight: 700;
       color: #00d4aa;
-      margin-bottom: 8px;
     }
     .sub { color: #888; font-size: 14px; margin-bottom: 40px; }
     .spinner {
@@ -35,9 +50,17 @@
   </style>
 </head>
 <body>
-  <div class="logo"><img id="logo-img" src="../assets/icon.png" width="80" height="80" style="vertical-align:middle; margin-right:12px; border-radius:16px;">OCcode</div>
+  <div class="logo-container">
+    <img id="logo-img" src="" width="80" height="80" alt="OCcode">
+    <div class="logo-text">OCcode</div>
+  </div>
   <div class="sub">Powered by OpenClaw</div>
   <div class="spinner"></div>
   <div id="status">Starting…</div>
+  <script>
+    const img = document.getElementById('logo-img');
+    img.addEventListener('load', () => img.classList.add('loaded'));
+    img.addEventListener('error', () => { img.style.display = 'none'; });
+  </script>
 </body>
 </html>
