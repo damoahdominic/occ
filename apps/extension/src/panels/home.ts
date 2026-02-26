@@ -13,6 +13,10 @@ export class HomePanel {
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
     this._extensionUri = extensionUri;
+    const iconUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
+    );
+    this._panel.webview.html = this._getLoadingHtml(iconUri.toString());
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
@@ -49,6 +53,95 @@ export class HomePanel {
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
     this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+  }
+
+  private _getLoadingHtml(iconUri: string): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
+      background: #1a1a1a;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .logo {
+      width: 96px;
+      height: 96px;
+      margin-bottom: 24px;
+      filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3)); }
+      50% { opacity: 0.75; filter: drop-shadow(0 4px 20px rgba(220, 40, 40, 0.6)); }
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    h1 .accent { color: #dc2828; }
+    .tagline {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 40px;
+    }
+    .spinner-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(220, 40, 40, 0.15);
+      border-top-color: #dc2828;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-text {
+      font-size: 13px;
+      color: #666;
+      letter-spacing: 0.02em;
+    }
+    .loading-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+      100% { content: ''; }
+    }
+  </style>
+</head>
+<body>
+  <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
+  <p class="tagline">AI powered local installation and management tool for OpenClaw.</p>
+  <div class="spinner-wrap">
+    <div class="spinner"></div>
+    <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
+  </div>
+</body>
+</html>`;
   }
 
   private _getHtml(
@@ -177,7 +270,11 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
+<<<<<<< HEAD
   <p class="tagline">AI powered local installation for OpenClaw</p>
+=======
+  <p class="tagline">AI powered local installation and management tool for OpenClaw.</p>
+>>>>>>> main
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row">

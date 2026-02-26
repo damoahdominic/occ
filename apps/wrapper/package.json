@@ -46,9 +46,13 @@
       {
         "from": "assets/vscodium/",
         "to": "assets/vscodium",
+<<<<<<< HEAD
         "filter": [
           "**/*"
         ]
+=======
+        "filter": ["**/*"]
+>>>>>>> main
       }
     ],
     "win": {
@@ -60,6 +64,7 @@
     },
     "mac": {
       "target": [
+<<<<<<< HEAD
         {
           "target": "dmg",
           "arch": [
@@ -72,6 +77,10 @@
             "arm64"
           ]
         }
+=======
+        {"target": "dmg", "arch": ["x64"]},
+        {"target": "dmg", "arch": ["arm64"]}
+>>>>>>> main
       ],
       "icon": "assets/icon.png",
       "category": "public.app-category.developer-tools"
@@ -86,8 +95,13 @@
     }
   },
   "dependencies": {
+<<<<<<< HEAD
     "electron-log": "^5.0.0",
     "sql.js": "^1.14.0"
+=======
+    "adm-zip": "^0.5.16",
+    "electron-log": "^5.0.0"
+>>>>>>> main
   },
   "optionalDependencies": {
     "@electron/rcedit": "^4.0.0"

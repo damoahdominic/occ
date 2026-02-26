@@ -208,6 +208,20 @@
       return;
     }
 
+<<<<<<< HEAD
+=======
+    if (msg.command === "refresh") {
+      data      = msg.data   || { channels: [] };
+      rawConfig = msg.config || "";
+      // Update config editor content if it exists
+      var editor = $("config-editor");
+      if (editor) editor.value = rawConfig;
+      // Re-render channel cards if needed, or let next tab switch update
+      showToast("Configuration updated externally", "ok");
+      return;
+    }
+
+>>>>>>> main
     if (msg.command === "openclaw.saveResult") {
       var configStatus = $("config-status");
       var configHint   = $("config-hint");
@@ -225,4 +239,8 @@
   /* Signal readiness to the extension — triggers the init data response */
   vscode.postMessage({ command: "ready" });
 
+<<<<<<< HEAD
 }());
+=======
+}());
+>>>>>>> main
