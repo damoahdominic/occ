@@ -462,7 +462,7 @@ export default function Home() {
       {/* Hero */}
       <main className="flex-1">
         <section className="relative w-full overflow-hidden">
-          {/* Background video */}
+          {/* Background video (desktop) */}
           <video
             autoPlay
             loop
