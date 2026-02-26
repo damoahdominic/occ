@@ -1,10 +1,7 @@
 import * as vscode from "vscode";
-<<<<<<< HEAD
-=======
 import * as fs from "fs";
 import * as path from "path";
 import { resolveConfigPath } from "./config-path";
->>>>>>> main
 
 type ChannelAccount = {
   id: string;
@@ -25,76 +22,6 @@ type ControlCenterData = {
   maintenance: { doctor: { status: "healthy" | "warning" | "error" } };
 };
 
-<<<<<<< HEAD
-const DUMMY_DATA: ControlCenterData = {
-  agents: [
-    { id: "agent-alpha" },
-    { id: "agent-beta" },
-    { id: "agent-gamma" },
-  ],
-  channels: [
-    {
-      channel: "whatsapp",
-      description: "WhatsApp surface configuration",
-      accounts: [
-        { id: "whatsapp-primary", title: "WhatsApp · Primary", status: "connected" },
-        { id: "whatsapp-business", title: "WhatsApp · Business", status: "connected" },
-      ],
-    },
-    {
-      channel: "telegram",
-      description: "Telegram surface configuration",
-      accounts: [
-        { id: "telegram-primary", title: "Telegram · Primary", status: "connected" },
-      ],
-    },
-    {
-      channel: "slack",
-      description: "Slack surface configuration",
-      accounts: [
-        { id: "slack-workspace", title: "Slack · Workspace", status: "needs-relink" },
-      ],
-    },
-  ],
-  automation: {
-    cronJobs: [
-      { status: "enabled" },
-      { status: "enabled" },
-      { status: "paused" },
-    ],
-  },
-  maintenance: {
-    doctor: { status: "healthy" },
-  },
-};
-
-const DUMMY_RAW_CONFIG = `{
-  // OpenClaw configuration
-  "agents": {
-    "list": [
-      { "id": "agent-alpha", "model": "gpt-4o", "role": "assistant" },
-      { "id": "agent-beta",  "model": "gpt-4o-mini", "role": "responder" },
-      { "id": "agent-gamma", "model": "claude-3-5-sonnet", "role": "analyst" }
-    ]
-  },
-  "channels": {
-    "whatsapp": { "enabled": true, "phoneNumber": "+1-555-0100" },
-    "telegram": { "enabled": true, "botToken": "demo-token-xxxx" },
-    "slack":    { "enabled": false, "webhookUrl": "" }
-  },
-  "automation": {
-    "cronJobs": [
-      { "id": "daily-report",  "schedule": "0 8 * * *",  "status": "enabled" },
-      { "id": "hourly-sync",   "schedule": "0 * * * *",   "status": "enabled" },
-      { "id": "weekly-digest", "schedule": "0 9 * * MON", "status": "paused"  }
-    ]
-  },
-  "gateway": {
-    "port": 3000,
-    "host": "localhost"
-  }
-}`;
-=======
 function sanitizeJson5(input: string): string {
   return input
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -186,7 +113,6 @@ function buildControlCenterData(configPath: string): ControlCenterData {
     },
   };
 }
->>>>>>> main
 
 function getNonce() {
   let text = "";
@@ -202,11 +128,8 @@ export class ConfigPanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
-<<<<<<< HEAD
-=======
   private _fileWatcher: vscode.FileSystemWatcher | undefined;
   private _lastModified: number = 0;
->>>>>>> main
 
   public static createOrShow(extensionUri: vscode.Uri) {
     if (ConfigPanel.currentPanel) {
@@ -238,13 +161,8 @@ export class ConfigPanel {
       if (message?.command === "ready") {
         void this._panel.webview.postMessage({
           command: "init",
-<<<<<<< HEAD
-          data: DUMMY_DATA,
-          config: DUMMY_RAW_CONFIG,
-=======
           data: buildControlCenterData(resolveConfigPath()),
           config: readOpenClawConfigRaw(resolveConfigPath()),
->>>>>>> main
         });
         return;
       }
@@ -257,10 +175,6 @@ export class ConfigPanel {
         return;
       }
       if (message?.command === "openclaw.saveConfig") {
-<<<<<<< HEAD
-        // Dummy mode: simulate a successful save without writing to disk
-        this._panel.webview.postMessage({ command: "openclaw.saveResult", ok: true });
-=======
         const configPath = resolveConfigPath();
         const text = message?.text || "";
         
@@ -290,7 +204,6 @@ export class ConfigPanel {
             error: err.message || "Failed to save configuration" 
           });
         }
->>>>>>> main
         return;
       }
       if (message?.command === "openclaw.runCommand") {
@@ -336,14 +249,10 @@ export class ConfigPanel {
   }
 
   private async _update() {
-<<<<<<< HEAD
-    this._panel.webview.html = this._getHtml(DUMMY_DATA, DUMMY_RAW_CONFIG);
-=======
     const configPath = resolveConfigPath();
     const data = buildControlCenterData(configPath);
     const rawConfig = readOpenClawConfigRaw(configPath);
     this._panel.webview.html = this._getHtml(data, rawConfig);
->>>>>>> main
   }
 
   private _setupFileWatcher() {
@@ -572,61 +481,7 @@ export class ConfigPanel {
       .status-text { font-size: 12px; }
       .hint-text { font-size: 11px; color: var(--text-muted); margin-right: 8px; }
       .recent-row { margin-bottom: 16px; }
-
-<<<<<<< HEAD
-=======
-      /* ── Responsive ──────────────────────────────────────────── */
-
-      /* Collapse sidebars on medium-width panels */
-      @media (max-width: 820px) {
-        .panel-grid { grid-template-columns: 1fr; }
-        .console-layout { grid-template-columns: 1fr; }
-        .sidebar { order: -1; }
-        /* Make quick-commands horizontal on medium */
-        .quick-grid { grid-template-columns: repeat(2, 1fr); }
-      }
-
-      /* Compact spacing on narrow panels */
-      @media (max-width: 640px) {
-        .container { padding: 14px; }
-        .tabs { gap: 4px; padding-bottom: 10px; flex-wrap: wrap; }
-        .tab { padding: 6px 10px; font-size: 12px; }
-        .panel { padding: 14px; border-radius: 12px; }
-        .panel h2 { font-size: 15px; }
-        .panel-grid { gap: 14px; }
-        .console-layout { gap: 14px; }
-        .header-title { font-size: 17px; }
-        .json-editor { min-height: 260px; }
-        .quick-grid { grid-template-columns: 1fr; }
-        .command-input-wrap { flex-wrap: wrap; }
-        .command-input { min-width: 0; width: 100%; }
-        .card-row { flex-wrap: wrap; }
-      }
-
-      /* Very narrow panels (sidebar panel view) */
-      @media (max-width: 400px) {
-        .container { padding: 10px; }
-        .tabs { gap: 4px; }
-        .tab { padding: 5px 8px; font-size: 11px; border-radius: 6px; }
-        .panel { padding: 10px; border-radius: 10px; }
-        .panel h2 { font-size: 14px; margin-bottom: 12px; }
-        .header { gap: 8px; margin-bottom: 14px; }
-        .header-title { font-size: 15px; gap: 8px; }
-        .channel-card { padding: 12px; }
-        .card-actions { flex-wrap: wrap; }
-        .btn-primary, .btn-secondary { font-size: 11px; }
-        .editor-toolbar { flex-wrap: wrap; gap: 8px; }
-        .editor-toolbar > div { flex: 1 1 100%; }
-        .panel-header-row { flex-wrap: wrap; gap: 8px; }
-        .panel-header-row > div { flex: 1 1 100%; }
-        .panel-header-row .btn-primary { width: 100%; }
-        .json-editor { min-height: 200px; font-size: 12px; }
-        .status-chip { font-size: 10px; padding: 3px 8px; }
-        .info-card { padding: 10px; }
-      }
     `;
-
->>>>>>> main
     return `<!DOCTYPE html>
 <html lang="en">
   <head>

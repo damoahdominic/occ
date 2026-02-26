@@ -277,11 +277,19 @@ function getVSCodiumBinaryCandidates(vscodeDir) {
   }
   if (process.platform === 'darwin') {
     return [
+      // Flat structure (extracted directly)
       path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
+      // Nested structure (archive has subdir)
+      path.join(vscodeDir, 'VSCodium-darwin-x64', 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
+      path.join(vscodeDir, 'VSCodium-darwin-arm64', 'VSCodium.app', 'Contents', 'Resources', 'app', 'bin', 'codium'),
     ];
   }
   return [
+    // Flat structure
     path.join(vscodeDir, 'bin', 'codium'),
+    // Nested structure (archive has subdir)
+    path.join(vscodeDir, 'VSCodium-linux-x64', 'bin', 'codium'),
+    path.join(vscodeDir, 'VSCodium-linux-arm64', 'bin', 'codium'),
   ];
 }
 

@@ -33,23 +33,13 @@ async function rebrandVSCodium(vscodeDir) {
   } catch (err) {
     console.warn('[rebrand] product.json patch failed (non-fatal):', err.message);
   }
-
-  try {
-    patchWorkbenchFiles(vscodeDir);
-  } catch (err) {
-    console.warn('[rebrand] Workbench CSS patch failed (non-fatal):', err.message);
-  }
 }
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
 async function rebrandWindows(vscodeDir) {
   // After flattening, files should be directly in vscodeDir
-<<<<<<< HEAD
-  const dir = fs.existsSync(path.join(vscodeDir, 'VSCodium.exe')) 
-=======
   const dir = fs.existsSync(path.join(vscodeDir, 'VSCodium.exe'))
->>>>>>> main
     ? vscodeDir
     : path.join(vscodeDir, 'VSCodium-win32-x64');
   if (!fs.existsSync(dir)) { console.warn('[rebrand] Windows VSCodium dir not found'); return; }
@@ -237,148 +227,6 @@ function patchProductJson(vscodeDir) {
     } catch (err) {
       console.warn(`[rebrand] Failed to patch ${pjPath}:`, err.message);
     }
-  }
-}
-
-// ── Workbench CSS patching (all platforms) ───────────────────────────────────
-
-/**
- * Appends CSS overrides to every workbench CSS bundle found inside the
- * extracted VSCodium installation.  This removes:
- *   • The VSCodium watermark logo shown in the empty-editor area
- *   • The VSCodium product logo in the title-bar / window-appicon slot
- * and replaces the watermark with our own icon.
- */
-function patchWorkbenchFiles(vscodeDir) {
-  // ── Locate the VSCodium `resources/app` root ─────────────────────────────
-  const appRootCandidates = [
-    path.join(vscodeDir, 'resources', 'app'),
-    path.join(vscodeDir, 'VSCodium-win32-x64', 'resources', 'app'),
-    path.join(vscodeDir, 'VSCodium.app', 'Contents', 'Resources', 'app'),
-    path.join(vscodeDir, 'VSCodium-linux-x64', 'resources', 'app'),
-  ];
-
-  let appRoot = appRootCandidates.find(c => fs.existsSync(c));
-
-  // Fallback: find product.json and derive app root from it
-  if (!appRoot) {
-    const pjFound = findFiles(vscodeDir, 'product.json', 5)
-      .find(f => f.includes(path.join('resources', 'app')));
-    if (pjFound) appRoot = path.dirname(pjFound);
-  }
-
-  if (!appRoot) {
-    console.warn('[rebrand] patchWorkbench: app root not found — skipping CSS patch');
-    return;
-  }
-
-  const workbenchDir = path.join(appRoot, 'out', 'vs', 'workbench');
-  if (!fs.existsSync(workbenchDir)) {
-    console.warn('[rebrand] patchWorkbench: workbench dir not found:', workbenchDir);
-    return;
-  }
-
-  // ── Build icon data URI ──────────────────────────────────────────────────
-  const iconPngPath = getAssetPath('icon.png');
-  let b64 = '';
-  if (fs.existsSync(iconPngPath)) {
-    b64 = fs.readFileSync(iconPngPath).toString('base64');
-  }
-  const iconDataUri = b64 ? `data:image/png;base64,${b64}` : '';
-
-  // Watermark replacement rule (empty-editor area, 128×128)
-  const watermarkRule = iconDataUri
-    ? `.monaco-workbench .editor-group-watermark{` +
-      `background-image:url("${iconDataUri}") !important;` +
-      `background-repeat:no-repeat !important;` +
-      `background-position:center !important;` +
-      `background-size:128px 128px !important;}`
-    : '';
-
-  // Title-bar icon replacement rule (18×18, mask cleared)
-  const titlebarIconRule = iconDataUri
-    ? [
-        // The appicon container — keep visible, clear the mask, inject our PNG
-        `.monaco-workbench .part.titlebar .window-appicon,` +
-        `.monaco-workbench .titlebar-left .window-appicon{` +
-          `background-image:url("${iconDataUri}") !important;` +
-          `background-size:16px 16px !important;` +
-          `background-repeat:no-repeat !important;` +
-          `background-position:center !important;` +
-          `-webkit-mask-image:none !important;` +
-          `mask-image:none !important;` +
-          `display:block !important;flex-shrink:0 !important;}`,
-        // Kill any pseudo-elements that would paint the VSCodium glyph on top
-        `.monaco-workbench .part.titlebar .window-appicon::before,` +
-        `.monaco-workbench .part.titlebar .window-appicon::after,` +
-        `.monaco-workbench .titlebar-left .window-appicon::before,` +
-        `.monaco-workbench .titlebar-left .window-appicon::after{` +
-          `display:none !important;content:none !important;}`,
-      ].join('\n')
-    : // Fallback: just hide if no icon available
-      `.monaco-workbench .part.titlebar .window-appicon,` +
-      `.monaco-workbench .titlebar-left .window-appicon{display:none !important;}`;
-
-  // ── CSS override block ───────────────────────────────────────────────────
-  const MARKER = '===OCcode-branding-v5===';
-  const cssOverride = [
-    `\n/* ${MARKER} */`,
-
-    // Nuke every child of the watermark container (letterpress + any siblings)
-    `.monaco-workbench .editor-group-watermark>*{` +
-      `display:none !important;visibility:hidden !important;opacity:0 !important;` +
-      `background:none !important;color:transparent !important;}`,
-
-    // Nuke all pseudo-elements on those children
-    `.monaco-workbench .editor-group-watermark>*::before,` +
-    `.monaco-workbench .editor-group-watermark>*::after{` +
-      `display:none !important;content:none !important;visibility:hidden !important;}`,
-
-    // Nuke pseudo-elements on the container itself
-    `.monaco-workbench .editor-group-watermark::before,` +
-    `.monaco-workbench .editor-group-watermark::after{` +
-      `display:none !important;content:none !important;}`,
-
-    // Replace the empty-editor watermark with our icon
-    watermarkRule,
-
-    // Replace the title-bar product icon with our icon
-    titlebarIconRule,
-
-    // Suppress any remaining codicon-vscodium glyphs site-wide
-    `.codicon-vscodium-stable::before,.codicon-vscodium-insider::before{` +
-      `display:none !important;content:none !important;}`,
-  ].join('\n');
-
-  // ── Patch every .css file in the workbench dir ───────────────────────────
-  let patched = 0;
-  let entries;
-  try { entries = fs.readdirSync(workbenchDir); } catch { return; }
-
-  // Strip any previous OCcode branding block (handles old marker versions too)
-  const OLD_MARKER_RE = /\n\/\* ===OCcode-branding[^=]*=== \*\/[\s\S]*$/;
-
-  for (const file of entries) {
-    if (!file.endsWith('.css')) continue;
-    const filePath = path.join(workbenchDir, file);
-    try {
-      let content = fs.readFileSync(filePath, 'utf8');
-      if (content.includes(MARKER)) {
-        console.log(`[rebrand] Already patched (v2): ${file}`);
-        continue;
-      }
-      // Remove any stale block from a previous run
-      content = content.replace(OLD_MARKER_RE, '');
-      fs.writeFileSync(filePath, content + cssOverride, 'utf8');
-      console.log(`[rebrand] Patched workbench CSS: ${file}`);
-      patched++;
-    } catch (err) {
-      console.warn(`[rebrand] Failed to patch ${file}:`, err.message);
-    }
-  }
-
-  if (patched === 0) {
-    console.warn('[rebrand] No new workbench CSS files patched in:', workbenchDir);
   }
 }
 

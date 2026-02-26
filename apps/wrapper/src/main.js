@@ -8,7 +8,7 @@ const {
   getVSCodiumBinary,
   getPlatformInfo,
 } = require('./download');
-const { installExtension, setDefaults, patchActivityBarState, launchVSCodium } = require('./setup');
+const { installExtension, setDefaults, launchVSCodium } = require('./setup');
 
 const APP_NAME = 'OCcode';
 const manifest = require('../vscodium-manifest.json');
@@ -79,9 +79,8 @@ async function bootstrap() {
 
     const os = require('os');
     if (process.platform !== 'win32') {
-      const p = getPlatformInfo();
-      const codiumRoot = path.join(VSCODE_DIR, p.dir);
-      const binDir = path.join(codiumRoot, 'bin');
+      // Use the actual binary's directory for chmod (handles both flat and nested structures)
+      const binDir = path.dirname(binary);
       if (fs.existsSync(binDir)) {
         for (const file of fs.readdirSync(binDir)) {
           const fullPath = path.join(binDir, file);
@@ -95,7 +94,6 @@ async function bootstrap() {
 
     sendStatus('Setting defaults…');
     await setDefaults(OCCODE_DIR);
-    await patchActivityBarState(OCCODE_DIR);
 
     sendStatus('Launching editor…');
     await launchVSCodium(binary, OCCODE_DIR, VSCODE_DIR);
