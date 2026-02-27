@@ -8,6 +8,16 @@ const DEFAULT_SETTINGS = {
   "workbench.tips.enabled": false,
   "extensions.autoUpdate": true,
   "telemetry.telemetryLevel": "off",
+  // Hide Source Control, Run & Debug, and Extensions from the activity bar.
+  // Items not listed here retain their default visibility (e.g. Explorer, Search,
+  // and any contributed view containers like OpenClaw).
+  "workbench.activityBar.pinnedViewContainers": [
+    { "id": "workbench.view.explorer",   "pinned": true,  "visible": true  },
+    { "id": "workbench.view.search",     "pinned": true,  "visible": true  },
+    { "id": "workbench.view.scm",        "pinned": false, "visible": false },
+    { "id": "workbench.view.debug",      "pinned": false, "visible": false },
+    { "id": "workbench.view.extensions", "pinned": false, "visible": false },
+  ],
 };
 
 async function installExtension(codiumBinary, occodeDir) {

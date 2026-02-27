@@ -299,94 +299,31 @@ export class HomePanel {
 
   private async _testOpenClawCli(): Promise<{ ok: boolean; output?: string; error?: string; command: string }> {
     if (process.platform === 'win32') {
-      // Bypass the slow npm .cmd shim — call node.exe with openclaw.mjs directly
-      const mjs = path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        'npm', 'node_modules', 'openclaw', 'openclaw.mjs'
-      );
-      const display = `node "${mjs}" --version`;
-
-      if (fs.existsSync(mjs)) {
-        // Find actual node.exe — process.execPath is Electron/VSCodium, not Node
-        const candidates = [
-          process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '',
-          'C:\\Program Files\\nodejs\\node.exe',
-          'C:\\Program Files (x86)\\nodejs\\node.exe',
-          process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs', 'node.exe') : '',
-        ].filter(Boolean);
-
-        let nodeExe = candidates.find(p => fs.existsSync(p));
-
-        if (!nodeExe) {
-          try {
-            const result = await new Promise<string>((resolve, reject) => {
-              cp.exec('where node.exe', { timeout: 3000 }, (err, stdout) => {
-                if (err) reject(err);
-                else resolve(stdout.trim().split(/\r?\n/)[0]?.trim() || '');
-              });
-            });
-            if (result && fs.existsSync(result)) nodeExe = result;
-          } catch {}
-        }
-
+      // ── 1. Find openclaw.mjs (checks npm prefix + version-manager paths) ──────
+      const mjs = await this._findWindowsOpenClawMjs();
+      if (mjs) {
+        // ── 2. Find node.exe (PATH-first, then nvm/Volta/scoop, then hardcoded) ──
+        const nodeExe = await this._findWindowsNodeExe();
         if (nodeExe) {
-          return new Promise(resolve => {
-            const child = cp.spawn(
-              nodeExe!,
-              [mjs, '--version'],
-              {
-                timeout: 30000,
-                windowsHide: true,
-                detached: true,
-                stdio: ['ignore', 'pipe', 'pipe']
-              }
-            );
-
-            let stdout = '';
-            let stderr = '';
-
-            child.stdout?.on('data', data => stdout += data);
-            child.stderr?.on('data', data => stderr += data);
-
-            const timer = setTimeout(() => {
-              child.kill('SIGTERM');
-            }, 30000);
-
-            child.on('close', (code, signal) => {
-              clearTimeout(timer);
-              if (signal === 'SIGTERM' || code === null) {
-                resolve({ ok: false, error: 'Timed out after 30s', command: display });
-              } else if (code !== 0) {
-                resolve({ ok: false, error: stderr.trim() || `Exit ${code}`, command: display });
-              } else {
-                resolve({ ok: true, output: (stdout || stderr).trim(), command: display });
-              }
-            });
-
-            child.on('error', err => {
-              clearTimeout(timer);
-              resolve({ ok: false, error: err.message, command: display });
-            });
-          });
+          return this._spawnNodeMjs(nodeExe, mjs, `"${nodeExe}" "${mjs}" --version`);
         }
       }
 
-      // Fallback: cmd shim (slow but works)
-      const cmdPath = path.join(
-        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-        'npm', 'openclaw.cmd'
-      );
-      if (fs.existsSync(cmdPath)) {
+      // ── 3. .cmd / .exe shim fallback (npm prefix + scoop shims) ──────────────
+      const cmdPath = await this._findWindowsOpenClawCmd();
+      if (cmdPath) {
         return new Promise(resolve => {
           cp.execFile(
-            'cmd.exe',
-            ['/c', cmdPath, '--version'],
+            'cmd.exe', ['/c', cmdPath, '--version'],
             { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 },
             (error, stdout, stderr) => {
               if (error) {
-                const timedOut = error.code == null;
-                const errMsg = timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`);
-                resolve({ ok: false, error: errMsg, command: `${cmdPath} --version` });
+                const timedOut = (error as any).signal === 'SIGTERM' || error.code == null;
+                resolve({
+                  ok: false,
+                  error: timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`),
+                  command: `${cmdPath} --version`,
+                });
               } else {
                 resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cmdPath} --version` });
               }
@@ -398,25 +335,176 @@ export class HomePanel {
       return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
     }
 
+    // ── Mac / Linux ──────────────────────────────────────────────────────────────
     const cliPath = await this._findOpenClawPath();
     if (!cliPath) {
       return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
     }
-
     return new Promise(resolve => {
       cp.execFile(
-        cliPath,
-        ['--version'],
+        cliPath, ['--version'],
         { timeout: 30000, maxBuffer: 1024 * 1024, env: this._buildExecEnv() },
         (error, stdout, stderr) => {
           if (error) {
-            const errMsg = stderr?.toString().trim() || error.message || `Exit ${(error as any).code}`;
-            resolve({ ok: false, error: errMsg, command: `${cliPath} --version` });
+            resolve({ ok: false, error: stderr?.toString().trim() || error.message || `Exit ${(error as any).code}`, command: `${cliPath} --version` });
           } else {
             resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cliPath} --version` });
           }
         }
       );
+    });
+  }
+
+  /**
+   * Finds openclaw.mjs in the npm global prefix (dynamic) and common
+   * version-manager install paths so any Node setup is covered.
+   */
+  private async _findWindowsOpenClawMjs(): Promise<string | undefined> {
+    const home = os.homedir();
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+
+    // Ask npm where its global prefix lives — covers custom prefixes / nvm / fnm
+    const prefixResult = await this._runCommand('npm config get prefix', 3000);
+    const npmPrefix = (prefixResult.stdout || '').trim().replace(/['"]/g, '');
+
+    const candidates = [
+      npmPrefix ? path.join(npmPrefix, 'node_modules', 'openclaw', 'openclaw.mjs') : '',
+      path.join(appData, 'npm', 'node_modules', 'openclaw', 'openclaw.mjs'),
+      // scoop (nodejs / nodejs-lts)
+      path.join(home, 'scoop', 'apps', 'nodejs', 'current', 'node_modules', 'openclaw', 'openclaw.mjs'),
+      path.join(home, 'scoop', 'apps', 'nodejs-lts', 'current', 'node_modules', 'openclaw', 'openclaw.mjs'),
+      // Volta
+      path.join(localAppData, 'Volta', 'tools', 'image', 'packages', 'openclaw', 'lib', 'node_modules', 'openclaw', 'openclaw.mjs'),
+    ].filter(Boolean);
+
+    return candidates.find(p => fs.existsSync(p));
+  }
+
+  /**
+   * Finds the real node.exe for Windows.
+   * Strategy: PATH lookup first (handles nvm-windows, fnm, Volta shims, winget,
+   * and standard installs), then version-manager directories, then hardcoded paths.
+   */
+  private async _findWindowsNodeExe(): Promise<string | undefined> {
+    const home = os.homedir();
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+
+    // 1. PATH lookup — most reliable; works for nvm-windows, fnm, Volta shims,
+    //    winget, and standard installers without any special-casing.
+    try {
+      const found = await new Promise<string>((resolve, reject) =>
+        cp.exec('where node.exe', { timeout: 3000, windowsHide: true }, (err, stdout) =>
+          err ? reject(err) : resolve(stdout.trim().split(/\r?\n/)[0]?.trim() || '')
+        )
+      );
+      // Skip if the path belongs to VSCodium / VS Code / Electron (wrong node)
+      if (found && fs.existsSync(found) && !/vscodium|vscode|electron/i.test(found)) {
+        return found;
+      }
+    } catch {}
+
+    // 2. nvm-windows — %NVM_HOME%\<version>\node.exe
+    const nvmHome = process.env.NVM_HOME;
+    if (nvmHome && fs.existsSync(nvmHome)) {
+      try {
+        const versions = fs.readdirSync(nvmHome)
+          .filter(e => /^\d+\.\d+\.\d+$/.test(e))
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+        for (const v of versions.slice(0, 5)) {
+          const p = path.join(nvmHome, v, 'node.exe');
+          if (fs.existsSync(p)) return p;
+        }
+      } catch {}
+    }
+
+    // 3. Volta — %LOCALAPPDATA%\Volta\tools\image\node\<version>\node.exe
+    const voltaNodeDir = path.join(localAppData, 'Volta', 'tools', 'image', 'node');
+    if (fs.existsSync(voltaNodeDir)) {
+      try {
+        const versions = fs.readdirSync(voltaNodeDir)
+          .filter(e => /^\d+\.\d+\.\d+$/.test(e))
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+        for (const v of versions.slice(0, 5)) {
+          const p = path.join(voltaNodeDir, v, 'node.exe');
+          if (fs.existsSync(p)) return p;
+        }
+      } catch {}
+    }
+
+    // 4. scoop (nodejs / nodejs-lts)
+    for (const app of ['nodejs', 'nodejs-lts']) {
+      const p = path.join(home, 'scoop', 'apps', app, 'current', 'node.exe');
+      if (fs.existsSync(p)) return p;
+    }
+
+    // 5. Standard installer, chocolatey, winget fallbacks
+    const hardcoded = [
+      path.join(programFiles, 'nodejs', 'node.exe'),
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+      path.join(localAppData, 'Programs', 'nodejs', 'node.exe'),
+      'C:\\ProgramData\\chocolatey\\bin\\node.exe',
+      'C:\\tools\\nodejs\\node.exe',
+    ];
+    return hardcoded.find(p => fs.existsSync(p));
+  }
+
+  /**
+   * Finds openclaw.cmd / .exe shim using the npm global prefix (dynamic)
+   * and common fallback locations including scoop shims.
+   */
+  private async _findWindowsOpenClawCmd(): Promise<string | undefined> {
+    const home = os.homedir();
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+
+    const prefixResult = await this._runCommand('npm config get prefix', 3000);
+    const npmPrefix = (prefixResult.stdout || '').trim().replace(/['"]/g, '');
+
+    const candidates = [
+      npmPrefix ? path.join(npmPrefix, 'openclaw.cmd') : '',
+      npmPrefix ? path.join(npmPrefix, 'openclaw.exe') : '',
+      path.join(appData, 'npm', 'openclaw.cmd'),
+      path.join(appData, 'npm', 'openclaw.exe'),
+      // scoop shims
+      path.join(home, 'scoop', 'shims', 'openclaw.cmd'),
+      path.join(home, 'scoop', 'shims', 'openclaw.exe'),
+    ].filter(Boolean);
+
+    return candidates.find(p => fs.existsSync(p));
+  }
+
+  /** Spawns `<nodeExe> <mjs> --version` and resolves with the result. */
+  private _spawnNodeMjs(
+    nodeExe: string,
+    mjs: string,
+    display: string
+  ): Promise<{ ok: boolean; output?: string; error?: string; command: string }> {
+    return new Promise(resolve => {
+      const child = cp.spawn(nodeExe, [mjs, '--version'], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', d => (stdout += d));
+      child.stderr?.on('data', d => (stderr += d));
+      const timer = setTimeout(() => child.kill('SIGTERM'), 30000);
+      child.on('close', (code, signal) => {
+        clearTimeout(timer);
+        if (signal === 'SIGTERM' || code === null) {
+          resolve({ ok: false, error: 'Timed out after 30s', command: display });
+        } else if (code !== 0) {
+          resolve({ ok: false, error: stderr.trim() || `Exit ${code}`, command: display });
+        } else {
+          resolve({ ok: true, output: (stdout || stderr).trim(), command: display });
+        }
+      });
+      child.on('error', err => {
+        clearTimeout(timer);
+        resolve({ ok: false, error: err.message, command: display });
+      });
     });
   }
 
