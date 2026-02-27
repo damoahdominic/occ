@@ -63,16 +63,21 @@ async function rebrandWindows(vscodeDir) {
   //    always used, making it show in the OS taskbar.
   patchMainJsIcon(dir);
 
-  // 4. Try rcedit if available (patches the exe's embedded PE icon resource)
+  // 4. Patch the exe's embedded PE icon resource via rcedit.
+  //    This is what Windows taskbar / Start menu / file explorer actually show.
+  //    @electron/rcedit is a hard dependency — log clearly if it fails.
   const mainExePath = path.join(dir, 'VSCodium.exe');
   if (fs.existsSync(mainExePath) && fs.existsSync(srcIco)) {
     try {
-      const rcedit = require('@electron/rcedit');
+      const rcedit = require('rcedit');
       await rcedit(mainExePath, { icon: srcIco });
       console.log('[rebrand] Patched VSCodium.exe embedded icon via rcedit');
-    } catch (_) {
-      // rcedit is optional — silently skip if not installed
+    } catch (rceditErr) {
+      console.warn('[rebrand] rcedit failed — Windows taskbar may still show VSCodium icon:', rceditErr.message);
     }
+  } else {
+    if (!fs.existsSync(mainExePath)) console.warn('[rebrand] VSCodium.exe not found for rcedit patch');
+    if (!fs.existsSync(srcIco)) console.warn('[rebrand] icon.ico not found for rcedit patch:', srcIco);
   }
 }
 
@@ -94,20 +99,39 @@ function patchMainJsIcon(dir) {
   }
   try {
     let src = fs.readFileSync(mainJsPath, 'utf8');
-
-    // Pattern: any variable followed by &&!<var>.isBuilt&&(l.icon=
-    // We drop the !<var>.isBuilt&& part so the icon is always set.
     const before = src;
+
+    // Strategy: remove any `!<var>.isBuilt &&` guard that gates the icon assignment.
+    // VSCodium minifies differently per build — we try patterns from most to least specific.
+
+    // Pattern 1 (original): variable names seen in some builds
     src = src.replace(
-      /(\$&&)![\w$]+\.isBuilt&&(\(l\.icon=)/g,
+      /(\$&&)![\w$]+\.isBuilt&&(\([\w$]+\.icon=)/g,
       '$1$2'
     );
 
+    // Pattern 2: looser — captures the full icon assignment expression
     if (src === before) {
-      // Try a looser pattern in case variable names differ between builds
       src = src.replace(
         /&&![\w$]+\.isBuilt&&(\([\w$]+\.icon=[\w$]+\([\w$]+\.appRoot,"resources\/win32\/code_150x150\.png"\)\))/g,
         '&&$1'
+      );
+    }
+
+    // Pattern 3: broadest — any isBuilt guard anywhere near an .icon= assignment
+    // Handles any variable naming scheme across VSCodium versions
+    if (src === before) {
+      src = src.replace(
+        /![\w$]+\.isBuilt&&([\w$]+\.icon=)/g,
+        '$1'
+      );
+    }
+
+    // Pattern 4: ultra-broad — strip any isBuilt check that precedes a win32 icon path
+    if (src === before) {
+      src = src.replace(
+        /![\w$]+\.isBuilt&&(?=[\w$()."'\/]*code_150x150)/g,
+        ''
       );
     }
 
@@ -115,7 +139,14 @@ function patchMainJsIcon(dir) {
       fs.writeFileSync(mainJsPath, src, 'utf8');
       console.log('[rebrand] Patched main.js: removed isBuilt icon guard (taskbar icon will now show)');
     } else {
-      console.log('[rebrand] main.js icon guard already removed or pattern not matched — skipping');
+      // Last-resort: if none of the patterns matched, log the surrounding context
+      // so we can add a pattern for this VSCodium version.
+      const match = src.match(/.{0,80}isBuilt.{0,80}/);
+      if (match) {
+        console.warn('[rebrand] main.js: isBuilt still present — pattern not matched. Context:', match[0]);
+      } else {
+        console.log('[rebrand] main.js: no isBuilt guard found (already clean or different build)');
+      }
     }
   } catch (err) {
     console.warn('[rebrand] main.js icon patch failed (non-fatal):', err.message);

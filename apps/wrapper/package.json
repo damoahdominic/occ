@@ -39,38 +39,63 @@
       {
         "from": "extensions/",
         "to": "extensions/",
-        "filter": ["**/*.vsix"]
+        "filter": [
+          "**/*.vsix"
+        ]
       },
       {
         "from": "assets/vscodium/",
         "to": "assets/vscodium",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/",
+        "to": "assets/",
+        "filter": [
+          "icon.*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "mac": {
       "target": [
-        {"target": "dmg", "arch": ["x64"]},
-        {"target": "dmg", "arch": ["arm64"]}
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "icon": "assets/icon.png",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/icon.png",
       "category": "Development"
     }
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
-    "electron-log": "^5.0.0"
-  },
-  "optionalDependencies": {
-    "@electron/rcedit": "^4.0.0"
+    "electron-log": "^5.0.0",
+    "rcedit": "^3.1.0"
   },
   "devDependencies": {
     "electron": "^30.0.0",
