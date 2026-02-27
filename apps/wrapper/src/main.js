@@ -114,6 +114,11 @@ async function bootstrap() {
 }
 
 app.setName(APP_NAME);
+// Set Windows App User Model ID so the taskbar groups under OCcode's icon,
+// not VSCodium's. Must be called before any window is created.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.openclaw.occode');
+}
 if (isLinux) {
   // Silence DBus connection errors in headless/limited environments.
   app.commandLine.appendSwitch('disable-features', 'UseDBus');
