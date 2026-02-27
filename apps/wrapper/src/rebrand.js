@@ -33,6 +33,12 @@ async function rebrandVSCodium(vscodeDir) {
   } catch (err) {
     console.warn('[rebrand] product.json patch failed (non-fatal):', err.message);
   }
+
+  try {
+    patchWorkbenchHtml(vscodeDir);
+  } catch (err) {
+    console.warn('[rebrand] workbench.html patch failed (non-fatal):', err.message);
+  }
 }
 
 // ── Windows ──────────────────────────────────────────────────────────────────
@@ -190,7 +196,7 @@ async function rebrandMacOS(vscodeDir) {
       // The icon key points to the .icns filename (without extension)
       // We're replacing VSCodium.icns in-place, so no plist change needed
       // But update display name
-      plist = plist.replace(/<string>VSCodium<\/string>/g, '<string>OCcode</string>');
+      plist = plist.replace(/<string>VSCodium<\/string>/g, '<string>OpenClaw Code</string>');
       fs.writeFileSync(plistPath, plist, 'utf8');
       console.log('[rebrand] Updated Info.plist display name');
     } catch (err) {
@@ -213,6 +219,7 @@ async function rebrandLinux(vscodeDir) {
 
   // Replace pixmaps icon
   const pixmap = path.join(dir, 'pixmaps', 'vscodium.png');
+
   safeCopy(srcPng, pixmap);
 
   // Replace resources/app/resources/linux/code.png
@@ -239,16 +246,24 @@ function patchProductJson(vscodeDir) {
     // Only patch the one inside resources/app/
     if (!pjPath.includes(path.join('resources', 'app'))) continue;
     try {
-      const product = JSON.parse(fs.readFileSync(pjPath, 'utf8'));
+      let src = fs.readFileSync(pjPath, 'utf8');
+      let product = JSON.parse(src);
       let changed = false;
       for (const key of ['nameShort', 'nameLong', 'applicationName']) {
-        if (product[key] && product[key] !== 'OCcode') {
-          product[key] = key === 'nameLong' ? 'OCcode' : 'OCcode';
+        if (product[key] && product[key] !== 'OpenClaw Code') {
+          product[key] = 'OpenClaw Code';
           changed = true;
         }
       }
       if (product.win32AppUserModelId) {
         product.win32AppUserModelId = 'OpenClaw.OCcode';
+        changed = true;
+      }
+      // Also replace any VSCodium strings in the raw JSON
+      const originalSrc = src;
+      src = src.replace(/VSCodium/g, 'OpenClaw Code');
+      if (src !== originalSrc) {
+        product = JSON.parse(src);
         changed = true;
       }
       if (changed) {
@@ -257,6 +272,28 @@ function patchProductJson(vscodeDir) {
       }
     } catch (err) {
       console.warn(`[rebrand] Failed to patch ${pjPath}:`, err.message);
+    }
+  }
+}
+
+// ── Workbench HTML patching (favicon) ────────────────────────────────────
+
+function patchWorkbenchHtml(vscodeDir) {
+  const candidates = findFiles(vscodeDir, 'workbench.html', 3);
+  for (const wbPath of candidates) {
+    if (!wbPath.includes(path.join('resources', 'app'))) continue;
+    try {
+      let html = fs.readFileSync(wbPath, 'utf8');
+      const original = html;
+      // Replace favicon reference with our icon
+      html = html.replace(/<link rel="icon"[^>]*>/gi, '');
+      html = html.replace(/<title>[^<]*<\/title>/i, '<title>OpenClaw Code</title>');
+      if (html !== original) {
+        fs.writeFileSync(wbPath, html, 'utf8');
+        console.log(`[rebrand] Patched ${wbPath}`);
+      }
+    } catch (err) {
+      console.warn(`[rebrand] Failed to patch ${wbPath}:`, err.message);
     }
   }
 }
