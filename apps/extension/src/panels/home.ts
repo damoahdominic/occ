@@ -62,9 +62,10 @@ export class HomePanel {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { font-size: 16px; }
     body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
       background: #1a1a1a;
       color: #e0e0e0;
       display: flex;
@@ -72,50 +73,57 @@ export class HomePanel {
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      padding: 40px 20px;
+      padding: clamp(16px, 5vw, 48px) clamp(12px, 4vw, 32px);
+      text-align: center;
     }
     .logo {
-      width: 96px;
-      height: 96px;
-      margin-bottom: 24px;
+      width: clamp(56px, 14vw, 96px);
+      height: clamp(56px, 14vw, 96px);
+      margin-bottom: clamp(14px, 3vw, 24px);
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
       animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3)); }
       50% { opacity: 0.75; filter: drop-shadow(0 4px 20px rgba(220, 40, 40, 0.6)); }
     }
     h1 {
-      font-size: 28px;
+      font-size: clamp(16px, 4.5vw, 28px);
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: clamp(4px, 1vw, 8px);
       color: #fff;
+      line-height: 1.2;
+      word-break: break-word;
     }
     h1 .accent { color: #dc2828; }
     .tagline {
       color: #888;
-      font-size: 14px;
-      margin-bottom: 40px;
+      font-size: clamp(11px, 2.5vw, 14px);
+      margin-bottom: clamp(24px, 6vw, 40px);
+      max-width: 40ch;
+      line-height: 1.5;
     }
     .spinner-wrap {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 16px;
+      gap: clamp(10px, 2.5vw, 16px);
     }
     .spinner {
-      width: 36px;
-      height: 36px;
+      width: clamp(24px, 6vw, 36px);
+      height: clamp(24px, 6vw, 36px);
       border: 3px solid rgba(220, 40, 40, 0.15);
       border-top-color: #dc2828;
       border-radius: 50%;
       animation: spin 0.75s linear infinite;
+      flex-shrink: 0;
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
     .loading-text {
-      font-size: 13px;
+      font-size: clamp(11px, 2.5vw, 13px);
       color: #666;
       letter-spacing: 0.02em;
     }
@@ -167,9 +175,10 @@ export class HomePanel {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { font-size: 16px; }
     body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
       background: #1a1a1a;
       color: #e0e0e0;
       display: flex;
@@ -177,94 +186,159 @@ export class HomePanel {
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      padding: 40px 20px;
+      padding: clamp(16px, 5vw, 48px) clamp(12px, 4vw, 32px);
+      text-align: center;
     }
+
+    /* ── Hero ──────────────────────────────────────────────────── */
     .logo {
-      width: 96px;
-      height: 96px;
-      margin-bottom: 24px;
+      width: clamp(56px, 14vw, 96px);
+      height: clamp(56px, 14vw, 96px);
+      margin-bottom: clamp(12px, 3vw, 24px);
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
+      flex-shrink: 0;
     }
     h1 {
-      font-size: 28px;
+      font-size: clamp(15px, 4.5vw, 28px);
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: clamp(4px, 1vw, 8px);
       color: #fff;
+      line-height: 1.2;
+      word-break: break-word;
     }
     h1 .accent { color: #dc2828; }
     .tagline {
       color: #888;
-      font-size: 14px;
-      margin-bottom: 32px;
+      font-size: clamp(11px, 2.5vw, 14px);
+      margin-bottom: clamp(18px, 5vw, 32px);
+      max-width: 44ch;
+      line-height: 1.5;
     }
+
+    /* ── Status badge ──────────────────────────────────────────── */
     .status {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      margin-bottom: 28px;
-      padding: 8px 16px;
+      gap: 6px;
+      font-size: clamp(11px, 2.5vw, 14px);
+      margin-bottom: clamp(16px, 4vw, 28px);
+      padding: clamp(5px, 1.5vw, 8px) clamp(10px, 3vw, 16px);
       border-radius: 6px;
       background: rgba(255,255,255,0.04);
+      max-width: 95vw;
     }
     .status.detected { color: #4ade80; }
     .status.not-found { color: #facc15; }
+
+    /* ── Checks card ───────────────────────────────────────────── */
     .checks {
-      width: min(520px, 95vw);
+      width: min(520px, 96vw);
       background: rgba(255,255,255,0.03);
       border: 1px solid #2b2b2b;
       border-radius: 8px;
-      padding: 12px 16px;
-      margin-bottom: 24px;
-      font-size: 13px;
+      padding: clamp(8px, 2.5vw, 12px) clamp(10px, 3vw, 16px);
+      margin-bottom: clamp(16px, 4vw, 24px);
+      font-size: clamp(11px, 2.5vw, 13px);
     }
     .check-row {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
+      align-items: baseline;
+      gap: 8px;
+      padding: clamp(4px, 1.2vw, 6px) 0;
       border-bottom: 1px solid #2b2b2b;
     }
     .check-row:last-child { border-bottom: none; }
-    .check-row .label { color: #9a9a9a; }
+    .check-row .label {
+      color: #9a9a9a;
+      text-align: left;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .check-row .value {
+      flex: 0 0 auto;
+      text-align: right;
+      max-width: 50%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .check-row .value.ok { color: #4ade80; }
     .check-row .value.warn { color: #facc15; }
+
+    /* ── Buttons ───────────────────────────────────────────────── */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(8px, 2vw, 12px);
+      width: min(320px, 96vw);
+    }
     .btn-primary {
       background: #dc2828;
       color: #fff;
       border: none;
-      padding: 12px 28px;
+      padding: clamp(9px, 2.5vw, 12px) clamp(18px, 5vw, 28px);
       border-radius: 8px;
-      font-size: 15px;
+      font-size: clamp(13px, 3vw, 15px);
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s;
+      transition: background 0.15s, transform 0.1s;
+      width: fit-content;
+      white-space: nowrap;
     }
     .btn-primary:hover { background: #b91c1c; }
+    .btn-primary:active { transform: scale(0.98); }
     .btn-secondary {
       background: transparent;
       color: #aaa;
       border: 1px solid #444;
-      padding: 10px 20px;
+      padding: clamp(7px, 2vw, 10px) clamp(14px, 4vw, 20px);
       border-radius: 8px;
-      font-size: 13px;
+      font-size: clamp(11px, 2.5vw, 13px);
       cursor: pointer;
-      margin-top: 12px;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, color 0.15s, transform 0.1s;
+      width: fit-content;
+      white-space: nowrap;
     }
     .btn-secondary:hover { border-color: #888; color: #ddd; }
+    .btn-secondary:active { transform: scale(0.98); }
+
+    /* ── Footer links ──────────────────────────────────────────── */
     .links {
-      margin-top: 48px;
+      margin-top: clamp(28px, 7vw, 48px);
       display: flex;
-      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: clamp(12px, 3vw, 24px);
     }
     .links a {
       color: #666;
       text-decoration: none;
-      font-size: 12px;
+      font-size: clamp(10px, 2vw, 12px);
       transition: color 0.15s;
+      white-space: nowrap;
     }
     .links a:hover { color: #dc2828; }
+
+    /* ── Narrow panel adjustments (< 300px) ────────────────────── */
+    @media (max-width: 299px) {
+      .check-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+      }
+      .check-row .label,
+      .check-row .value {
+        max-width: 100%;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+      }
+    }
   </style>
 </head>
 <body>
@@ -278,12 +352,14 @@ export class HomePanel {
       <span class="value ${dirClass}">${dirText}</span>
     </div>
     <div class="check-row">
-      <span class="label">CLI check (openclaw --version)</span>
+      <span class="label">CLI (openclaw --version)</span>
       <span class="value ${cliClass}">${cliText}${cliHint}</span>
     </div>
   </div>
-  <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
-  <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
+  <div class="btn-group">
+    <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
+    <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
+  </div>
   <div class="links">
     <a href="https://github.com/damoahdominic/occ">GitHub</a>
     <a href="https://openclaw.ai">Website</a>
