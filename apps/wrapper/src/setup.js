@@ -213,10 +213,17 @@ async function launchVSCodium(codiumBinary, occodeDir, vscodeDir) {
   ];
   const isWin = process.platform === 'win32';
   const isLinux = process.platform === 'linux';
+  const isMac = process.platform === 'darwin';
   const disableGpu =
     process.env.OCCODE_DISABLE_GPU === '1' ||
     (isLinux && process.env.OCCODE_ENABLE_GPU !== '1');
   const noSandbox = isLinux && process.env.OCCODE_NO_SANDBOX === '1';
+  if (isMac) {
+    // macOS 26 (Tahoe) changed signal handler installation in a way that breaks
+    // V8's WebAssembly trap handler (EnableWebAssemblyTrapHandler → EXC_BREAKPOINT).
+    // Fall back to software bounds-checking instead.
+    args.push('--js-flags=--no-wasm-trap-handler');
+  }
   if (isLinux) {
     args.push('--disable-features=UseDBus');
     args.push('--disable-dev-shm-usage');

@@ -16,11 +16,21 @@ async function rebrandVSCodium(vscodeDir) {
   const platform = process.platform; // win32 | darwin | linux
   console.log(`[rebrand] Rebranding VSCodium for ${platform}…`);
 
+  // On macOS, all rebrand operations (icon, Info.plist, product.json,
+  // workbench.html) modify files inside the sealed app bundle. Any such
+  // modification invalidates VSCodium's code signature, and re-signing
+  // with ad-hoc overwrites the main executable's team identity, which
+  // causes Electron to crash at startup (EXC_BREAKPOINT / brk 0) on
+  // macOS 26+. Skip all in-bundle modifications on macOS so the original
+  // signature remains intact and the app launches correctly.
+  if (platform === 'darwin') {
+    console.log('[rebrand] macOS: skipping in-bundle modifications to preserve code signature.');
+    return;
+  }
+
   try {
     if (platform === 'win32') {
       await rebrandWindows(vscodeDir);
-    } else if (platform === 'darwin') {
-      await rebrandMacOS(vscodeDir);
     } else {
       await rebrandLinux(vscodeDir);
     }
@@ -202,6 +212,21 @@ async function rebrandMacOS(vscodeDir) {
     } catch (err) {
       console.warn('[rebrand] Info.plist update failed:', err.message);
     }
+  }
+
+  // Re-sign the app bundle ad-hoc after modifying Info.plist and resources.
+  // Modifying any signed file (Info.plist, .icns) invalidates the original
+  // signature, causing macOS to refuse to launch the app. Ad-hoc signing
+  // (--sign -) creates a local signature without needing a certificate.
+  // --preserve-metadata=entitlements carries forward the original entitlements
+  // (e.g. com.apple.security.cs.allow-jit) which V8 requires under Hardened
+  // Runtime to allocate JIT executable memory. Without this the app crashes
+  // at ElectronMain startup with EXC_BREAKPOINT / brk 0.
+  try {
+    execSync(`codesign --force --sign - --preserve-metadata=entitlements "${appBundle}"`, { stdio: 'pipe' });
+    console.log('[rebrand] Re-signed app bundle (ad-hoc, outer bundle only, entitlements preserved)');
+  } catch (err) {
+    console.warn('[rebrand] Ad-hoc re-signing failed (non-fatal):', err.message);
   }
 }
 

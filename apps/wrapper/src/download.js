@@ -12,10 +12,19 @@ const PLATFORM_MAP = {
   linux:  { os: 'linux',  arch: 'x64', ext: 'tar.gz', dir: 'VSCodium-linux-x64' },
 };
 
+function getNativeArch() {
+  if (process.platform === 'darwin') {
+    try {
+      return execSync('uname -m', { encoding: 'utf8' }).trim();
+    } catch (_) {}
+  }
+  return process.arch;
+}
+
 function getPlatformInfo() {
   const p = PLATFORM_MAP[process.platform];
   if (!p) throw new Error(`Unsupported platform: ${process.platform}`);
-  if (process.arch === 'arm64') {
+  if (getNativeArch() === 'arm64') {
     if (process.platform === 'darwin') {
       return { ...p, arch: 'arm64', dir: 'VSCodium-darwin-arm64' };
     }
