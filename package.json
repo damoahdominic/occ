@@ -4,22 +4,17 @@
   "private": true,
   "description": "OCcode — branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [
-    "apps/wrapper",
-    "apps/extension",
     "apps/web",
     "packages/control-center"
   ],
   "scripts": {
-    "dev": "npm run --workspace=apps/extension watch & npm run --workspace=apps/wrapper start",
+    "dev": "npm --prefix apps/editor run watch",
+    "dev:react": "npm --prefix apps/editor run watchreact",
     "web": "npm run --workspace=apps/web dev",
-    "compile": "npm run ext:compile",
-    "build-electron": "npm run --workspace=apps/wrapper build",
-    "wrapper": "npm run --workspace=apps/wrapper start",
-    "ext:compile": "npm run --workspace=apps/extension compile",
-    "ext:watch": "npm run --workspace=apps/extension watch",
-    "ext:package": "npm run --workspace=apps/extension package",
-    "ext:bundle": "bash ./scripts/package-extension.sh",
-    "vscodium:update": "node ./scripts/update-vscodium.mjs"
+    "editor:compile": "cd apps/editor && node ./node_modules/gulp/bin/gulp.js transpile-client-esbuild",
+    "editor:build": "npm --prefix apps/editor run compile-build",
+    "editor:build-react": "npm --prefix apps/editor run buildreact",
+    "editor:watch-react": "npm --prefix apps/editor run watchreact"
   },
   "dependencies": {
     "cobe": "^0.6.5",
