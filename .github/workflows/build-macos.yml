@@ -87,6 +87,12 @@ jobs:
           npx scope-tailwind ./src -o src2/ -s void-scope -c styles.css -p "void-"
           npx tsup
 
+      - name: Copy React bundles into out-build
+        working-directory: apps/editor
+        run: |
+          mkdir -p out-build/vs/workbench/contrib/void/browser/react
+          cp -r src/vs/workbench/contrib/void/browser/react/out out-build/vs/workbench/contrib/void/browser/react/
+
       - name: Bundle (out-build -> out-vscode)
         working-directory: apps/editor
         run: node_modules/.bin/gulp bundle-vscode
