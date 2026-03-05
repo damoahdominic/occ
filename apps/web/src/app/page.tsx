@@ -21,14 +21,13 @@ import {
 import { NoiseBackground } from "@/components/ui/noise-background";
 import { ScreenshotShowcase } from "@/components/ui/screenshot-showcase";
 
-type Platform = "windows" | "macos" | "linux";
+type Platform = "windows" | "macos";
 
 function detectPlatform(): Platform {
-  if (typeof navigator === "undefined") return "linux";
+  if (typeof navigator === "undefined") return "windows";
   const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("win")) return "windows";
   if (ua.includes("mac")) return "macos";
-  return "linux";
+  return "windows";
 }
 
 const RELEASES = "https://github.com/damoahdominic/occ/releases";
@@ -36,7 +35,6 @@ const RELEASES = "https://github.com/damoahdominic/occ/releases";
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
   macos: "macOS",
-  linux: "Linux",
 };
 
 const platformIcons: Record<Platform, React.ReactNode> = {
@@ -48,11 +46,6 @@ const platformIcons: Record<Platform, React.ReactNode> = {
   macos: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
       <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-    </svg>
-  ),
-  linux: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.368 1.884 1.43.199.065.395.065.59 0 .2-.065.397-.2.497-.397.2-.4.2-.999 0-1.696-.002-.005 0-.013-.002-.018a6.79 6.79 0 01-.197-.666c.15-.165.293-.399.392-.666a3.85 3.85 0 00.2-1.163c.003-.065-.003-.134-.006-.199-.135-.865-.664-1.53-1.26-2.065a14.92 14.92 0 01-.94-.884c-.398-.398-.737-.866-.97-1.398-.064-.135-.132-.27-.198-.4-.13-.27-.264-.535-.332-.865a3.57 3.57 0 01-.027-.665c.012-.2.048-.398.078-.595.06-.4.13-.795.16-1.264.032-.47.002-.936-.098-1.398-.2-.93-.596-1.83-1.196-2.53-.399-.466-.864-.864-1.397-1.131-.267-.135-.535-.2-.868-.267-.19-.03-.397-.065-.6-.065zm-.22 1.47c.154 0 .515.064.645.13.394.196.707.458 1.01.794.39.465.689 1.064.844 1.731.071.332.095.665.071 1 0 .399-.065.73-.131 1.064-.033.197-.065.397-.065.598-.004.267.014.53.063.795.08.397.222.73.396 1.064.066.13.132.265.198.397.267.6.663 1.13 1.13 1.6.265.265.532.53.795.793.53.465.928.994 1.03 1.596-.003.332-.064.664-.196.93-.07.135-.164.264-.262.394-.2-.132-.396-.267-.596-.466-.198-.133-.397-.332-.528-.465-.133-.133-.198-.2-.265-.265a2.093 2.093 0 01-.395-.53c-.067-.132-.136-.265-.136-.4a1.007 1.007 0 01.068-.397c.066-.133.197-.332.262-.465.067-.133.134-.266.134-.4.002-.133-.063-.265-.13-.33a.824.824 0 00-.397-.2.637.637 0 00-.464.064.978.978 0 00-.397.332 1.592 1.592 0 00-.198.53c-.067.2-.067.468-.002.665a2.8 2.8 0 00.396.93c.132.198.27.398.396.53.13.132.197.265.327.397l.131.134c-.13.265-.06.53-.06.795 0 .333-.132.533-.265.733-.598.065-1.064-.068-1.53-.2-.465-.132-.862-.33-1.196-.53-.13-.065-.265-.197-.396-.265 0-.068-.004-.133 0-.198.003-.4.066-.733.2-.998.132-.267.33-.465.594-.665.133-.065.267-.132.4-.198.133-.066.267-.133.33-.265.067-.067.068-.133.068-.2-.002-.2-.134-.333-.268-.467a.96.96 0 00-.465-.198c-.133 0-.265.066-.33.133a.807.807 0 00-.267.4 2.297 2.297 0 00-.133.665 3.487 3.487 0 01-.264 1.063c-.133.267-.33.468-.596.668a4.39 4.39 0 01-.929.464c-.33.132-.667.198-.998.268-.197.003-.397.003-.596-.065-.133-.065-.197-.133-.264-.198-.133-.2-.133-.467-.067-.797.067-.265 0-.664-.066-1.064-.064-.396-.131-.73-.063-.997a.873.873 0 01.396-.465c.131-.066.33-.133.461-.2.397-.132.862-.264 1.128-.598.133-.197.2-.398.2-.665 0-.132-.068-.265-.134-.33a.94.94 0 00-.53-.265c-.066-.003-.135 0-.198 0l-.132.003c-.197.065-.33.197-.462.332-.133.132-.265.265-.398.332-.133.065-.33.065-.53.065-.197-.003-.396-.068-.527-.2-.133-.13-.2-.264-.267-.464-.064-.132-.064-.332-.064-.53v-.066c.066-.4.2-.73.4-.998.198-.264.461-.465.728-.598.267-.133.596-.2.86-.265.07-.004.13-.004.194 0z" />
     </svg>
   ),
 };
@@ -119,8 +112,8 @@ const features = [
     ),
   },
   {
-    title: "Free and open",
-    desc: "Completely free to use, built by a community of people who believe AI should be accessible to everyone.",
+    title: "Free to use",
+    desc: "Completely free to use. No subscriptions, no hidden fees — just download and get started.",
     icon: (
       <svg viewBox="0 0 32 32" fill="none">
         <rect x="7" y="15" width="18" height="13" rx="3" stroke="var(--accent)" strokeWidth="2" />
@@ -267,7 +260,7 @@ function bezier(p1x: number, p1y: number, p2x: number, p2y: number, progress: nu
 }
 
 export default function Home() {
-  const [platform, setPlatform] = useState<Platform>("linux");
+  const [platform, setPlatform] = useState<Platform>("windows");
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -369,7 +362,7 @@ export default function Home() {
     };
   }, []);
 
-  const otherPlatforms = (["windows", "macos", "linux"] as Platform[]).filter(
+  const otherPlatforms = (["windows", "macos"] as Platform[]).filter(
     (p) => p !== platform
   );
 
@@ -482,6 +475,10 @@ export default function Home() {
             <ContainerScroll
               titleComponent={
                 <div className="flex flex-col items-center">
+                  <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 px-4 py-1.5 text-xs text-[var(--text-muted)]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+                    Sponsored by MoltPod Inc.
+                  </div>
                   <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-6">
                     Open<span className="text-[var(--accent)]">Claw</span> Code
                   </h1>
