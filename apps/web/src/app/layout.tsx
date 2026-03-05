@@ -30,7 +30,6 @@ export const metadata: Metadata = {
     "VS Code AI",
     "AI setup",
     "self-hosted AI",
-    "open source AI",
     "OCCode",
     "AI developer tools",
     "one-click AI install",
@@ -61,7 +60,7 @@ export const metadata: Metadata = {
     siteName: "OpenClaw Code",
     title: "OpenClaw Code — The Easiest Way to Use AI Locally",
     description:
-      "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux. Free and open source.",
+      "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux.",
     images: [
       {
         url: "/OpenClawOGImage.png",
@@ -109,7 +108,6 @@ const jsonLd = {
   downloadUrl: "https://github.com/damoahdominic/occ/releases",
   releaseNotes: "https://github.com/damoahdominic/occ/releases",
   softwareVersion: "latest",
-  license: "https://github.com/damoahdominic/occ/blob/main/LICENSE",
   author: {
     "@type": "Organization",
     name: "Making Better Agents",

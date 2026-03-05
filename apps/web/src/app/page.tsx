@@ -32,16 +32,6 @@ function detectPlatform(): Platform {
 }
 
 const RELEASES = "https://github.com/damoahdominic/occ/releases";
-const REPO = "https://github.com/damoahdominic/occ";
-const RELEASES_API = "https://api.github.com/repos/damoahdominic/occ/releases/latest";
-
-type ReleaseAssets = {
-  macos: string | null;
-  windows: string | null;
-  linux_deb: string | null;
-  linux_tar: string | null;
-  version: string | null;
-};
 
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
@@ -280,7 +270,6 @@ export default function Home() {
   const [platform, setPlatform] = useState<Platform>("linux");
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [releaseAssets, setReleaseAssets] = useState<ReleaseAssets | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const globeContainerRef = useRef<HTMLDivElement>(null);
   // Mouse-tracking state for globe interaction
@@ -293,24 +282,6 @@ export default function Home() {
 
   useEffect(() => {
     setPlatform(detectPlatform());
-  }, []);
-
-  useEffect(() => {
-    fetch(RELEASES_API)
-      .then((r) => r.json())
-      .then((data) => {
-        const assets: { name: string; browser_download_url: string }[] = data.assets ?? [];
-        const find = (pat: RegExp) =>
-          assets.find((a) => pat.test(a.name))?.browser_download_url ?? null;
-        setReleaseAssets({
-          macos: find(/darwin.*signed\.zip$/i),
-          windows: find(/win32.*system-setup\.exe$/i),
-          linux_deb: find(/linux.*\.deb$/i),
-          linux_tar: find(/linux.*\.tar\.gz$/i),
-          version: data.tag_name ?? null,
-        });
-      })
-      .catch(() => {});
   }, []);
 
   // Cobe globe
@@ -402,13 +373,6 @@ export default function Home() {
     (p) => p !== platform
   );
 
-  const downloadUrl = (p: Platform): string => {
-    if (!releaseAssets) return RELEASES;
-    if (p === "macos") return releaseAssets.macos ?? RELEASES;
-    if (p === "windows") return releaseAssets.windows ?? RELEASES;
-    return releaseAssets.linux_deb ?? releaseAssets.linux_tar ?? RELEASES;
-  };
-
   return (
     <div className="min-h-screen flex flex-col">
       {/* Nav */}
@@ -417,7 +381,6 @@ export default function Home() {
           <NavbarLogo />
           <NavItems
             items={[
-              { name: "GitHub", link: REPO },
               { name: "Docs", link: "https://docs.openclaw.ai" },
               { name: "OpenClaw", link: "https://openclaw.ai" },
             ]}
@@ -434,7 +397,7 @@ export default function Home() {
               noiseIntensity={0.15}
             >
               <a
-                href={downloadUrl(platform)}
+                href={RELEASES}
                 className="inline-flex items-center gap-2 cursor-pointer rounded-full bg-[var(--bg)] px-5 py-2 text-sm font-semibold text-white shadow-[0px_1px_0px_0px_rgba(255,255,255,0.06)_inset,0px_1px_2px_0px_rgba(0,0,0,0.4)] transition-all duration-100 hover:brightness-110 active:scale-[0.98]"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -442,7 +405,7 @@ export default function Home() {
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Download{releaseAssets?.version ? ` ${releaseAssets.version}` : ""}
+                Download
               </a>
             </NoiseBackground>
           </div>
@@ -459,9 +422,6 @@ export default function Home() {
             isOpen={isMobileMenuOpen}
             onClose={() => setIsMobileMenuOpen(false)}
           >
-            <a href={REPO} className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
-              GitHub
-            </a>
             <a href="https://docs.openclaw.ai" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
               Docs
             </a>
@@ -497,7 +457,7 @@ export default function Home() {
       {/* Hero */}
       <main className="flex-1">
         <section className="relative w-full overflow-hidden">
-          {/* Background video (desktop) */}
+          {/* Background video */}
           <video
             autoPlay
             loop
@@ -535,7 +495,7 @@ export default function Home() {
                   <div className="relative mb-10">
                     <div className="relative flex rounded-xl btn-glow">
                       <a
-                        href={downloadUrl(platform)}
+                        href={RELEASES}
                         className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-all"
                       >
                         {platformIcons[platform]}
@@ -551,17 +511,12 @@ export default function Home() {
                         </svg>
                       </button>
                     </div>
-                    {releaseAssets?.version && (
-                      <p className="text-center text-xs text-[var(--text-muted)] mt-2">
-                        Latest: {releaseAssets.version}
-                      </p>
-                    )}
                     {showDropdown && (
-                      <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[220px]">
+                      <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[200px]">
                         {otherPlatforms.map((p) => (
                           <a
                             key={p}
-                            href={downloadUrl(p)}
+                            href={RELEASES}
                             className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm"
                             onClick={() => setShowDropdown(false)}
                           >
@@ -569,50 +524,11 @@ export default function Home() {
                             <span>Download for {platformLabels[p]}</span>
                           </a>
                         ))}
-                        {platform === "linux" && releaseAssets?.linux_tar && (
-                          <a
-                            href={releaseAssets.linux_tar}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm border-t border-[var(--border)]"
-                            onClick={() => setShowDropdown(false)}
-                          >
-                            <span>{platformIcons.linux}</span>
-                            <span>Linux (.tar.gz)</span>
-                          </a>
-                        )}
-                        {platform === "windows" && releaseAssets?.windows && (
-                          <a
-                            href={releaseAssets.windows.replace("system-setup", "user-setup")}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm border-t border-[var(--border)]"
-                            onClick={() => setShowDropdown(false)}
-                          >
-                            <span>{platformIcons.windows}</span>
-                            <span>Windows (user installer)</span>
-                          </a>
-                        )}
-                        <a
-                          href={RELEASES}
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-xs text-[var(--text-muted)] border-t border-[var(--border)]"
-                          onClick={() => setShowDropdown(false)}
-                        >
-                          All releases →
-                        </a>
                       </div>
                     )}
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center md:gap-4 w-full sm:w-auto gap-6">
-                    <a
-                      href={REPO}
-                      className="w-[75%] sm:w-auto mx-auto group/star inline-flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="shrink-0 transition-colors duration-300">
-                        <path d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.154-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.026 2.747-1.026.546 1.378.202 2.397.1 2.65.64.7 1.028 1.595 1.028 2.688 0 3.848-2.338 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2z" />
-                      </svg>
-                      Star on GitHub
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover/star:opacity-100 group-hover/star:translate-x-0.5 transition-all duration-300">
-                        <path d="M7 17l9.2-9.2M17 17V8H8" />
-                      </svg>
-                    </a>
                     <a
                       href="https://mba.sh"
                       target="_blank"
@@ -697,15 +613,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Screenshots */}
-        <section className="px-6 py-24 max-w-6xl mx-auto">
-          <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">See it in action</h2>
-          <p className="text-[var(--text-muted)] text-center mb-16 max-w-xl mx-auto">
-            AI powered local installation and management tool for OpenClaw.
-          </p>
-          <ScreenshotShowcase />
-        </section>
-
         {/* Global community */}
         <section className="relative px-6 py-24 overflow-hidden">
           <div className="max-w-6xl mx-auto">
@@ -743,7 +650,6 @@ export default function Home() {
               <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[260px] bg-red-500/[0.08] rounded-full blur-3xl pointer-events-none" />
 
               <div className="relative px-8 py-16 sm:px-20 text-center">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)] mb-4">Free &amp; Open Source</p>
                 <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4 leading-tight">
                   Get started in minutes
                 </h2>
@@ -755,7 +661,7 @@ export default function Home() {
                   {/* Platform-aware download — reuses hero btn-glow style */}
                   <div className="relative flex rounded-xl btn-glow">
                     <a
-                      href={downloadUrl(platform)}
+                      href={RELEASES}
                       className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-xl text-base transition-colors"
                     >
                       {platformIcons[platform]}
@@ -763,18 +669,6 @@ export default function Home() {
                     </a>
                   </div>
 
-                  <a
-                    href={REPO}
-                    className="group inline-flex items-center gap-2 px-6 py-3.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
-                    </svg>
-                    View source
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-40 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-200">
-                      <path d="M7 17l9.2-9.2M17 17V8H8" />
-                    </svg>
-                  </a>
                 </div>
               </div>
 
@@ -802,12 +696,6 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-[var(--text-muted)]">
-              <a href={REPO} className="flex items-center gap-1.5 hover:text-white transition-colors">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
-                </svg>
-                GitHub
-              </a>
               <a href="https://docs.openclaw.ai" className="flex items-center gap-1.5 hover:text-white transition-colors">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
