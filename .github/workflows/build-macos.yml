@@ -10,6 +10,8 @@ jobs:
   build-sign-notarize:
     runs-on: macos-latest
     timeout-minutes: 120
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -25,10 +27,14 @@ jobs:
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci --ignore-scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install build dependencies
         working-directory: apps/editor/build
         run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Patch compilation to emit despite pre-existing TS errors
         working-directory: apps/editor
