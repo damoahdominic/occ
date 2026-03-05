@@ -347,7 +347,7 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI powered local installation and management tool for OpenClaw.</p>
+  <p class="tagline">AI powered local harness for OpenClaw installation, configuration and troubleshooting</p>
   <div class="spinner-wrap">
     <div class="spinner"></div>
     <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
@@ -654,7 +654,7 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI powered local installation for OpenClaw</p>
+  <p class="tagline">AI powered local harness for OpenClaw installation, configuration and troubleshooting</p>
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row">
