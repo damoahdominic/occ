@@ -121,7 +121,8 @@ jobs:
           P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          # sign.js looks for buildagent.keychain at AGENT_TEMPDIRECTORY
+          KEYCHAIN_PATH=$RUNNER_TEMP/buildagent.keychain
           CERT_PATH=$RUNNER_TEMP/developer-id.p12
 
           echo "$P12_BASE64" | base64 --decode -o "$CERT_PATH"
@@ -136,15 +137,17 @@ jobs:
       - name: Sign app
         env:
           CODESIGN_IDENTITY: "Developer ID Application: HITL, Inc (SQZ9VHYXJ3)"
-          AGENT_BUILDDIRECTORY: ${{ runner.temp }}
+          # gulp outputs to path.dirname(root) = $GITHUB_WORKSPACE/apps/VSCode-darwin-arm64
+          AGENT_BUILDDIRECTORY: ${{ github.workspace }}/apps
           AGENT_TEMPDIRECTORY: ${{ runner.temp }}
           VSCODE_ARCH: arm64
         working-directory: apps/editor
-        run: node build/darwin/sign.js "$RUNNER_TEMP"
+        run: node build/darwin/sign.js "$GITHUB_WORKSPACE/apps"
 
       - name: Zip signed app
         run: |
-          cd "$RUNNER_TEMP/VSCode-darwin-arm64"
+          APP_DIR="$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64"
+          cd "$APP_DIR"
           zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64.zip" "OCcode.app"
 
       - name: Notarize
@@ -168,17 +171,17 @@ jobs:
 
       - name: Staple notarization ticket
         run: |
-          xcrun stapler staple "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app"
+          xcrun stapler staple "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64/OCcode.app"
 
       - name: Re-zip stapled app
         run: |
-          cd "$RUNNER_TEMP/VSCode-darwin-arm64"
+          cd "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64"
           zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64-signed.zip" "OCcode.app"
 
       - name: Verify signature
         run: |
-          codesign -dv --deep --verbose=4 "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app" 2>&1
-          spctl -a -vvv -t install "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app" 2>&1
+          codesign -dv --deep --verbose=4 "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64/OCcode.app" 2>&1
+          spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64/OCcode.app" 2>&1
 
       - name: Upload signed app artifact
         uses: actions/upload-artifact@v4
