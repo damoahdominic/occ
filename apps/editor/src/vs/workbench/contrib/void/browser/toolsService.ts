@@ -290,6 +290,21 @@ export class ToolsService implements IToolsService {
 				return { persistentTerminalId };
 			},
 
+			// ---
+
+			web_search: (params: RawToolParamsObj) => {
+				const query = validateStr('query', params.query);
+				return { query };
+			},
+
+			read_url: (params: RawToolParamsObj) => {
+				const url = validateStr('url', params.url);
+				if (!url.startsWith('http://') && !url.startsWith('https://')) {
+					throw new Error(`URL must start with http:// or https://, got: "${url}"`);
+				}
+				return { url };
+			},
+
 		}
 
 
@@ -461,6 +476,76 @@ export class ToolsService implements IToolsService {
 				await this.terminalToolService.killPersistentTerminal(persistentTerminalId)
 				return { result: {} }
 			},
+
+			// ---
+
+			web_search: async ({ query }) => {
+				const encoded = encodeURIComponent(query);
+				const resp = await fetch(`https://api.duckduckgo.com/?q=${encoded}&format=json&no_html=1&skip_disambig=1`);
+				if (!resp.ok) throw new Error(`Search failed: ${resp.status} ${resp.statusText}`);
+				const data = await resp.json() as any;
+
+				const parts: string[] = [];
+
+				if (data.AbstractText) {
+					parts.push(`${data.AbstractText}\nSource: ${data.AbstractURL}`);
+				}
+
+				const directResults: any[] = data.Results ?? [];
+				for (const r of directResults.slice(0, 4)) {
+					if (r.Text && r.FirstURL) parts.push(`${r.Text}\n${r.FirstURL}`);
+				}
+
+				const related: any[] = data.RelatedTopics ?? [];
+				for (const t of related.slice(0, 8)) {
+					if (t.Text && t.FirstURL) parts.push(`${t.Text}\n${t.FirstURL}`);
+					// nested topics (e.g. disambiguation categories)
+					if (t.Topics) {
+						for (const sub of (t.Topics as any[]).slice(0, 4)) {
+							if (sub.Text && sub.FirstURL) parts.push(`${sub.Text}\n${sub.FirstURL}`);
+						}
+					}
+				}
+
+				const results = parts.length > 0 ? parts.join('\n\n') : 'No results found.';
+				return { result: { results } };
+			},
+
+			read_url: async ({ url }) => {
+				const resp = await fetch(url, {
+					headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OCcode/3.0; +https://openclaw.dev)' }
+				});
+				if (!resp.ok) throw new Error(`Failed to fetch URL: ${resp.status} ${resp.statusText}`);
+
+				const contentType = resp.headers.get('content-type') ?? '';
+				let content: string;
+
+				if (contentType.includes('text/html')) {
+					let html = await resp.text();
+					// remove script/style blocks entirely
+					html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+					html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+					// block-level tags → newline
+					html = html.replace(/<\/?(p|div|h[1-6]|li|tr|br|section|article|header|footer|nav|main|pre|blockquote)[^>]*>/gi, '\n');
+					// strip all remaining tags
+					html = html.replace(/<[^>]+>/g, '');
+					// decode entities
+					html = html.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&nbsp;/g, ' ').replace(/&#39;/g, "'");
+					// collapse whitespace
+					content = html.replace(/\n{3,}/g, '\n\n').trim();
+				} else {
+					content = await resp.text();
+				}
+
+				// cap at 2 pages worth of chars
+				const maxLen = MAX_FILE_CHARS_PAGE * 2;
+				if (content.length > maxLen) {
+					content = content.slice(0, maxLen) + '\n\n...(content truncated, use read_url with a more specific anchor or section URL)';
+				}
+
+				return { result: { content, url } };
+			},
+
 		}
 
 
@@ -564,6 +649,17 @@ export class ToolsService implements IToolsService {
 			kill_persistent_terminal: (params, _result) => {
 				return `Successfully closed terminal "${params.persistentTerminalId}".`;
 			},
+
+			// ---
+
+			web_search: (params, result) => {
+				return `Web search results for "${params.query}":\n\n${result.results}`;
+			},
+
+			read_url: (params, result) => {
+				return `Content from ${result.url}:\n\n${result.content}`;
+			},
+
 		}
 
 
