@@ -32,6 +32,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Rebuild native modules for Electron (arm64)
+        working-directory: apps/editor
+        run: npx --yes @electron/rebuild -v 34.3.2 -a arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install build dependencies
         working-directory: apps/editor/build
         run: npm ci
@@ -225,6 +231,12 @@ jobs:
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci --ignore-scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rebuild native modules for Electron (x64)
+        working-directory: apps/editor
+        run: npx --yes @electron/rebuild -v 34.3.2 -a x64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
