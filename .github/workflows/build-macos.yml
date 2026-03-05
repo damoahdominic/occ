@@ -81,6 +81,12 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=7168
 
+      - name: Build React bundles (Void UI)
+        working-directory: apps/editor/src/vs/workbench/contrib/void/browser/react
+        run: |
+          npx scope-tailwind ./src -o src2/ -s void-scope -c styles.css -p "void-"
+          npx tsup
+
       - name: Bundle (out-build -> out-vscode)
         working-directory: apps/editor
         run: node_modules/.bin/gulp bundle-vscode
