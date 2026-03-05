@@ -2,9 +2,25 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
+import * as https from 'https';
 import { HomePanel } from './panels/home';
-import { ConfigPanel } from './panels/setup';
 import { StatusPanel } from './panels/status';
+import { ConfigPanel, stopConfigProxy } from './panels/config';
+
+const CONFIG_URL = 'http://localhost:18789/config';
+
+/** Returns true if the OpenClaw web server is reachable. */
+function isWebServerReachable(): Promise<boolean> {
+  return new Promise(resolve => {
+    const req = http.get(CONFIG_URL, { timeout: 3000 }, res => {
+      res.resume();
+      resolve(res.statusCode !== undefined && res.statusCode < 500);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
 
 /** Activity-bar container IDs to hide from every OCcode installation. */
 const HIDDEN_ACTIVITY_BAR_IDS = [
@@ -88,21 +104,7 @@ async function openOpenClawFolder(): Promise<void> {
     fs.mkdirSync(openclawPath, { recursive: true });
   }
 
-  const openclawUri = vscode.Uri.file(openclawPath);
-
-  // 1. Trust ~/.openclaw globally so VS Code never prompts the user.
-  const trustConfig = vscode.workspace.getConfiguration('security.workspace.trust');
-  const trustedUris: string[] = trustConfig.get('trustedUris') ?? [];
-  const uriString = openclawUri.toString();
-  if (!trustedUris.includes(uriString)) {
-    await trustConfig.update(
-      'trustedUris',
-      [...trustedUris, uriString],
-      vscode.ConfigurationTarget.Global,
-    );
-  }
-
-  // 2. Create the named workspace file if it doesn't exist.
+  // 1. Create the named workspace file if it doesn't exist.
   const workspaceFilePath = path.join(openclawPath, WORKSPACE_FILENAME);
   if (!fs.existsSync(workspaceFilePath)) {
     fs.writeFileSync(
@@ -121,14 +123,62 @@ async function openOpenClawFolder(): Promise<void> {
     );
   }
 
-  // 3. If we're already inside this workspace, nothing more to do.
+  // 2. If we're already inside this workspace, nothing more to do.
   const workspaceFileUri = vscode.Uri.file(workspaceFilePath);
   if (vscode.workspace.workspaceFile?.fsPath === workspaceFileUri.fsPath) {
     return;
   }
 
-  // Open the workspace file — reloads the window once, then VS Code remembers it.
+  // 3. Open the workspace file — reloads the window once, then VS Code remembers it.
   await vscode.commands.executeCommand('vscode.openFolder', workspaceFileUri);
+}
+
+/**
+ * Cross-platform guide the AI can follow to install Node.js if it is missing
+ * or too old on the user's machine.
+ */
+function nodeInstallGuide(platform: string): string {
+  if (platform === 'win32') {
+    return [
+      `**Installing Node.js on Windows (choose one):**`,
+      `- **winget** (built into Windows 10+): \`winget install OpenJS.NodeJS.LTS\``,
+      `- **Chocolatey**: \`choco install nodejs-lts\``,
+      `- **Scoop**: \`scoop install nodejs-lts\``,
+      `- **nvm-windows**: download from https://github.com/coreybutler/nvm-windows/releases, then \`nvm install lts && nvm use lts\``,
+      `- **Volta**: \`winget install Volta.Volta\` then \`volta install node\``,
+      `- **Direct installer**: download the Windows MSI from https://nodejs.org/en/download/ (LTS recommended)`,
+      `After installing Node.js, open a **new** terminal and verify with \`node --version\` and \`npm --version\`.`,
+      `Then re-run the OpenClaw installer.`,
+    ].join('\n');
+  }
+  if (platform === 'darwin') {
+    return [
+      `**Installing Node.js on macOS (choose one):**`,
+      `- **Homebrew** (recommended): \`brew install node@lts\` or \`brew install node\``,
+      `- **nvm** (manages multiple versions):`,
+      `  \`curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash\``,
+      `  then restart the shell and run \`nvm install --lts && nvm use --lts\``,
+      `- **Volta**: \`curl https://get.volta.sh | bash\` then \`volta install node\``,
+      `- **Direct installer**: download the macOS pkg from https://nodejs.org/en/download/ (LTS recommended)`,
+      `After installing, open a **new** terminal and verify with \`node --version\` and \`npm --version\`.`,
+      `Then re-run the OpenClaw installer.`,
+    ].join('\n');
+  }
+  // Linux
+  return [
+    `**Installing Node.js on Linux (choose one):**`,
+    `- **Debian / Ubuntu / Mint**: \`sudo apt update && sudo apt install -y nodejs npm\``,
+    `  (for latest LTS via NodeSource: \`curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash - && sudo apt install -y nodejs\`)`,
+    `- **RHEL / CentOS / Fedora / Rocky**: \`sudo dnf install -y nodejs\``,
+    `  (for latest LTS via NodeSource: \`curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash - && sudo dnf install -y nodejs\`)`,
+    `- **Arch / Manjaro**: \`sudo pacman -S nodejs npm\``,
+    `- **Alpine**: \`apk add nodejs npm\``,
+    `- **nvm** (distro-agnostic, no sudo):`,
+    `  \`curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash\``,
+    `  then restart the shell and run \`nvm install --lts && nvm use --lts\``,
+    `- **Volta**: \`curl https://get.volta.sh | bash\` then \`volta install node\``,
+    `After installing, verify with \`node --version\` and \`npm --version\`, then re-run the OpenClaw installer.`,
+  ].join('\n');
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -142,8 +192,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('openclaw.home', () => {
       HomePanel.createOrShow(context.extensionUri);
     }),
-    vscode.commands.registerCommand('openclaw.configure', () => {
-      ConfigPanel.createOrShow(context.extensionUri);
+    vscode.commands.registerCommand('openclaw.configure', async () => {
+      const reachable = await isWebServerReachable();
+      if (reachable) {
+        await ConfigPanel.createOrShow();
+      } else {
+        // Web server not running — ask the AI to start it
+        const message =
+          `The OpenClaw web configuration server is not running at ${CONFIG_URL}.\n\n` +
+          `Please start it now by running the OpenClaw gateway in the terminal:\n` +
+          `\`\`\`\nopenclaw gateway start\n\`\`\`\n\n` +
+          `Once it is running, I will be able to open the configuration UI at ${CONFIG_URL} inside the editor.`;
+        await vscode.commands.executeCommand('void.openChatWithMessage', message);
+      }
     }),
     vscode.commands.registerCommand('openclaw.aiFixConfig', () => {
       const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
@@ -163,21 +224,162 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         `\`\`\`json\n${configContent}\n\`\`\``;
       vscode.commands.executeCommand('void.openChatWithMessage', message);
     }),
-    vscode.commands.registerCommand('openclaw.install', () => {
+    vscode.commands.registerCommand('openclaw.install', async () => {
       const platform = process.platform;
-      const shell = (vscode.env.shell || '').toLowerCase();
-      let installCmd = 'curl -fsSL https://openclaw.ai/install.sh | bash';
+      const arch     = process.arch;
+      const shell    = (vscode.env.shell || '').toLowerCase();
+
+      // ── Determine install command ────────────────────────────────────────────
+      let installCmd: string;
+      let platformDesc: string;
+      let probeUrl: string;
 
       if (platform === 'win32') {
-        const isPowerShell = shell.includes('powershell') || shell.includes('pwsh');
-        installCmd = isPowerShell
-          ? 'iwr -useb https://openclaw.ai/install.ps1 | iex'
-          : 'curl -fsSL https://openclaw.ai/install.cmd -o install.cmd && install.cmd && del install.cmd';
+        const isPs      = shell.includes('powershell') || shell.includes('pwsh');
+        // git-bash.exe / wsl.exe / bash.exe — NOT git-cmd.exe
+        const isBash    = /bash\.exe|wsl\.exe|mintty/.test(shell) || shell.endsWith('bash');
+
+        if (isBash) {
+          // Git Bash / WSL — Unix-style
+          installCmd   = 'curl -fsSL https://openclaw.ai/install.sh | bash';
+          platformDesc = 'Windows (Git Bash / WSL)';
+          probeUrl     = 'https://openclaw.ai/install.sh';
+        } else if (isPs) {
+          // PowerShell / pwsh terminal — hardened flags from official installer
+          installCmd   = [
+            `$ErrorActionPreference = 'Stop'`,
+            `$ProgressPreference = 'SilentlyContinue'`,
+            `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
+          ].join('; ');
+          platformDesc = 'Windows (PowerShell)';
+          probeUrl     = 'https://openclaw.ai/install.ps1';
+        } else {
+          // CMD — auto-mode (mirrors the official batch installer logic):
+          //   1. Try PowerShell with hardened flags
+          //   2. curl.exe → download install.cmd to %TEMP%, run, clean up
+          //   3. PowerShell downloads install.cmd (covers curl-absent systems)
+          //      Note: use $env:TEMP inside PS so spaces in path are handled;
+          //      CMD expands %TEMP% for the outer call/del.
+          const tmp   = `%TEMP%\\openclaw-install.cmd`;
+          const tmpPs = `$env:TEMP\\openclaw-install.cmd`;      // inside PS -Command
+          const ps    =
+            `powershell -NoProfile -ExecutionPolicy Bypass -Command ` +
+            `"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; ` +
+            `Invoke-WebRequest -UseBasicParsing 'https://openclaw.ai/install.ps1' | Invoke-Expression"`;
+          const curlDl =
+            `curl -fsSL https://openclaw.ai/install.cmd -o "${tmp}"` +
+            ` && call "${tmp}" && del /f /q "${tmp}"`;
+          const psDl =
+            `powershell -NoProfile -ExecutionPolicy Bypass -Command ` +
+            `"$ProgressPreference='SilentlyContinue'; ` +
+            `(Invoke-WebRequest -UseBasicParsing 'https://openclaw.ai/install.cmd').Content ` +
+            `| Set-Content -Path '${tmpPs}' -Encoding ASCII"` +
+            ` && call "${tmp}" && del /f /q "${tmp}"`;
+          installCmd   = `${ps} || (where curl.exe >nul 2>&1 && (${curlDl}) || (${psDl}))`;
+          platformDesc = 'Windows (CMD — auto: PS → curl → PS-download)';
+          probeUrl     = 'https://openclaw.ai/install.ps1';
+        }
+      } else {
+        installCmd   = 'curl -fsSL https://openclaw.ai/install.sh | bash';
+        platformDesc = platform === 'darwin' ? 'macOS' : `Linux (${arch})`;
+        probeUrl     = 'https://openclaw.ai/install.sh';
       }
 
+      // ── Pre-flight: verify installer URL is reachable ────────────────────────
+      const reachable = await new Promise<boolean>(resolve => {
+        const req = http.get(probeUrl.replace('https://', 'http://'), { timeout: 5000 }, res => {
+          res.resume();
+          resolve((res.statusCode ?? 0) < 500);
+        });
+        const httpsReq = https.get(probeUrl, { timeout: 5000 }, res => {
+          res.resume();
+          resolve((res.statusCode ?? 0) < 500);
+        });
+        req.on('error', () => {});
+        httpsReq.on('error', () => resolve(false));
+        httpsReq.on('timeout', () => { httpsReq.destroy(); resolve(false); });
+      });
+
+      if (!reachable) {
+        const aiMessage = [
+          `OpenClaw installation could not start on **${platformDesc}** because the installer URL is not reachable.`,
+          ``,
+          `**URL probed:** \`${probeUrl}\``,
+          `**System:**`,
+          `- Platform: \`${platform}\` (${arch})`,
+          `- Node.js: \`${process.version}\``,
+          `- Shell: \`${vscode.env.shell || 'unknown'}\``,
+          ``,
+          `**Possible causes:** no internet connection, firewall/proxy blocking openclaw.ai, DNS failure, or the server is temporarily down.`,
+          ``,
+          `Please diagnose the network issue and provide an alternative installation method or workaround for this platform.`,
+          `After resolving, the user can retry by clicking "Install OpenClaw" on the OpenClaw Home panel.`,
+          ``,
+          `If the issue is that Node.js or npm is missing entirely, here is how to install it:`,
+          ``,
+          nodeInstallGuide(platform),
+        ].join('\n');
+        await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage);
+        return;
+      }
+
+      // ── Launch terminal ──────────────────────────────────────────────────────
       const terminal = vscode.window.createTerminal('OpenClaw Install');
       terminal.show();
       terminal.sendText(installCmd);
+
+      // ── Watch for completion ─────────────────────────────────────────────────
+      const disposable = vscode.window.onDidCloseTerminal(async closed => {
+        if (closed !== terminal) return;
+        disposable.dispose();
+
+        const exitCode = closed.exitStatus?.code;
+
+        if (exitCode !== undefined && exitCode !== 0) {
+          // Installation failed — hand off to AI with full context
+          const aiMessage = [
+            `OpenClaw installation **failed** on **${platformDesc}**.`,
+            ``,
+            `**System information:**`,
+            `- Platform: \`${platform}\` (${arch})`,
+            `- Shell: \`${vscode.env.shell || 'unknown'}\``,
+            `- Node.js: \`${process.version}\``,
+            `- VS Code: \`${vscode.version}\``,
+            `- Exit code: \`${exitCode}\``,
+            ``,
+            `**Install command attempted:**`,
+            `\`\`\``,
+            installCmd,
+            `\`\`\``,
+            ``,
+            `**Diagnostics to check:**`,
+            `- Network/firewall: can \`${probeUrl}\` be reached?`,
+            platform === 'win32'
+              ? `- PowerShell execution policy: run \`Get-ExecutionPolicy\` — should not be \`Restricted\``
+              : `- Permissions: does the user have write access to \`/usr/local/bin\` or the install target?`,
+            platform === 'win32'
+              ? `- Admin rights: the installer may need elevation (run terminal as Administrator)`
+              : `- Try with \`sudo\` if the install target requires root`,
+            `- Node.js / npm: run \`node --version\` and \`npm --version\` to confirm they are available`,
+            ``,
+            `**If Node.js is missing or too old, install it first:**`,
+            ``,
+            nodeInstallGuide(platform),
+            ``,
+            `**After Node.js is confirmed working**, re-run the OpenClaw installer:`,
+            `\`\`\``,
+            installCmd,
+            `\`\`\``,
+            ``,
+            `Please diagnose the failure, explain what went wrong, and provide a corrected install command or step-by-step fix that works on this exact platform.`,
+            `Once fixed, running \`openclaw --version\` should confirm a successful install.`,
+          ].join('\n');
+          await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage);
+        } else {
+          // Success (code 0) or user manually closed (code undefined) — refresh panel
+          HomePanel.refresh();
+        }
+      });
     }),
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
@@ -190,4 +392,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }, 250);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  stopConfigProxy();
+}

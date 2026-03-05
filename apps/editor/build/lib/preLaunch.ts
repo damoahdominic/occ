@@ -40,8 +40,11 @@ async function getElectron() {
 }
 
 async function ensureCompiled() {
-	if (!(await exists('out'))) {
-		await runProcess(npm, ['run', 'compile']);
+	// Check for out/main.js specifically — out/ can exist with only tsconfig files if a
+	// previous rimraf+transpile was interrupted, which would cause Electron to crash at
+	// startup. Fall back to the esbuild transpile (fast, 0 pre-existing TS errors).
+	if (!(await exists('out/main.js'))) {
+		await runProcess('node', ['./node_modules/gulp/bin/gulp.js', 'transpile-client-esbuild']);
 	}
 }
 

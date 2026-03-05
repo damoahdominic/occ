@@ -1,18 +1,26 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as fs from 'fs';
+import * as http from 'http';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
+
+type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
 export class HomePanel {
   public static currentPanel: HomePanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
+  private _commandAction: 'start' | 'stop' | 'restart' | null = null;
+  private _pollingTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly _outputChannel: vscode.OutputChannel;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
     this._extensionUri = extensionUri;
+    this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
@@ -20,7 +28,11 @@ export class HomePanel {
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
-      if (msg.command) {
+      if (msg.command === 'gatewayAction') {
+        void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
+      } else if (msg.command === 'checkVersion') {
+        void this._checkLatestVersion();
+      } else if (msg.command) {
         vscode.commands.executeCommand(msg.command);
       }
     }, null, this._disposables);
@@ -38,8 +50,17 @@ export class HomePanel {
     HomePanel.currentPanel = new HomePanel(panel, extensionUri);
   }
 
+  /** Re-run CLI detection and redraw — called after install completes. */
+  public static refresh(): void {
+    if (HomePanel.currentPanel) {
+      void HomePanel.currentPanel._update();
+    }
+  }
+
   public dispose() {
     HomePanel.currentPanel = undefined;
+    this._stopPolling();
+    this._outputChannel.dispose();
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
   }
@@ -53,6 +74,189 @@ export class HomePanel {
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
     this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+    // Kick off gateway status polling now that the webview is ready.
+    this._startPolling();
+  }
+
+  // ── Gateway status helpers ─────────────────────────────────────────────────
+
+  private async _checkGatewayStatus(): Promise<GatewayStatus> {
+    if (this._commandAction) {
+      return this._commandAction === 'start' ? 'starting'
+           : this._commandAction === 'stop'  ? 'stopping'
+           : 'restarting';
+    }
+    return new Promise(resolve => {
+      const req = http.get('http://localhost:18789/', { timeout: 2000 }, res => {
+        res.resume();
+        resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
+      });
+      req.on('error', (err: NodeJS.ErrnoException) => {
+        resolve(err.code === 'ECONNREFUSED' ? 'stopped' : 'errored');
+      });
+      req.on('timeout', () => { req.destroy(); resolve('stopped'); });
+    });
+  }
+
+  private _startPolling(): void {
+    this._stopPolling();
+    const tick = async () => {
+      if (!HomePanel.currentPanel) return;
+      const [status, aiRunning] = await Promise.all([
+        this._checkGatewayStatus(),
+        vscode.commands.executeCommand<boolean>('void.getIsRunning').then(v => !!v, () => false),
+      ]);
+      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status }); } catch {}
+      try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
+    };
+    void tick();
+    this._pollingTimer = setInterval(tick, 2000);
+  }
+
+  private _stopPolling(): void {
+    if (this._pollingTimer !== undefined) {
+      clearInterval(this._pollingTimer);
+      this._pollingTimer = undefined;
+    }
+  }
+
+  /**
+   * Polls the actual gateway HTTP status until the expected state is reached
+   * or the timeout expires. Streams live status updates to the webview while
+   * waiting so the UI stays accurate (still "Starting…" etc.).
+   */
+  private async _waitForDesiredState(
+    expected: GatewayStatus,
+    intermediary: GatewayStatus,
+    timeoutMs = 20000,
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      const current = await this._checkGatewayStatus();
+      if (current === expected) return true;
+      // Still transitioning — keep the intermediary label in the UI.
+      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
+    }
+    return false;
+  }
+
+  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart'): Promise<void> {
+    const intermediary: GatewayStatus =
+      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
+    const expectedState: GatewayStatus = action === 'stop' ? 'stopped' : 'running';
+
+    this._commandAction = action;
+    try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
+
+    const cliPath = await this._findOpenClawPath();
+    if (!cliPath) {
+      this._outputChannel.appendLine('[OpenClaw] Error: openclaw CLI not found');
+      this._commandAction = null;
+      return;
+    }
+
+    this._outputChannel.clear();
+    this._outputChannel.appendLine(`[OpenClaw] gateway ${action} …`);
+
+    let output = '';
+    const child = cp.spawn(cliPath, ['gateway', action], {
+      env: this._buildExecEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout?.on('data', (d: Buffer) => { const t = d.toString(); output += t; this._outputChannel.append(t); });
+    child.stderr?.on('data', (d: Buffer) => { const t = d.toString(); output += t; this._outputChannel.append(t); });
+    child.on('close', async (code: number | null) => {
+      this._outputChannel.appendLine(`[OpenClaw] gateway ${action} exited (${code ?? 'signal'})`);
+      this._commandAction = null;
+
+      // Give the gateway time to actually reach the desired state before
+      // deciding anything — the CLI often exits before the service is up/down.
+      const reached = await this._waitForDesiredState(expectedState, intermediary);
+
+      if (reached) {
+        // All good — show the confirmed final state.
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: expectedState }); } catch {}
+      } else {
+        // Still not in the right state after waiting — hand off to AI.
+        this._outputChannel.appendLine(`[OpenClaw] Expected "${expectedState}" but gateway did not reach it. Invoking MoltPilot…`);
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: 'ai-fixing' }); } catch {}
+
+        const currentStatus = await this._checkGatewayStatus();
+        const aiMessage =
+          `I tried to run \`openclaw gateway ${action}\` but the gateway never reached the expected state ("${expectedState}"). ` +
+          `It is currently **${currentStatus}**.\n\n` +
+          `Here is the full command output:\n\`\`\`\n${output.trim()}\n\`\`\`\n\n` +
+          `Please diagnose the issue and provide the exact steps or commands to fix it.`;
+        await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage);
+
+        // Resume normal status polling after a moment.
+        setTimeout(async () => {
+          const final = await this._checkGatewayStatus();
+          try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: final }); } catch {}
+        }, 5000);
+      }
+    });
+    child.on('error', (err: Error) => {
+      this._outputChannel.appendLine(`[OpenClaw] Error: ${err.message}`);
+      this._commandAction = null;
+    });
+  }
+
+  // ── Version check ──────────────────────────────────────────────────────────
+
+  /** Fetches the latest openclaw version from the npm registry. */
+  private _fetchLatestVersion(): Promise<string | null> {
+    return new Promise(resolve => {
+      // Try npm registry first — openclaw is published there.
+      const req = https.get(
+        { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
+        res => {
+          let data = '';
+          res.on('data', (c: Buffer) => (data += c));
+          res.on('end', () => {
+            try { resolve(JSON.parse(data).version ?? null); } catch { resolve(null); }
+          });
+        },
+      );
+      req.setTimeout(6000, () => { req.destroy(); resolve(null); });
+      req.on('error', () => resolve(null));
+    });
+  }
+
+  private async _checkLatestVersion(): Promise<void> {
+    const post = (html: string) => {
+      try { this._panel.webview.postMessage({ type: 'versionResult', html }); } catch {}
+    };
+
+    const [cliCheck, latest] = await Promise.all([
+      this._testOpenClawCli(),
+      this._fetchLatestVersion(),
+    ]);
+
+    if (!latest) {
+      post(`<span style="color:#888">Could not reach version server — check your connection.</span>`);
+      return;
+    }
+
+    const installed = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
+
+    if (!installed) {
+      post(`<span style="color:#60a5fa">Latest: <strong>${latest}</strong> — OpenClaw CLI not detected locally.</span>`);
+      return;
+    }
+
+    // Normalise versions for comparison (strip leading 'v', build metadata, etc.)
+    const norm = (v: string) => v.replace(/^v/i, '').split(/[-+]/)[0];
+    if (norm(installed) === norm(latest)) {
+      post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${installed}</strong></span>`);
+    } else {
+      post(
+        `<span style="color:#fbbf24">Update available: <strong>${latest}</strong> ` +
+        `&mdash; you have <strong>${installed}</strong>. ` +
+        `Run <code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:3px">openclaw update</code> to upgrade.</span>`,
+      );
+    }
   }
 
   private _getLoadingHtml(iconUri: string): string {
@@ -169,6 +373,19 @@ export class HomePanel {
     const cliClass = cliCheck.ok ? 'ok' : 'warn';
     const cliHint = cliCheck.ok ? '' : ` (tried: ${cliCheck.command})`;
 
+    // ── Lucide icons (inline SVG, no CDN needed) ──────────────────────────────
+    const ic = (d: string, size = 13, opacity = '0.55') =>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:${opacity}">${d}</svg>`;
+    const icFolder   = ic('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>');
+    const icTerminal = ic('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>');
+    const icServer   = ic('<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>');
+    const icBot      = ic('<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>');
+    // Button icons — slightly larger, full opacity
+    const icSettings = ic('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>', 15, '0.9');
+    const icDownload = ic('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>', 15, '0.9');
+    const icRefreshCw = ic('<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>', 14, '0.85');
+    const icBtnPrimary = isInstalled ? icSettings : icDownload;
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -243,12 +460,18 @@ export class HomePanel {
     .check-row {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
+      align-items: center;
       gap: 8px;
       padding: clamp(4px, 1.2vw, 6px) 0;
       border-bottom: 1px solid #2b2b2b;
     }
     .check-row:last-child { border-bottom: none; }
+    .check-row .row-icon {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      color: #9a9a9a;
+    }
     .check-row .label {
       color: #9a9a9a;
       text-align: left;
@@ -268,6 +491,85 @@ export class HomePanel {
     }
     .check-row .value.ok { color: #4ade80; }
     .check-row .value.warn { color: #facc15; }
+
+    /* ── Gateway status row ─────────────────────────────────────── */
+    .gw-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    @keyframes gw-spin { to { transform: rotate(360deg); } }
+    .gw-spinner {
+      width: 11px;
+      height: 11px;
+      border: 2px solid rgba(96,165,250,0.2);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: gw-spin 0.7s linear infinite;
+      display: none;
+      flex-shrink: 0;
+    }
+    .gw-spinner.ai {
+      border-color: rgba(167,139,250,0.2);
+      border-top-color: #a78bfa;
+    }
+
+    /* ── MoltPilot row ──────────────────────────────────────────── */
+    .molt-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    @keyframes molt-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+    @keyframes molt-sparkle {
+      0%   { opacity: 0; transform: scale(0.6) rotate(-15deg); }
+      30%  { opacity: 1; transform: scale(1.2) rotate(10deg); }
+      60%  { opacity: 0.7; transform: scale(0.9) rotate(-5deg); }
+      100% { opacity: 0; transform: scale(0.6) rotate(20deg); }
+    }
+    .molt-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #666;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .molt-dot.working {
+      background: #a78bfa;
+      animation: molt-pulse 1.2s ease-in-out infinite;
+    }
+    #molt-sparkle {
+      display: none;
+      font-size: 13px;
+      line-height: 1;
+      animation: molt-sparkle 1.4s ease-in-out infinite;
+    }
+    #molt-sparkle.visible { display: inline-block; }
+    #molt-text { max-width: none; overflow: visible; }
+    .gw-btn {
+      font-size: clamp(10px, 2vw, 11px);
+      padding: 2px 9px;
+      border-radius: 4px;
+      border: 1px solid currentColor;
+      cursor: pointer;
+      background: transparent;
+      line-height: 1.5;
+      transition: background 0.12s;
+      display: none;
+    }
+    .gw-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .gw-stop    { color: #f87171; }
+    .gw-stop:not(:disabled):hover    { background: rgba(248,113,113,0.15); }
+    .gw-start   { color: #4ade80; }
+    .gw-start:not(:disabled):hover   { background: rgba(74,222,128,0.15); }
+    .gw-restart { color: #fbbf24; }
+    .gw-restart:not(:disabled):hover { background: rgba(251,191,36,0.15); }
 
     /* ── Buttons ───────────────────────────────────────────────── */
     .btn-group {
@@ -289,7 +591,11 @@ export class HomePanel {
       transition: background 0.15s, transform 0.1s;
       width: fit-content;
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
     }
+    .btn-primary svg { flex-shrink: 0; }
     .btn-primary:hover { background: #b91c1c; }
     .btn-primary:active { transform: scale(0.98); }
     .btn-secondary {
@@ -303,7 +609,11 @@ export class HomePanel {
       transition: border-color 0.15s, color 0.15s, transform 0.1s;
       width: fit-content;
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
+    .btn-secondary svg { flex-shrink: 0; }
     .btn-secondary:hover { border-color: #888; color: #ddd; }
     .btn-secondary:active { transform: scale(0.98); }
 
@@ -348,17 +658,38 @@ export class HomePanel {
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row">
+      <span class="row-icon">${icFolder}</span>
       <span class="label">Config folder (~/.openclaw)</span>
       <span class="value ${dirClass}">${dirText}</span>
     </div>
     <div class="check-row">
+      <span class="row-icon">${icTerminal}</span>
       <span class="label">CLI (openclaw --version)</span>
       <span class="value ${cliClass}">${cliText}${cliHint}</span>
     </div>
+    <div class="check-row">
+      <span class="row-icon">${icServer}</span>
+      <span class="label">Gateway</span>
+      <span class="gw-cell">
+        <span id="gw-spinner" class="gw-spinner"></span>
+        <span id="gw-text" class="value" style="color:#666">Checking…</span>
+        <button id="gw-btn" class="gw-btn" disabled></button>
+      </span>
+    </div>
+    <div class="check-row">
+      <span class="row-icon">${icBot}</span>
+      <span class="label">MoltPilot</span>
+      <span class="molt-cell">
+        <span id="molt-sparkle">✨</span>
+        <span id="molt-dot" class="molt-dot"></span>
+        <span id="molt-text" class="value" style="color:#666">Idle</span>
+      </span>
+    </div>
   </div>
   <div class="btn-group">
-    <button class="btn-primary" onclick="cmd('${buttonCommand}')">${buttonLabel}</button>
-    <button class="btn-secondary" onclick="cmd('openclaw.status')">Check Status</button>
+    <button class="btn-primary" onclick="cmd('${buttonCommand}')">${icBtnPrimary}${buttonLabel}</button>
+    <button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates with OpenClaw</button>
+    <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
   </div>
   <div class="links">
     <a href="https://github.com/damoahdominic/occ">GitHub</a>
@@ -368,6 +699,91 @@ export class HomePanel {
   <script>
     const vscode = acquireVsCodeApi();
     function cmd(c) { vscode.postMessage({ command: c }); }
+
+    // ── Gateway status ────────────────────────────────────────────
+    const GW = {
+      running:    { label: 'Running',              color: '#4ade80', btnLabel: 'Stop',    btnClass: 'gw-stop',    action: 'stop',    spin: false, aiSpin: false },
+      stopped:    { label: 'Stopped',              color: '#facc15', btnLabel: 'Start',   btnClass: 'gw-start',   action: 'start',   spin: false, aiSpin: false },
+      errored:    { label: 'Errored',              color: '#f87171', btnLabel: 'Restart', btnClass: 'gw-restart', action: 'restart', spin: false, aiSpin: false },
+      starting:   { label: 'Starting…',           color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
+      stopping:   { label: 'Stopping…',           color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
+      restarting: { label: 'Restarting…',         color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
+      checking:   { label: 'Checking…',           color: '#666',    btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
+      'ai-fixing':{ label: 'AI Copilot fixing…',  color: '#a78bfa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: true  },
+    };
+
+    const gwSpinner = document.getElementById('gw-spinner');
+    const gwText    = document.getElementById('gw-text');
+    const gwBtn     = document.getElementById('gw-btn');
+
+    // Show spinner while checking on load.
+    gwSpinner.style.display = 'inline-block';
+
+    function updateGateway(status) {
+      const cfg = GW[status] || GW.checking;
+      gwSpinner.style.display = cfg.spin ? 'inline-block' : 'none';
+      gwSpinner.classList.toggle('ai', !!cfg.aiSpin);
+      gwText.textContent  = cfg.label;
+      gwText.style.color  = cfg.color;
+      if (cfg.btnLabel) {
+        gwBtn.textContent    = cfg.btnLabel;
+        gwBtn.dataset.action = cfg.action;
+        gwBtn.className      = 'gw-btn ' + cfg.btnClass;
+        gwBtn.disabled       = false;
+        gwBtn.style.display  = 'inline-flex';
+      } else {
+        gwBtn.disabled      = true;
+        gwBtn.style.display = 'none';
+      }
+    }
+
+    gwBtn.addEventListener('click', () => {
+      const action = gwBtn.dataset.action;
+      if (!action) return;
+      gwBtn.disabled = true;
+      vscode.postMessage({ command: 'gatewayAction', action });
+    });
+
+    // ── MoltPilot status ──────────────────────────────────────────
+    const moltDot     = document.getElementById('molt-dot');
+    const moltText    = document.getElementById('molt-text');
+    const moltSparkle = document.getElementById('molt-sparkle');
+    let _moltRunning  = false;
+
+    function updateMoltPilot(running) {
+      if (_moltRunning === running) return;
+      _moltRunning = running;
+      moltDot.classList.toggle('working', running);
+      moltSparkle.classList.toggle('visible', running);
+      moltText.textContent = running ? 'Running' : 'Idle';
+      moltText.style.color = running ? '#a78bfa' : '#666';
+    }
+
+    // ── Version check ─────────────────────────────────────────────
+    function checkVersion() {
+      const btn = document.getElementById('btn-version');
+      const res = document.getElementById('version-result');
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+      res.style.display = 'none';
+      vscode.postMessage({ command: 'checkVersion' });
+    }
+
+    window.addEventListener('message', e => {
+      if (e.data.type === 'gatewayStatus') {
+        updateGateway(e.data.status);
+        if (e.data.status === 'ai-fixing') updateMoltPilot(true);
+      } else if (e.data.type === 'aiRunning') {
+        updateMoltPilot(e.data.running);
+      } else if (e.data.type === 'versionResult') {
+        const btn = document.getElementById('btn-version');
+        const res = document.getElementById('version-result');
+        btn.disabled = false;
+        btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw';
+        res.innerHTML = e.data.html;
+        res.style.display = 'block';
+      }
+    });
   </script>
 </body>
 </html>`;
