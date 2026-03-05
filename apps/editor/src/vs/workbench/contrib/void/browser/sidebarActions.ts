@@ -282,6 +282,19 @@ registerAction2(class extends Action2 {
 
 
 
+// Exposes AI running state to extensions (e.g. OpenClaw home panel MoltPilot indicator).
+export const VOID_GET_IS_RUNNING_ID = 'void.getIsRunning'
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: VOID_GET_IS_RUNNING_ID, title: localize2('voidGetIsRunning', 'MoltPilot: Get AI Running State') });
+	}
+	run(accessor: ServicesAccessor): boolean {
+		const streamState = accessor.get(IChatThreadService).streamState
+		return Object.values(streamState).some(s => s?.isRunning && s.isRunning !== 'idle')
+	}
+})
+
+
 // export class TabSwitchListener extends Disposable {
 
 // 	constructor(

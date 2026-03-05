@@ -1801,6 +1801,11 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 		} catch {
 		}
 
+		// Scroll the terminal panel into view so autoscroll doesn't bury it.
+		requestAnimationFrame(() => {
+			container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		});
+
 		// Listen for size changes of the container and keep the terminal layout in sync.
 		const resizeObserver = new ResizeObserver((entries) => {
 			const height = entries[0].borderBoxSize[0].blockSize;
@@ -1834,9 +1839,11 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 			componentParams.info = persistentTerminalNameOfId(toolMessage.params.persistentTerminalId)
 		}
 
-		componentParams.children = <ToolChildrenWrapper className='whitespace-pre text-nowrap overflow-auto text-sm'>
-			<div className='!select-text cursor-auto'>
-				<BlockCode initValue={`${msg.trim()}`} language='shellscript' />
+		componentParams.children = <ToolChildrenWrapper className='whitespace-pre text-nowrap text-sm'>
+			<div className='max-h-[160px] overflow-y-auto overflow-x-auto'>
+				<div className='!select-text cursor-auto'>
+					<BlockCode initValue={`${msg.trim()}`} language='shellscript' />
+				</div>
 			</div>
 		</ToolChildrenWrapper>
 	}
@@ -1850,7 +1857,7 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 	}
 	else if (toolMessage.type === 'running_now') {
 		if (type === 'run_command')
-			componentParams.children = <div ref={divRef} className='relative h-[300px] text-sm' />
+			componentParams.children = <div ref={divRef} className='relative h-[70px] text-sm' />
 	}
 	else if (toolMessage.type === 'rejected' || toolMessage.type === 'tool_request') {
 	}

@@ -26,7 +26,6 @@ import { IViewsService } from '../../../services/views/common/viewsService.js';
 
 /* eslint-disable */ // Void
 import { VOID_CTRL_K_ACTION_ID, VOID_CTRL_L_ACTION_ID } from '../../../contrib/void/browser/actionIDs.js';
-import { VIEWLET_ID as REMOTE_EXPLORER_VIEWLET_ID } from '../../../contrib/remote/browser/remoteExplorer.js';
 /* eslint-enable */
 
 // interface WatermarkEntry {
@@ -193,33 +192,50 @@ export class EditorGroupWatermark extends Disposable {
 				buttonContainer.style.marginBottom = '16px';
 				voidIconBox.appendChild(buttonContainer);
 
-				// Open a folder
+				// Open OpenClaw State Directory button
 				const openFolderButton = h('button')
 				openFolderButton.root.classList.add('void-openfolder-button')
 				openFolderButton.root.style.display = 'block'
-				openFolderButton.root.style.width = '124px' // Set width to 124px as requested
-				openFolderButton.root.textContent = 'Open Folder'
-				openFolderButton.root.onclick = () => {
-					this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID)
-					// if (this.contextKeyService.contextMatchesRules(ContextKeyExpr.and(WorkbenchStateContext.isEqualTo('workspace')))) {
-					// 	this.commandService.executeCommand(OpenFolderViaWorkspaceAction.ID);
-					// } else {
-					// 	this.commandService.executeCommand(isMacintosh ? 'workbench.action.files.openFileFolder' : 'workbench.action.files.openFolder');
-					// }
+				openFolderButton.root.style.width = '260px'
+				openFolderButton.root.textContent = 'Open OpenClaw State Directory'
+				openFolderButton.root.onclick = async () => {
+					// Open AI sidebar if not visible
+					void this.viewsService.openViewContainer('workbench.view.void');
+
+					// Check for ~/.openclaw workspace file
+					const home = process.env['HOME'] || process.env['USERPROFILE'] || '';
+					const openclawDir = home ? `${home}/.openclaw` : '';
+					const workspaceFile = openclawDir ? `${openclawDir}/My OpenClaw Workspace.code-workspace` : '';
+
+					let opened = false;
+					if (workspaceFile) {
+						try {
+							const { promises: fsPromises } = await import('fs');
+							await fsPromises.access(workspaceFile);
+							// Workspace file exists — open it
+							const { URI } = await import('../../../../base/common/uri.js');
+							await this.hostService.openWindow([{ workspaceUri: URI.file(workspaceFile) }]);
+							opened = true;
+						} catch {
+							// workspace file missing — try opening the folder directly
+							if (openclawDir) {
+								try {
+									const { promises: fsPromises } = await import('fs');
+									await fsPromises.access(openclawDir);
+									const { URI } = await import('../../../../base/common/uri.js');
+									await this.hostService.openWindow([{ folderUri: URI.file(openclawDir) }]);
+									opened = true;
+								} catch { /* fall through to picker */ }
+							}
+						}
+					}
+
+					if (!opened) {
+						// ~/.openclaw doesn't exist — let user pick a folder
+						this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID);
+					}
 				}
 				buttonContainer.appendChild(openFolderButton.root);
-
-				// Open SSH button
-				const openSSHButton = h('button')
-				openSSHButton.root.classList.add('void-openssh-button')
-				openSSHButton.root.style.display = 'block'
-				openSSHButton.root.style.backgroundColor = '#5a5a5a' // Made darker than the default gray
-				openSSHButton.root.style.width = '124px' // Set width to 124px as requested
-				openSSHButton.root.textContent = 'Open SSH'
-				openSSHButton.root.onclick = () => {
-					this.viewsService.openViewContainer(REMOTE_EXPLORER_VIEWLET_ID);
-				}
-				buttonContainer.appendChild(openSSHButton.root);
 
 
 				// Recents
@@ -304,6 +320,16 @@ export class EditorGroupWatermark extends Disposable {
 				if (keys2)
 					label2.set(keys2);
 				this.currentDisposables.add(label2);
+
+				const keys3 = this.keybindingService.lookupKeybinding('openclaw.home');
+				const dl3 = append(voidIconBox, $('dl'));
+				const dt3 = append(dl3, $('dt'));
+				dt3.textContent = 'OpenClaw Home'
+				const dd3 = append(dl3, $('dd'));
+				const label3 = new KeybindingLabel(dd3, OS, { renderUnboundKeybindings: true, ...defaultKeybindingLabelStyles });
+				if (keys3)
+					label3.set(keys3);
+				this.currentDisposables.add(label3);
 
 				// const keys3 = this.keybindingService.lookupKeybinding('workbench.action.openGlobalKeybindings');
 				// const button3 = append(recentsBox, $('button'));

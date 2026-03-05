@@ -33,6 +33,14 @@
 				"path": "./themes/openclaw-dark.json"
 			}
 		],
+		"keybindings": [
+			{
+				"command": "openclaw.home",
+				"key": "ctrl+alt+h",
+				"mac": "cmd+alt+h",
+				"when": "true"
+			}
+		],
 		"commands": [
 			{
 				"command": "openclaw.home",
