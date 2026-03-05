@@ -57,6 +57,18 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=7168
 
+      - name: Install extension dependencies
+        working-directory: apps/editor
+        run: |
+          for dir in extensions/*/; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Installing deps for $dir"
+              (cd "$dir" && npm install --ignore-scripts 2>/dev/null || true)
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Compile non-native extensions
         working-directory: apps/editor
         run: node_modules/.bin/gulp compile-non-native-extensions-build
