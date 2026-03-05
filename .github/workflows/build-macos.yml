@@ -1,0 +1,126 @@
+name: Build & Sign macOS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-sign-notarize:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.2'
+
+      - name: Install editor dependencies
+        working-directory: apps/editor
+        run: npm ci --ignore-scripts
+
+      - name: Install build dependencies
+        working-directory: apps/editor/build
+        run: npm ci
+
+      - name: Build editor (esbuild transpile)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp transpile-client-esbuild
+
+      - name: Download Electron
+        working-directory: apps/editor
+        run: node build/lib/electron.js
+        continue-on-error: true
+
+      - name: Package app (arm64)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp vscode-darwin-arm64-min-ci
+        env:
+          VSCODE_ARCH: arm64
+
+      - name: Import certificate to keychain
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          CERT_PATH=$RUNNER_TEMP/developer-id.p12
+
+          echo "$P12_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "keychain-password" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "keychain-password" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "keychain-password" "$KEYCHAIN_PATH"
+
+      - name: Sign app
+        env:
+          CODESIGN_IDENTITY: "Developer ID Application: HITL, Inc (SQZ9VHYXJ3)"
+          AGENT_BUILDDIRECTORY: ${{ runner.temp }}
+          AGENT_TEMPDIRECTORY: ${{ runner.temp }}
+          VSCODE_ARCH: arm64
+        working-directory: apps/editor
+        run: node build/darwin/sign.js "$RUNNER_TEMP"
+
+      - name: Zip signed app
+        run: |
+          cd "$RUNNER_TEMP/VSCode-darwin-arm64"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64.zip" "OCcode.app"
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_ISSUER: ${{ secrets.APPLE_API_KEY_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          # Write the .p8 key file
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
+
+          xcrun notarytool submit "$RUNNER_TEMP/OCcode-darwin-arm64.zip" \
+            --key ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_KEY_ISSUER" \
+            --wait \
+            --timeout 30m
+
+      - name: Staple notarization ticket
+        run: |
+          xcrun stapler staple "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app"
+
+      - name: Re-zip stapled app
+        run: |
+          cd "$RUNNER_TEMP/VSCode-darwin-arm64"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64-signed.zip" "OCcode.app"
+
+      - name: Verify signature
+        run: |
+          codesign -dv --deep --verbose=4 "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app" 2>&1
+          spctl -a -vvv -t install "$RUNNER_TEMP/VSCode-darwin-arm64/OCcode.app" 2>&1
+
+      - name: Upload signed app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OCcode-darwin-arm64-signed
+          path: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
+          name: OCcode ${{ github.ref_name }}
+          draft: false
+          prerelease: false
