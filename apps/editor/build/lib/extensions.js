@@ -422,9 +422,13 @@ function doPackageLocalExtensionsStream(forWeb, disableMangle, native) {
         // also include shared production node modules
         const productionDependencies = (0, dependencies_1.getProductionDependencies)('extensions/');
         const dependenciesSrc = productionDependencies.map(d => path_1.default.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
-        result = event_stream_1.default.merge(localExtensionsStream, gulp_1.default.src(dependenciesSrc, { base: '.' })
-            .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', '.moduleignore')))
-            .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', `.moduleignore.${process.platform}`))));
+        if (dependenciesSrc.length > 0) {
+            result = event_stream_1.default.merge(localExtensionsStream, gulp_1.default.src(dependenciesSrc, { base: '.' })
+                .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', '.moduleignore')))
+                .pipe(util2.cleanNodeModules(path_1.default.join(root, 'build', `.moduleignore.${process.platform}`))));
+        } else {
+            result = localExtensionsStream;
+        }
     }
     return (result
         .pipe(util2.setExecutableBit(['**/*.sh'])));
