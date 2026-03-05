@@ -336,8 +336,25 @@ export const builtinTools: {
 		name: 'kill_persistent_terminal',
 		description: `Interrupts and closes a persistent terminal that you opened with open_persistent_terminal.`,
 		params: { persistent_terminal_id: { description: `The ID of the persistent terminal.` } }
-	}
+	},
 
+	// --- web ---
+
+	web_search: {
+		name: 'web_search',
+		description: `Search the web for up-to-date information. Returns relevant results with titles, URLs, and summaries. Use this to look up current events, documentation, APIs, packages, or any information not available in the codebase.`,
+		params: {
+			query: { description: 'The search query.' },
+		},
+	},
+
+	read_url: {
+		name: 'read_url',
+		description: `Fetch and read the full text content of any URL. Returns the page as plain text with HTML stripped. Use this to read documentation, articles, GitHub files, API references, or any web page after finding it with web_search.`,
+		params: {
+			url: { description: 'The full URL to fetch (must start with http:// or https://).' },
+		},
+	},
 
 	// go_to_definition
 	// go_to_usages
