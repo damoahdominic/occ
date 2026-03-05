@@ -60,11 +60,11 @@ jobs:
       - name: Install extension dependencies
         working-directory: apps/editor
         run: |
-          for dir in extensions/*/; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Installing deps for $dir"
-              (cd "$dir" && npm install --ignore-scripts 2>/dev/null || true)
-            fi
+          # Install deps for all extensions and their nested subdirs (e.g. server/)
+          find extensions -name "package.json" -not -path "*/node_modules/*" | while read pkg; do
+            dir=$(dirname "$pkg")
+            echo "Installing deps in $dir"
+            (cd "$dir" && npm install --ignore-scripts 2>/dev/null || true)
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
