@@ -54,22 +54,32 @@ jobs:
       - name: Compile to out-build (tsc, no type-check errors)
         working-directory: apps/editor
         run: node_modules/.bin/gulp compile-build-without-mangling
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Compile non-native extensions
         working-directory: apps/editor
         run: node_modules/.bin/gulp compile-non-native-extensions-build
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Compile extension media
         working-directory: apps/editor
         run: node_modules/.bin/gulp compile-extension-media-build
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Bundle (out-build -> out-vscode)
         working-directory: apps/editor
         run: node_modules/.bin/gulp bundle-vscode
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Minify (out-vscode -> out-vscode-min)
         working-directory: apps/editor
         run: node_modules/.bin/gulp minify-vscode
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Download Electron
         working-directory: apps/editor
