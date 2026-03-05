@@ -187,6 +187,7 @@ jobs:
 
       - name: Upload signed app artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: OCcode-darwin-arm64-signed
           path: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
