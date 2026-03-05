@@ -77,6 +77,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compile OpenClaw extension (tsc)
+        working-directory: apps/editor/extensions/openclaw
+        run: node_modules/.bin/tsc -p tsconfig.json
+
       - name: Compile non-native extensions
         working-directory: apps/editor
         run: node_modules/.bin/gulp compile-non-native-extensions-build
@@ -277,6 +281,10 @@ jobs:
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile OpenClaw extension (tsc)
+        working-directory: apps/editor/extensions/openclaw
+        run: node_modules/.bin/tsc -p tsconfig.json
 
       - name: Compile non-native extensions
         working-directory: apps/editor
