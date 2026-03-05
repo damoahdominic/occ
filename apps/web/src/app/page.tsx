@@ -488,41 +488,24 @@ export default function Home() {
                     Just download, open, and you&apos;re ready to go.
                   </p>
 
-                  {/* Download button */}
-                  <div className="relative mb-10">
-                    <div className="relative flex rounded-xl btn-glow">
+                  {/* Download buttons */}
+                  <div className="flex flex-col sm:flex-row items-center gap-3 mb-10">
+                    <div className="relative btn-glow rounded-xl">
                       <a
                         href={RELEASES}
-                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-all"
+                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all"
                       >
-                        {platformIcons[platform]}
-                        Download for {platformLabels[platform]}
+                        {platformIcons["windows"]}
+                        Download for Windows
                       </a>
-                      <button
-                        onClick={() => setShowDropdown(!showDropdown)}
-                        className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-3 py-3.5 rounded-r-xl border-l border-white/20 transition-colors"
-                        aria-label="Other platforms"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
-                        </svg>
-                      </button>
                     </div>
-                    {showDropdown && (
-                      <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[200px]">
-                        {otherPlatforms.map((p) => (
-                          <a
-                            key={p}
-                            href={RELEASES}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm"
-                            onClick={() => setShowDropdown(false)}
-                          >
-                            <span>{platformIcons[p]}</span>
-                            <span>Download for {platformLabels[p]}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
+                    <a
+                      href={RELEASES}
+                      className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
+                    >
+                      {platformIcons["macos"]}
+                      Download for macOS
+                    </a>
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center md:gap-4 w-full sm:w-auto gap-6">
@@ -654,18 +637,23 @@ export default function Home() {
                   Download OCCode and go from zero to a fully configured OpenClaw environment — no manual setup required.
                 </p>
 
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                  {/* Platform-aware download — reuses hero btn-glow style */}
-                  <div className="relative flex rounded-xl btn-glow">
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <div className="relative btn-glow rounded-xl">
                     <a
                       href={RELEASES}
-                      className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-xl text-base transition-colors"
+                      className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-colors"
                     >
-                      {platformIcons[platform]}
-                      Download for {platformLabels[platform]}
+                      {platformIcons["windows"]}
+                      Download for Windows
                     </a>
                   </div>
-
+                  <a
+                    href={RELEASES}
+                    className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
+                  >
+                    {platformIcons["macos"]}
+                    Download for macOS
+                  </a>
                 </div>
               </div>
 
