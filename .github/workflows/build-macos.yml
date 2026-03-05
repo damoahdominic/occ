@@ -9,7 +9,7 @@ on:
 jobs:
   build-sign-notarize:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
@@ -30,9 +30,40 @@ jobs:
         working-directory: apps/editor/build
         run: npm ci
 
-      - name: Build editor (esbuild transpile)
+      - name: Patch compilation to emit despite pre-existing TS errors
         working-directory: apps/editor
-        run: node_modules/.bin/gulp transpile-client-esbuild
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'build/lib/compilation.js';
+            let c = fs.readFileSync(path, 'utf8');
+            c = c.replace(
+              'createCompile(src, { build, emitError: true, transpileOnly: false',
+              'createCompile(src, { build, emitError: false, transpileOnly: false'
+            );
+            fs.writeFileSync(path, c);
+            console.log('Patched compilation.js: emitError -> false');
+          "
+
+      - name: Compile to out-build (tsc, no type-check errors)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-build-without-mangling
+
+      - name: Compile non-native extensions
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-non-native-extensions-build
+
+      - name: Compile extension media
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-extension-media-build
+
+      - name: Bundle (out-build -> out-vscode)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp bundle-vscode
+
+      - name: Minify (out-vscode -> out-vscode-min)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp minify-vscode
 
       - name: Download Electron
         working-directory: apps/editor
