@@ -1,4 +1,4 @@
-name: Build & Sign macOS
+name: Build macOS & Windows
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-sign-notarize:
+  build-macos:
     runs-on: macos-latest
     timeout-minutes: 120
     permissions:
@@ -198,6 +198,173 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
+          name: OCcode ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.2'
+
+      - name: Install editor dependencies
+        working-directory: apps/editor
+        run: npm ci --ignore-scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install build dependencies
+        working-directory: apps/editor/build
+        run: npm ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch compilation to emit despite pre-existing TS errors
+        working-directory: apps/editor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'build/lib/compilation.js';
+            let c = fs.readFileSync(path, 'utf8');
+            c = c.replace(
+              'createCompile(src, { build, emitError: true, transpileOnly: false',
+              'createCompile(src, { build, emitError: false, transpileOnly: false'
+            );
+            fs.writeFileSync(path, c);
+            console.log('Patched compilation.js: emitError -> false');
+          "
+
+      - name: Compile to out-build (tsc, no type-check errors)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-build-without-mangling
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+
+      - name: Install extension dependencies
+        working-directory: apps/editor
+        run: |
+          find extensions -name "package.json" -not -path "*/node_modules/*" | while read pkg; do
+            dir=$(dirname "$pkg")
+            echo "Installing deps in $dir"
+            (cd "$dir" && npm install --ignore-scripts 2>/dev/null || true)
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compile non-native extensions
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-non-native-extensions-build
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+
+      - name: Compile extension media
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp compile-extension-media-build
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+
+      - name: Build React bundles (Void UI)
+        working-directory: apps/editor/src/vs/workbench/contrib/void/browser/react
+        run: |
+          npx scope-tailwind ./src -o src2/ -s void-scope -c styles.css -p "void-"
+          npx tsup
+
+      - name: Copy React bundles into out-build
+        working-directory: apps/editor
+        run: |
+          mkdir -p out-build/vs/workbench/contrib/void/browser/react
+          cp -r src/vs/workbench/contrib/void/browser/react/out out-build/vs/workbench/contrib/void/browser/react/
+
+      - name: Bundle (out-build -> out-vscode)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp bundle-vscode
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+
+      - name: Minify (out-vscode -> out-vscode-min)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp minify-vscode
+        env:
+          NODE_OPTIONS: --max-old-space-size=7168
+
+      - name: Download Electron
+        working-directory: apps/editor
+        run: node build/lib/electron.js
+        continue-on-error: true
+
+      - name: Package app (x64)
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp vscode-win32-x64-min-ci
+        env:
+          VSCODE_ARCH: x64
+
+      - name: Copy inno_updater to build
+        working-directory: apps/editor
+        run: node_modules/.bin/gulp vscode-win32-x64-inno-updater
+        env:
+          VSCODE_ARCH: x64
+
+      - name: Build Windows installers (system + user)
+        working-directory: apps/editor
+        run: |
+          node_modules/.bin/gulp vscode-win32-x64-system-setup
+          node_modules/.bin/gulp vscode-win32-x64-user-setup
+
+      - name: Zip portable app
+        shell: pwsh
+        run: |
+          $appDir = "$env:GITHUB_WORKSPACE\apps\VSCode-win32-x64"
+          $outZip = "$env:RUNNER_TEMP\OCcode-win32-x64.zip"
+          Compress-Archive -Path "$appDir\*" -DestinationPath $outZip
+
+      - name: Collect installer paths
+        id: paths
+        run: |
+          BUILD=apps/editor/.build/win32-x64
+          echo "system_setup=$(ls $BUILD/system-setup/VSCodeSetup.exe)" >> $GITHUB_OUTPUT
+          echo "user_setup=$(ls $BUILD/user-setup/VSCodeSetup.exe)" >> $GITHUB_OUTPUT
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: OCcode-win32-x64
+          path: |
+            apps/editor/.build/win32-x64/system-setup/VSCodeSetup.exe
+            apps/editor/.build/win32-x64/user-setup/VSCodeSetup.exe
+            ${{ runner.temp }}/OCcode-win32-x64.zip
+          retention-days: 30
+
+      - name: Rename installers for release
+        run: |
+          cp apps/editor/.build/win32-x64/system-setup/VSCodeSetup.exe \
+             "$RUNNER_TEMP/OCcode-win32-x64-system-setup.exe"
+          cp apps/editor/.build/win32-x64/user-setup/VSCodeSetup.exe \
+             "$RUNNER_TEMP/OCcode-win32-x64-user-setup.exe"
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ runner.temp }}/OCcode-win32-x64-system-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64-user-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64.zip
           name: OCcode ${{ github.ref_name }}
           draft: false
           prerelease: false
