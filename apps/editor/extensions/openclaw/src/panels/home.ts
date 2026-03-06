@@ -33,7 +33,10 @@ export class HomePanel {
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
       } else if (msg.command === 'openWorkspaceFile') {
-        const filePath = path.join(os.homedir(), '.openclaw', 'workspace', msg.file as string);
+        const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'MEMORY.md']);
+        const file = msg.file as string;
+        if (!allowed.has(file)) return;
+        const filePath = path.join(os.homedir(), '.openclaw', 'workspace', file);
         if (!fs.existsSync(filePath)) { fs.writeFileSync(filePath, '', 'utf8'); }
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command) {
@@ -583,6 +586,7 @@ export class HomePanel {
       align-items: center;
       gap: clamp(8px, 2vw, 12px);
       width: min(320px, 96vw);
+      margin-top: clamp(20px, 5vw, 32px);
     }
     .btn-primary {
       background: #dc2828;

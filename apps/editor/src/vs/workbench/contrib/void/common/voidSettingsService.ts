@@ -295,6 +295,9 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			
 			// add autoAcceptLLMChanges feature
 			if (readS.globalSettings.autoAcceptLLMChanges === undefined) readS.globalSettings.autoAcceptLLMChanges = false;
+
+			// always use MoltPilot system prompt if user hasn't set a custom one
+			if (!readS.globalSettings.aiInstructions) readS.globalSettings.aiInstructions = defaultGlobalSettings.aiInstructions;
 		}
 		catch (e) {
 			readS = defaultState()
