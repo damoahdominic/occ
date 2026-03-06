@@ -32,6 +32,10 @@ export class HomePanel {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
+      } else if (msg.command === 'openWorkspaceFile') {
+        const filePath = path.join(os.homedir(), '.openclaw', 'workspace', msg.file as string);
+        if (!fs.existsSync(filePath)) { fs.writeFileSync(filePath, '', 'utf8'); }
+        vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command) {
         vscode.commands.executeCommand(msg.command);
       }
@@ -618,6 +622,32 @@ export class HomePanel {
     .btn-secondary:hover { border-color: #888; color: #ddd; }
     .btn-secondary:active { transform: scale(0.98); }
 
+    /* ── Workspace file pills ──────────────────────────────────── */
+    .pills-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      margin-top: clamp(12px, 3vw, 18px);
+    }
+    .pill {
+      font-size: clamp(9px, 2vw, 11px);
+      font-family: var(--vscode-editor-font-family, monospace);
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(220,40,40,0.35);
+      color: #dc2828;
+      background: rgba(220,40,40,0.08);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s, border-color 0.12s;
+      user-select: none;
+    }
+    .pill:hover {
+      background: rgba(220,40,40,0.18);
+      border-color: rgba(220,40,40,0.7);
+    }
+
     /* ── Footer links ──────────────────────────────────────────── */
     .links {
       margin-top: clamp(28px, 7vw, 48px);
@@ -687,6 +717,11 @@ export class HomePanel {
       </span>
     </div>
   </div>
+  ${isInstalled ? `<div class="pills-row">
+    ${['AGENTS.md','IDENTITY.md','USER.md','TOOLS.md','MEMORY.md'].map(f =>
+      `<span class="pill" onclick="openFile('${f}')">${f}</span>`
+    ).join('\n    ')}
+  </div>` : ''}
   <div class="btn-group">
     <button class="btn-primary" onclick="cmd('${buttonCommand}')">${icBtnPrimary}${buttonLabel}</button>
     <button class="btn-secondary" onclick="cmd('openclaw.configureTUI')">${icTerminalBtn}Configure (TUI)</button>
@@ -701,6 +736,7 @@ export class HomePanel {
   <script>
     const vscode = acquireVsCodeApi();
     function cmd(c) { vscode.postMessage({ command: c }); }
+    function openFile(name) { vscode.postMessage({ command: 'openWorkspaceFile', file: name }); }
 
     // ── Gateway status ────────────────────────────────────────────
     const GW = {
