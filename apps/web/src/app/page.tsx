@@ -33,6 +33,15 @@ function detectPlatform(): Platform {
 
 const RELEASES = "https://github.com/damoahdominic/occ/releases";
 const REPO = "https://github.com/damoahdominic/occ";
+const RELEASES_API = "https://api.github.com/repos/damoahdominic/occ/releases/latest";
+
+type ReleaseAssets = {
+  macos: string | null;
+  windows: string | null;
+  linux_deb: string | null;
+  linux_tar: string | null;
+  version: string | null;
+};
 
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
@@ -271,6 +280,7 @@ export default function Home() {
   const [platform, setPlatform] = useState<Platform>("linux");
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [releaseAssets, setReleaseAssets] = useState<ReleaseAssets | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const globeContainerRef = useRef<HTMLDivElement>(null);
   // Mouse-tracking state for globe interaction
@@ -283,6 +293,24 @@ export default function Home() {
 
   useEffect(() => {
     setPlatform(detectPlatform());
+  }, []);
+
+  useEffect(() => {
+    fetch(RELEASES_API)
+      .then((r) => r.json())
+      .then((data) => {
+        const assets: { name: string; browser_download_url: string }[] = data.assets ?? [];
+        const find = (pat: RegExp) =>
+          assets.find((a) => pat.test(a.name))?.browser_download_url ?? null;
+        setReleaseAssets({
+          macos: find(/darwin.*signed\.zip$/i),
+          windows: find(/win32.*system-setup\.exe$/i),
+          linux_deb: find(/linux.*\.deb$/i),
+          linux_tar: find(/linux.*\.tar\.gz$/i),
+          version: data.tag_name ?? null,
+        });
+      })
+      .catch(() => {});
   }, []);
 
   // Cobe globe
@@ -374,6 +402,13 @@ export default function Home() {
     (p) => p !== platform
   );
 
+  const downloadUrl = (p: Platform): string => {
+    if (!releaseAssets) return RELEASES;
+    if (p === "macos") return releaseAssets.macos ?? RELEASES;
+    if (p === "windows") return releaseAssets.windows ?? RELEASES;
+    return releaseAssets.linux_deb ?? releaseAssets.linux_tar ?? RELEASES;
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Nav */}
@@ -399,7 +434,7 @@ export default function Home() {
               noiseIntensity={0.15}
             >
               <a
-                href={RELEASES}
+                href={downloadUrl(platform)}
                 className="inline-flex items-center gap-2 cursor-pointer rounded-full bg-[var(--bg)] px-5 py-2 text-sm font-semibold text-white shadow-[0px_1px_0px_0px_rgba(255,255,255,0.06)_inset,0px_1px_2px_0px_rgba(0,0,0,0.4)] transition-all duration-100 hover:brightness-110 active:scale-[0.98]"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -407,7 +442,7 @@ export default function Home() {
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Download
+                Download{releaseAssets?.version ? ` ${releaseAssets.version}` : ""}
               </a>
             </NoiseBackground>
           </div>
@@ -500,7 +535,7 @@ export default function Home() {
                   <div className="relative mb-10">
                     <div className="relative flex rounded-xl btn-glow">
                       <a
-                        href={RELEASES}
+                        href={downloadUrl(platform)}
                         className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-l-xl text-lg transition-all"
                       >
                         {platformIcons[platform]}
@@ -516,12 +551,17 @@ export default function Home() {
                         </svg>
                       </button>
                     </div>
+                    {releaseAssets?.version && (
+                      <p className="text-center text-xs text-[var(--text-muted)] mt-2">
+                        Latest: {releaseAssets.version}
+                      </p>
+                    )}
                     {showDropdown && (
-                      <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[200px]">
+                      <div className="absolute top-full mt-2 right-0 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl overflow-hidden shadow-2xl z-10 min-w-[220px]">
                         {otherPlatforms.map((p) => (
                           <a
                             key={p}
-                            href={RELEASES}
+                            href={downloadUrl(p)}
                             className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm"
                             onClick={() => setShowDropdown(false)}
                           >
@@ -529,6 +569,33 @@ export default function Home() {
                             <span>Download for {platformLabels[p]}</span>
                           </a>
                         ))}
+                        {platform === "linux" && releaseAssets?.linux_tar && (
+                          <a
+                            href={releaseAssets.linux_tar}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm border-t border-[var(--border)]"
+                            onClick={() => setShowDropdown(false)}
+                          >
+                            <span>{platformIcons.linux}</span>
+                            <span>Linux (.tar.gz)</span>
+                          </a>
+                        )}
+                        {platform === "windows" && releaseAssets?.windows && (
+                          <a
+                            href={releaseAssets.windows.replace("system-setup", "user-setup")}
+                            className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-sm border-t border-[var(--border)]"
+                            onClick={() => setShowDropdown(false)}
+                          >
+                            <span>{platformIcons.windows}</span>
+                            <span>Windows (user installer)</span>
+                          </a>
+                        )}
+                        <a
+                          href={RELEASES}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--border)] transition-colors text-xs text-[var(--text-muted)] border-t border-[var(--border)]"
+                          onClick={() => setShowDropdown(false)}
+                        >
+                          All releases →
+                        </a>
                       </div>
                     )}
                   </div>
@@ -688,7 +755,7 @@ export default function Home() {
                   {/* Platform-aware download — reuses hero btn-glow style */}
                   <div className="relative flex rounded-xl btn-glow">
                     <a
-                      href={RELEASES}
+                      href={downloadUrl(platform)}
                       className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-8 py-3.5 rounded-xl text-base transition-colors"
                     >
                       {platformIcons[platform]}
