@@ -66,8 +66,8 @@ export const defaultProviderSettings = {
 		endpoint: '', // optionally allow overriding default
 	},
 	ocFreeModel: {
-		endpoint: 'https://openrouter.ai/api/v1', // OpenRouter-compatible endpoint
-		apiKey: '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',
+		endpoint: 'https://inference.mba.sh/v1',
+		apiKey: 'sk-moltpilot-prod',
 	},
 
 } as const
