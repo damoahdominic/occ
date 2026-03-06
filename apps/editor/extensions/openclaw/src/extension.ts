@@ -384,6 +384,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
     }),
+    vscode.commands.registerCommand('openclaw.configureTUI', () => {
+      const terminal = vscode.window.createTerminal({
+        name: 'OpenClaw Configure',
+        location: vscode.TerminalLocation.Editor,
+      });
+      terminal.show();
+      terminal.sendText('openclaw configure', true);
+    }),
   );
 
   // Auto-show Home panel on startup (after activation settles)
