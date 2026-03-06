@@ -481,8 +481,13 @@ export class ToolsService implements IToolsService {
 
 			web_search: async ({ query }) => {
 				const encoded = encodeURIComponent(query);
-				const resp = await fetch(`https://api.duckduckgo.com/?q=${encoded}&format=json&no_html=1&skip_disambig=1`);
-				if (!resp.ok) throw new Error(`Search failed: ${resp.status} ${resp.statusText}`);
+				const controller = new AbortController();
+				const timeout = setTimeout(() => controller.abort(), 10_000);
+				let resp: Response;
+				try {
+					resp = await fetch(`https://api.duckduckgo.com/?q=${encoded}&format=json&no_html=1&skip_disambig=1`, { signal: controller.signal });
+				} finally { clearTimeout(timeout); }
+				if (!resp!.ok) throw new Error(`Search failed: ${resp!.status} ${resp!.statusText}`);
 				const data = await resp.json() as any;
 
 				const parts: string[] = [];
@@ -512,10 +517,16 @@ export class ToolsService implements IToolsService {
 			},
 
 			read_url: async ({ url }) => {
-				const resp = await fetch(url, {
-					headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OCcode/3.0; +https://openclaw.dev)' }
-				});
-				if (!resp.ok) throw new Error(`Failed to fetch URL: ${resp.status} ${resp.statusText}`);
+				const controller = new AbortController();
+				const timeout = setTimeout(() => controller.abort(), 15_000);
+				let resp: Response;
+				try {
+					resp = await fetch(url, {
+						headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OCcode/3.0; +https://openclaw.dev)' },
+						signal: controller.signal,
+					});
+				} finally { clearTimeout(timeout); }
+				if (!resp!.ok) throw new Error(`Failed to fetch URL: ${resp!.status} ${resp!.statusText}`);
 
 				const contentType = resp.headers.get('content-type') ?? '';
 				let content: string;
