@@ -32,6 +32,11 @@ function detectPlatform(): Platform {
 
 const RELEASES = "https://github.com/damoahdominic/occ/releases";
 
+const DOWNLOAD_URLS: Record<Platform, string> = {
+  windows: "https://github.com/damoahdominic/occ/releases/download/v3.1.2/OCcode-win32-x64-user-setup.exe",
+  macos: "https://github.com/damoahdominic/occ/releases/download/v3.1.2/OCcode-darwin-arm64-signed.zip",
+};
+
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
   macos: "macOS",
@@ -476,10 +481,6 @@ export default function Home() {
             <ContainerScroll
               titleComponent={
                 <div className="flex flex-col items-center">
-                  <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 px-4 py-1.5 text-xs text-[var(--text-muted)]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
-                    Sponsored by MoltPod Inc.
-                  </div>
                   <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-6">
                     Open<span className="text-[var(--accent)]">Claw</span> Code
                   </h1>
@@ -495,7 +496,7 @@ export default function Home() {
                       p === platform ? (
                         <div key={p} className="relative btn-glow rounded-xl">
                           <a
-                            href={RELEASES}
+                            href={DOWNLOAD_URLS[p]}
                             className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all"
                           >
                             {platformIcons[p]}
@@ -505,7 +506,7 @@ export default function Home() {
                       ) : (
                         <a
                           key={p}
-                          href={RELEASES}
+                          href={DOWNLOAD_URLS[p]}
                           className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
                         >
                           {platformIcons[p]}
@@ -649,7 +650,7 @@ export default function Home() {
                     p === platform ? (
                       <div key={p} className="relative btn-glow rounded-xl">
                         <a
-                          href={RELEASES}
+                          href={DOWNLOAD_URLS[p]}
                           className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-colors"
                         >
                           {platformIcons[p]}
@@ -659,7 +660,7 @@ export default function Home() {
                     ) : (
                       <a
                         key={p}
-                        href={RELEASES}
+                        href={DOWNLOAD_URLS[p]}
                         className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
                       >
                         {platformIcons[p]}
