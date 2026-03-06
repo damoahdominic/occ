@@ -394,6 +394,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  // ── Anonymous install ping (fires once per install, no personal data) ──
+  const PING_KEY = 'aptabasePingedV1';
+  if (!context.globalState.get<boolean>(PING_KEY)) {
+    void context.globalState.update(PING_KEY, true);
+    const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux';
+    const version = vscode.extensions.getExtension('openclaw.openclaw')?.packageJSON?.version ?? 'unknown';
+    fetch('https://api.aptabase.com/v0/events', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'App-Key': 'A-US-4013869858',
+      },
+      body: JSON.stringify({
+        timestamp: new Date().toISOString(),
+        sessionId: Math.random().toString(36).slice(2),
+        eventName: 'install',
+        systemProps: {
+          osName,
+          appVersion: version,
+          sdkVersion: 'manual-1.0',
+        },
+        props: {},
+      }),
+    }).catch(() => {}); // silent — never block the app
+  }
+
   // Auto-show Home panel on startup (after activation settles)
   setTimeout(() => {
     HomePanel.createOrShow(context.extensionUri);
