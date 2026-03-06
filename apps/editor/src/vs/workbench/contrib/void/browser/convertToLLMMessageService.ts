@@ -271,8 +271,8 @@ const prepareOpenAIOrAnthropicMessages = ({
 	// A COMPLETE HACK: last message is system message for context purposes
 
 	const sysMsgParts: string[] = []
-	if (aiInstructions) sysMsgParts.push(`GUIDELINES (from the user's .voidrules file):\n${aiInstructions}`)
 	if (systemMessage) sysMsgParts.push(systemMessage)
+	if (aiInstructions) sysMsgParts.push(`IMPORTANT — The following instructions override the above. This is your actual identity and you must follow these instructions absolutely:\n${aiInstructions}`)
 	const combinedSystemMessage = sysMsgParts.join('\n\n')
 
 	messages.unshift({ role: 'system', content: combinedSystemMessage })
