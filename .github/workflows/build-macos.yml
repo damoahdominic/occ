@@ -518,6 +518,10 @@ jobs:
         env:
           VSCODE_ARCH: x64
 
+      - name: Remove musl watcher (not needed on glibc Ubuntu)
+        run: |
+          rm -rf "$GITHUB_WORKSPACE/apps/VSCode-linux-x64/resources/app/node_modules/@parcel/watcher-linux-x64-musl"
+
       - name: Build .deb package
         working-directory: apps/editor
         run: |
