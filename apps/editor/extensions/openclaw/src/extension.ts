@@ -230,19 +230,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('openclaw.install', async () => {
       const platform = process.platform === 'darwin' ? 'macOS'
         : process.platform === 'win32' ? 'Windows' : 'Linux';
-      await vscode.commands.executeCommand('void.openChatWithMessage', [
+      const message = [
         `Please install OpenClaw on this ${platform} computer on my behalf.`,
         ``,
         `Follow these steps:`,
         `1. Use the terminal tool to run \`npm install -g openclaw\`.`,
-        `2. If the install fails with a permission error (EACCES or "permission denied"), `,
+        `2. If the install fails with a permission error (EACCES or "permission denied"),`,
         `   tell me you need my system password and ask me to type it here in the chat.`,
         `   Then use it by running: \`echo "THE_PASSWORD" | sudo -S npm install -g openclaw\`.`,
         `   Do not repeat or display my password back to me at any point.`,
         `3. Once installed, confirm it worked by running \`openclaw --version\`.`,
         ``,
         `Do not give me commands to run myself — you must run everything for me.`,
-      ].join('\n'));
+      ].join('\n');
+      try {
+        // Open the Void sidebar first, then send the message
+        await vscode.commands.executeCommand('void.sidebar.open');
+        await vscode.commands.executeCommand('void.openChatWithMessage', message);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Could not open AI chat: ${err}`);
+      }
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();
