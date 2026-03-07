@@ -228,12 +228,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.commands.executeCommand('void.openChatWithMessage', message);
     }),
     vscode.commands.registerCommand('openclaw.install', async () => {
-      await HomePanel.runInstall(
-        context.extensionUri,
-        process.platform,
-        process.arch,
-        (vscode.env.shell || '').toLowerCase(),
-      );
+      const platform = process.platform === 'darwin' ? 'macOS'
+        : process.platform === 'win32' ? 'Windows' : 'Linux';
+      await vscode.commands.executeCommand('void.openChatWithMessage', [
+        `Please install OpenClaw on this ${platform} computer on my behalf.`,
+        ``,
+        `Follow these steps:`,
+        `1. Use the terminal tool to run \`npm install -g openclaw\`.`,
+        `2. If the install fails with a permission error (EACCES or "permission denied"), `,
+        `   tell me you need my system password and ask me to type it here in the chat.`,
+        `   Then use it by running: \`echo "THE_PASSWORD" | sudo -S npm install -g openclaw\`.`,
+        `   Do not repeat or display my password back to me at any point.`,
+        `3. Once installed, confirm it worked by running \`openclaw --version\`.`,
+        ``,
+        `Do not give me commands to run myself — you must run everything for me.`,
+      ].join('\n'));
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();

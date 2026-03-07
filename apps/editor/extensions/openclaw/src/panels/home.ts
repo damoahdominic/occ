@@ -904,67 +904,6 @@ export class HomePanel {
     }
     .links a:hover { color: #dc2828; }
 
-    /* ── Install console ────────────────────────────────────────── */
-    @keyframes fadeSlideIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes pulseDot {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.25; }
-    }
-    .install-wrap {
-      width: 100%;
-      max-width: min(560px, 96vw);
-      margin-top: 20px;
-      border-radius: 10px;
-      overflow: hidden;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.45);
-      animation: fadeSlideIn 0.28s ease both;
-      transition: border-color 0.4s ease;
-    }
-    .install-wrap.state-done   { border-color: #238636; }
-    .install-wrap.state-failed { border-color: #6e1111; }
-    .install-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 14px;
-      background: #161b22;
-      border-bottom: 1px solid #30363d;
-      font-size: 11px;
-      color: #8b949e;
-      font-family: var(--vscode-editor-font-family, monospace);
-      letter-spacing: 0.01em;
-    }
-    .install-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #3fb950;
-      flex-shrink: 0;
-      animation: pulseDot 1.3s ease-in-out infinite;
-      transition: background 0.3s;
-    }
-    .install-wrap.state-done   .install-dot { background: #3fb950; animation: none; }
-    .install-wrap.state-failed .install-dot { background: #f85149; animation: none; }
-    .install-log {
-      background: transparent;
-      margin: 0;
-      padding: 10px 14px;
-      font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
-      font-size: 11px;
-      line-height: 1.65;
-      color: #7ee787;
-      overflow-y: auto;
-      max-height: 190px;
-      white-space: pre-wrap;
-      word-break: break-all;
-      transition: color 0.3s;
-    }
-    .install-wrap.state-failed .install-log { color: #ffa198; }
 
     /* ── Narrow panel adjustments (< 300px) ────────────────────── */
     @media (max-width: 299px) {
@@ -1028,13 +967,6 @@ export class HomePanel {
     <button class="btn-secondary" onclick="cmd('openclaw.configureTUI')">${icTerminalBtn}Configure (TUI)</button>
     <button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates with OpenClaw</button>
     <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
-  </div>
-  <div id="install-wrap" class="install-wrap" style="display:none">
-    <div class="install-header">
-      <span class="install-dot" id="install-dot"></span>
-      <span id="install-header-text">Installing OpenClaw…</span>
-    </div>
-    <pre id="install-log" class="install-log"></pre>
   </div>
   <div class="links">
     <a href="https://github.com/damoahdominic/occ">GitHub</a>
@@ -1128,27 +1060,6 @@ export class HomePanel {
         btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw';
         res.innerHTML = e.data.html;
         res.style.display = 'block';
-      } else if (e.data.type === 'installLog') {
-        const log = document.getElementById('install-log');
-        if (log) { log.textContent += e.data.text; log.scrollTop = log.scrollHeight; }
-      } else if (e.data.type === 'installState') {
-        const wrap = document.getElementById('install-wrap');
-        const hdr  = document.getElementById('install-header-text');
-        if (!wrap) return;
-        if (e.data.state === 'running') {
-          wrap.className = 'install-wrap';
-          wrap.style.display = 'block';
-          if (hdr) hdr.textContent = 'Installing OpenClaw\u2026';
-        } else if (e.data.state === 'done') {
-          wrap.className = 'install-wrap state-done';
-          if (hdr) hdr.textContent = 'Installation complete \u2714';
-          setTimeout(() => { wrap.style.display = 'none'; }, 3000);
-        } else if (e.data.state === 'failed') {
-          wrap.className = 'install-wrap state-failed';
-          if (hdr) hdr.textContent = 'Installation failed \u2014 opening AI assistant\u2026';
-          setTimeout(() => { wrap.style.display = 'none'; }, 4500);
-        }
-      }
     });
   </script>
 </body>
