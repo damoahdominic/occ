@@ -47,7 +47,7 @@ async function hideActivityBarItems(
   context: vscode.ExtensionContext,
 ): Promise<void> {
   // Only run once per installation to avoid fighting user customisations.
-  const APPLIED_KEY = 'activityBarHiddenConfiguredV2';
+  const APPLIED_KEY = 'activityBarHiddenConfiguredV3';
   if (context.globalState.get<boolean>(APPLIED_KEY, false)) {
     return;
   }
