@@ -88,9 +88,7 @@ git push origin v1.0.0
 The workflow triggers automatically and creates a GitHub Release with the signed `.zip`.
 
 ### Manually
-Go to: https://github.com/damoahdominic/occ/actions/workflows/build-macos.yml
-
-Click **"Run workflow"** → **"Run workflow"**.
+Go to: https://github.com/damoahdominic/occ/actions/workflows/build-macos.yml > → **"Run workflow"**.
 
 ---
 
