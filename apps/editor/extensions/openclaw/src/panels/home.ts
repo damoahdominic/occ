@@ -43,6 +43,8 @@ export class HomePanel {
   private _commandAction: 'start' | 'stop' | 'restart' | null = null;
   private _pollingTimer: ReturnType<typeof setInterval> | undefined;
   private readonly _outputChannel: vscode.OutputChannel;
+  private _lastInstalledState: boolean | undefined;
+  private _pollTick = 0;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
@@ -54,6 +56,10 @@ export class HomePanel {
     this._panel.webview.html = this._getLoadingHtml(iconUri.toString());
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+    // Re-check installation whenever the panel becomes visible again.
+    this._panel.onDidChangeViewState(e => {
+      if (e.webviewPanel.visible) { void this._update(); }
+    }, null, this._disposables);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
@@ -268,7 +274,11 @@ export class HomePanel {
     const openclawDir = path.join(os.homedir(), '.openclaw');
     const dirExists = fs.existsSync(openclawDir);
     const cliCheck = await this._testOpenClawCli();
-    const isInstalled = dirExists && cliCheck.ok;
+    // Require a valid semver-like version string — a stale/broken binary that
+    // exits 0 without printing a version will not count as installed.
+    const hasVersion = cliCheck.ok && /\d+\.\d+/.test(cliCheck.output?.trim() ?? '');
+    const isInstalled = dirExists && hasVersion;
+    this._lastInstalledState = isInstalled;
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
@@ -299,8 +309,25 @@ export class HomePanel {
 
   private _startPolling(): void {
     this._stopPolling();
+    this._pollTick = 0;
     const tick = async () => {
       if (!HomePanel.currentPanel) return;
+      this._pollTick++;
+
+      // Every 15 ticks (~30s) re-check whether OpenClaw is still installed.
+      // If the state changed (e.g. AI just uninstalled it), re-render the panel.
+      if (this._pollTick % 15 === 0) {
+        const openclawDir = path.join(os.homedir(), '.openclaw');
+        const dirExists = fs.existsSync(openclawDir);
+        const cliCheck = await this._testOpenClawCli();
+        const hasVersion = cliCheck.ok && /\d+\.\d+/.test(cliCheck.output?.trim() ?? '');
+        const nowInstalled = dirExists && hasVersion;
+        if (nowInstalled !== this._lastInstalledState) {
+          void this._update(); // re-renders panel and resets polling
+          return;
+        }
+      }
+
       const [status, aiRunning] = await Promise.all([
         this._checkGatewayStatus(),
         vscode.commands.executeCommand<boolean>('void.getIsRunning').then(v => !!v, () => false),
