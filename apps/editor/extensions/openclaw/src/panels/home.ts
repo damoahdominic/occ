@@ -8,6 +8,32 @@ import * as path from 'path';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
+/**
+ * Resolves the directory where OpenClaw stores its workspace files
+ * (AGENTS.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md).
+ *
+ * Reads the `workspace` field from ~/.openclaw/openclaw.json if present.
+ * Falls back to ~/.openclaw/workspace/ if the field is absent or unreadable.
+ * Expands a leading ~ to the home directory.
+ */
+function getOpenClawWorkspaceDir(): string {
+  const fallback = path.join(os.homedir(), '.openclaw', 'workspace');
+  try {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    const ws = config['workspace'];
+    if (typeof ws === 'string' && ws.trim()) {
+      return ws.startsWith('~')
+        ? path.join(os.homedir(), ws.slice(1))
+        : ws;
+    }
+  } catch {
+    // openclaw.json missing or unreadable — use fallback
+  }
+  return fallback;
+}
+
 export class HomePanel {
   public static currentPanel: HomePanel | undefined;
   private static _installTerminal: vscode.Terminal | undefined;
@@ -37,8 +63,14 @@ export class HomePanel {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'MEMORY.md']);
         const file = msg.file as string;
         if (!allowed.has(file)) return;
-        const filePath = path.join(os.homedir(), '.openclaw', 'workspace', file);
-        if (!fs.existsSync(filePath)) { fs.writeFileSync(filePath, '', 'utf8'); }
+        const workspaceDir = getOpenClawWorkspaceDir();
+        const filePath = path.join(workspaceDir, file);
+        if (!fs.existsSync(filePath)) {
+          vscode.window.showWarningMessage(
+            `${file} not found in ${workspaceDir}. OpenClaw may not have initialised its workspace yet.`
+          );
+          return;
+        }
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command) {
         vscode.commands.executeCommand(msg.command);
@@ -143,7 +175,10 @@ export class HomePanel {
       if (r1.code === 0) {
         tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
-        setTimeout(() => HomePanel.refresh(), 1500);
+        setTimeout(() => {
+          HomePanel.refresh();
+          vscode.commands.executeCommand('openclaw.openWorkspace');
+        }, 1500);
         return;
       }
       // Permission error on Unix → ask for sudo, then retry
@@ -156,7 +191,10 @@ export class HomePanel {
         if (r2.code === 0) {
           tee('\n✅  Installed successfully!\n');
           post({ type: 'installState', state: 'done' });
-          setTimeout(() => HomePanel.refresh(), 1500);
+          setTimeout(() => {
+          HomePanel.refresh();
+          vscode.commands.executeCommand('openclaw.openWorkspace');
+        }, 1500);
           return;
         }
       }
@@ -177,7 +215,10 @@ export class HomePanel {
       if (r.code === 0) {
         tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
-        setTimeout(() => HomePanel.refresh(), 1500);
+        setTimeout(() => {
+          HomePanel.refresh();
+          vscode.commands.executeCommand('openclaw.openWorkspace');
+        }, 1500);
         return;
       }
     } else {
@@ -186,7 +227,10 @@ export class HomePanel {
       if (r1.code === 0) {
         tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
-        setTimeout(() => HomePanel.refresh(), 1500);
+        setTimeout(() => {
+          HomePanel.refresh();
+          vscode.commands.executeCommand('openclaw.openWorkspace');
+        }, 1500);
         return;
       }
       // Permission error → sudo cache → retry
@@ -199,7 +243,10 @@ export class HomePanel {
           if (r2.code === 0) {
             tee('\n✅  Installed successfully!\n');
             post({ type: 'installState', state: 'done' });
-            setTimeout(() => HomePanel.refresh(), 1500);
+            setTimeout(() => {
+          HomePanel.refresh();
+          vscode.commands.executeCommand('openclaw.openWorkspace');
+        }, 1500);
             return;
           }
         }

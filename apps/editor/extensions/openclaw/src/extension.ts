@@ -83,37 +83,40 @@ async function hideActivityBarItems(
 }
 
 /**
- * Opens ~/.openclaw in the Explorer as a named workspace ("My OpenClaw Workspace").
+ * Opens ~/.openclaw as a named workspace — but only if OpenClaw is already installed.
  *
  * Strategy:
- *  1. Trust ~/.openclaw silently — we create and own this directory.
- *  2. Create ~/.openclaw/My OpenClaw Workspace.code-workspace if it doesn't exist.
- *     VS Code uses the filename (sans extension) as the window title, giving us
- *     "My OpenClaw Workspace" instead of "Untitled Workspace".
- *     The workspace file hides itself from the Explorer via files.exclude.
- *  3. If we're not already inside that workspace, open it (one-time window reload).
- *     After the first launch VS Code remembers the workspace, so no further reloads.
+ *  - ~/.occ is OCcode's internal state directory. It is never opened as a workspace.
+ *  - ~/.openclaw is OpenClaw's directory, created by OpenClaw after it installs.
+ *    We open it as the workspace so users can browse their config files.
+ *    If it doesn't exist yet (pre-install), we do nothing.
+ *  - The .code-workspace file lives in ~/.occ so we don't pollute ~/.openclaw.
+ *    The workspace file points at ~/.openclaw as the folder using an absolute path.
  */
 const WORKSPACE_FILENAME = 'My OpenClaw Workspace.code-workspace';
 
 async function openOpenClawFolder(): Promise<void> {
-  const openclawPath = path.join(os.homedir(), '.openclaw');
-
-  // Ensure the directory exists.
-  if (!fs.existsSync(openclawPath)) {
-    fs.mkdirSync(openclawPath, { recursive: true });
+  // Ensure ~/.occ exists — OCcode's internal state directory.
+  const occPath = path.join(os.homedir(), '.occ');
+  if (!fs.existsSync(occPath)) {
+    fs.mkdirSync(occPath, { recursive: true });
   }
 
-  // 1. Create the named workspace file if it doesn't exist.
-  const workspaceFilePath = path.join(openclawPath, WORKSPACE_FILENAME);
+  // Only open the workspace if OpenClaw is already installed.
+  const openclawPath = path.join(os.homedir(), '.openclaw');
+  if (!fs.existsSync(openclawPath)) {
+    return; // OpenClaw not installed yet — nothing to open.
+  }
+
+  // Workspace file lives in ~/.occ, points at ~/.openclaw as the folder.
+  const workspaceFilePath = path.join(occPath, WORKSPACE_FILENAME);
   if (!fs.existsSync(workspaceFilePath)) {
     fs.writeFileSync(
       workspaceFilePath,
       JSON.stringify(
         {
-          folders: [{ path: '.' }],
+          folders: [{ path: openclawPath }],
           settings: {
-            // Hide the workspace file itself so the Explorer stays clean.
             'files.exclude': { '*.code-workspace': true },
           },
         },
@@ -123,13 +126,13 @@ async function openOpenClawFolder(): Promise<void> {
     );
   }
 
-  // 2. If we're already inside this workspace, nothing more to do.
+  // If we're already inside this workspace, nothing more to do.
   const workspaceFileUri = vscode.Uri.file(workspaceFilePath);
   if (vscode.workspace.workspaceFile?.fsPath === workspaceFileUri.fsPath) {
     return;
   }
 
-  // 3. Open the workspace file — reloads the window once, then VS Code remembers it.
+  // Open the workspace — reloads the window once, then VS Code remembers it.
   await vscode.commands.executeCommand('vscode.openFolder', workspaceFileUri);
 }
 
@@ -231,6 +234,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         process.arch,
         (vscode.env.shell || '').toLowerCase(),
       );
+    }),
+    vscode.commands.registerCommand('openclaw.openWorkspace', () => {
+      void openOpenClawFolder();
     }),
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
