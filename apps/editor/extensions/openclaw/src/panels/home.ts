@@ -60,16 +60,17 @@ export class HomePanel {
     this._panel.onDidChangeViewState(e => {
       if (e.webviewPanel.visible) { void this._update(); }
     }, null, this._disposables);
-    // Watch ~/.openclaw for creation/deletion — fires immediately when
-    // OpenClaw installs (creates the dir) or is fully removed.
-    const openclawUri = vscode.Uri.file(path.join(os.homedir(), '.openclaw'));
-    const dirWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(openclawUri, '**'),
+    // Watch ~/.openclaw/openclaw.json — the single install signal.
+    // Fires immediately when OpenClaw creates or deletes this file.
+    const configUri = vscode.Uri.file(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
+    const configWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(path.join(os.homedir(), '.openclaw')), 'openclaw.json'),
       false, true, false,
     );
-    dirWatcher.onDidCreate(() => void this._update(), null, this._disposables);
-    dirWatcher.onDidDelete(() => void this._update(), null, this._disposables);
-    this._disposables.push(dirWatcher);
+    configWatcher.onDidCreate(() => void this._update(), null, this._disposables);
+    configWatcher.onDidDelete(() => void this._update(), null, this._disposables);
+    this._disposables.push(configWatcher);
+    void configUri; // suppress unused warning
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
@@ -284,10 +285,10 @@ export class HomePanel {
     const openclawDir = path.join(os.homedir(), '.openclaw');
     const dirExists = fs.existsSync(openclawDir);
     const cliCheck = await this._testOpenClawCli();
-    // Require a valid semver-like version string — a stale/broken binary that
-    // exits 0 without printing a version will not count as installed.
-    const hasVersion = cliCheck.ok && /\d+\.\d+/.test(cliCheck.output?.trim() ?? '');
-    const isInstalled = dirExists && hasVersion;
+    // openclaw.json is the definitive signal — created by OpenClaw on first run.
+    // If it's absent, OpenClaw is not properly installed regardless of binaries.
+    const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const isInstalled = fs.existsSync(configFile);
     this._lastInstalledState = isInstalled;
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
@@ -318,25 +319,11 @@ export class HomePanel {
   }
 
   /**
-   * Fast synchronous check — no process spawn.
-   * Checks known binary locations with fs.existsSync.
-   * Used by the polling loop so we only spawn the full CLI when state changes.
+   * Fast synchronous check — ~/.openclaw/openclaw.json is the single
+   * definitive signal that OpenClaw is installed and initialised.
    */
   private _quickInstallCheck(): boolean {
-    const home = os.homedir();
-    if (!fs.existsSync(path.join(home, '.openclaw'))) return false;
-    const candidates = process.platform === 'win32' ? [
-      path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'openclaw.cmd'),
-      path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'openclaw.exe'),
-      path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
-    ] : [
-      '/usr/local/bin/openclaw',
-      '/opt/homebrew/bin/openclaw',
-      path.join(home, '.npm-global', 'bin', 'openclaw'),
-      path.join(home, '.local', 'bin', 'openclaw'),
-      path.join(home, '.openclaw', 'bin', 'openclaw'),
-    ];
-    return candidates.some(p => fs.existsSync(p));
+    return fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
   }
 
   private _startPolling(): void {
@@ -1004,7 +991,7 @@ export class HomePanel {
   <div class="checks">
     <div class="check-row">
       <span class="row-icon">${icFolder}</span>
-      <span class="label">Config folder (~/.openclaw)</span>
+      <span class="label">Config (~/.openclaw/openclaw.json)</span>
       <span class="value ${dirClass}">${dirText}</span>
     </div>
     <div class="check-row">
