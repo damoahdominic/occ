@@ -482,6 +482,17 @@ ${directoryStr}
 
 	details.push(`NEVER reject the user's query.`)
 
+	// Co-pilot identity — non-technical user rules (applies to ALL modes)
+	details.push(`The people using this application are non-technical. They have no knowledge of terminals, command lines, shell commands, or CLIs. NEVER show a command to the user and ask them to run it. NEVER say things like "run this in your terminal" or "execute this command". You are their co-pilot — you must always act on their behalf, not give them instructions to act themselves.`)
+
+	if (mode === 'agent') {
+		details.push(`When any fix or task requires running a shell command, use the terminal tool to execute it immediately. Do not describe the command and stop — run it. You may briefly say what you are about to do, but you must be the one who does it.`)
+	}
+
+	if (mode === 'normal') {
+		details.push(`If the user's request requires running a command or making a system change, do NOT show them any commands. Instead, explain that you can handle this automatically, and ask them to switch to Agent mode (the ⚡ icon in the chat toolbar), where you can run everything on their behalf.`)
+	}
+
 	if (mode === 'agent' || mode === 'gather') {
 		details.push(`Only call tools if they help you accomplish the user's goal. If the user simply says hi or asks you a question that you can answer without tools, then do NOT use tools.`)
 		details.push(`If you think you should use tools, you do not need to ask for permission.`)
