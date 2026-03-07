@@ -384,13 +384,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
     }),
-    vscode.commands.registerCommand('openclaw.configureTUI', () => {
+    vscode.commands.registerCommand('openclaw.configureTUI', async () => {
+      // On Windows, Electron may not inherit the full user PATH, so resolve the
+      // openclaw binary the same way the home panel does (via HomePanel._findOpenClawPath).
+      // Fall back to the plain shell command if the panel hasn't been created yet.
       const terminal = vscode.window.createTerminal({
         name: 'OpenClaw Configure',
         location: vscode.TerminalLocation.Editor,
       });
       terminal.show();
-      terminal.sendText('openclaw configure', true);
+      if (process.platform === 'win32') {
+        // Use `cmd /c openclaw configure` so Windows resolves .cmd shims correctly
+        terminal.sendText('cmd /c openclaw configure', true);
+      } else {
+        terminal.sendText('openclaw configure', true);
+      }
     }),
   );
 
