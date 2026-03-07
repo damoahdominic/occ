@@ -158,7 +158,7 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
-	ocFreeModel: ['z-ai/glm-4.7-flash'], // OCC Legacy Model via OpenRouter
+	ocFreeModel: ['moltpilot'],
 
 } as const satisfies Record<ProviderName, string[]>
 
@@ -1458,7 +1458,7 @@ const openRouterSettings: VoidStaticProviderInfo = {
 
 const ocFreeModelSettings: VoidStaticProviderInfo = {
 	modelOptions: {
-		'z-ai/glm-4.7-flash': {
+		'moltpilot': {
 			contextWindow: 128_000,
 			reservedOutputTokenSpace: null,
 			supportsSystemMessage: 'system-role',
