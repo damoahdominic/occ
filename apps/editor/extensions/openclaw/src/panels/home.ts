@@ -1060,6 +1060,7 @@ export class HomePanel {
         btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw';
         res.innerHTML = e.data.html;
         res.style.display = 'block';
+      }
     });
   </script>
 </body>
