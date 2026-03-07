@@ -60,6 +60,16 @@ export class HomePanel {
     this._panel.onDidChangeViewState(e => {
       if (e.webviewPanel.visible) { void this._update(); }
     }, null, this._disposables);
+    // Watch ~/.openclaw for creation/deletion — fires immediately when
+    // OpenClaw installs (creates the dir) or is fully removed.
+    const openclawUri = vscode.Uri.file(path.join(os.homedir(), '.openclaw'));
+    const dirWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(openclawUri, '**'),
+      false, true, false,
+    );
+    dirWatcher.onDidCreate(() => void this._update(), null, this._disposables);
+    dirWatcher.onDidDelete(() => void this._update(), null, this._disposables);
+    this._disposables.push(dirWatcher);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
@@ -307,6 +317,28 @@ export class HomePanel {
     });
   }
 
+  /**
+   * Fast synchronous check — no process spawn.
+   * Checks known binary locations with fs.existsSync.
+   * Used by the polling loop so we only spawn the full CLI when state changes.
+   */
+  private _quickInstallCheck(): boolean {
+    const home = os.homedir();
+    if (!fs.existsSync(path.join(home, '.openclaw'))) return false;
+    const candidates = process.platform === 'win32' ? [
+      path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'openclaw.cmd'),
+      path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'openclaw.exe'),
+      path.join(home, '.openclaw', 'bin', 'openclaw.exe'),
+    ] : [
+      '/usr/local/bin/openclaw',
+      '/opt/homebrew/bin/openclaw',
+      path.join(home, '.npm-global', 'bin', 'openclaw'),
+      path.join(home, '.local', 'bin', 'openclaw'),
+      path.join(home, '.openclaw', 'bin', 'openclaw'),
+    ];
+    return candidates.some(p => fs.existsSync(p));
+  }
+
   private _startPolling(): void {
     this._stopPolling();
     this._pollTick = 0;
@@ -314,16 +346,13 @@ export class HomePanel {
       if (!HomePanel.currentPanel) return;
       this._pollTick++;
 
-      // Every 15 ticks (~30s) re-check whether OpenClaw is still installed.
-      // If the state changed (e.g. AI just uninstalled it), re-render the panel.
-      if (this._pollTick % 15 === 0) {
-        const openclawDir = path.join(os.homedir(), '.openclaw');
-        const dirExists = fs.existsSync(openclawDir);
-        const cliCheck = await this._testOpenClawCli();
-        const hasVersion = cliCheck.ok && /\d+\.\d+/.test(cliCheck.output?.trim() ?? '');
-        const nowInstalled = dirExists && hasVersion;
+      // Every 5 ticks (~10s): quick existsSync check on known binary paths.
+      // No process spawn — just cheap stat calls. If the result differs from
+      // the last known state, do a full _update() to confirm and re-render.
+      if (this._pollTick % 5 === 0) {
+        const nowInstalled = this._quickInstallCheck();
         if (nowInstalled !== this._lastInstalledState) {
-          void this._update(); // re-renders panel and resets polling
+          void this._update();
           return;
         }
       }
