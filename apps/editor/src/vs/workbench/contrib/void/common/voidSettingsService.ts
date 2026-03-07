@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { Emitter, Event } from '../../../../base/common/event.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { deepClone } from '../../../../base/common/objects.js';
 import { IEncryptionService } from '../../../../platform/encryption/common/encryptionService.js';
@@ -342,6 +343,10 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 					readS.settingsOfProvider[providerName].endpoint = defaultProviderSettings.ocFreeModel.endpoint
 					readS.settingsOfProvider[providerName].apiKey = defaultProviderSettings.ocFreeModel.apiKey
 					readS.settingsOfProvider[providerName]._didFillInProviderSettings = true
+					// generate a persistent device ID for per-user budget tracking on LiteLLM
+					if (!readS.settingsOfProvider[providerName].deviceId) {
+						readS.settingsOfProvider[providerName].deviceId = generateUuid()
+					}
 				}
 			}
 		}

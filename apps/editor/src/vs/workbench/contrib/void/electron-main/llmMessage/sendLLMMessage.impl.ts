@@ -322,6 +322,12 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		// max_completion_tokens: maxTokens,
 	}
 
+	// attach device ID so LiteLLM tracks spend per device (for budget enforcement)
+	if (providerName === 'ocFreeModel') {
+		const deviceId = (settingsOfProvider.ocFreeModel as any).deviceId
+		if (deviceId) (options as any).user = deviceId
+	}
+
 	// open source models - manually parse think tokens
 	const { needsManualParse: needsManualReasoningParse, nameOfFieldInDelta: nameOfReasoningFieldInDelta } = providerReasoningIOSettings?.output ?? {}
 	const manuallyParseReasoning = needsManualReasoningParse && canIOReasoning && openSourceThinkTags
