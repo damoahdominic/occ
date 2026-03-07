@@ -66,12 +66,10 @@ export class HomePanel {
   }
 
   /**
-   * Silent-first install flow:
-   *   1. Try `npm install -g openclaw` with captured output (no terminal, no sudo for
-   *      most properly-configured npm setups).
-   *   2. On failure, fall back to a tracked terminal — so clicking Install again
-   *      focuses the existing terminal instead of opening a new one.
-   *   3. On terminal failure, the AI is invoked immediately with full context.
+   * Fully silent install — no terminal is ever opened.
+   * Output is streamed line-by-line to the home panel webview.
+   * If sudo is needed, a VS Code password dialog is shown.
+   * On any failure the AI is invoked immediately with full context.
    */
   public static async runInstall(
     extensionUri: vscode.Uri,
@@ -84,118 +82,131 @@ export class HomePanel {
     if (!panel) return;
 
     const post = (msg: object) => { try { panel._panel.webview.postMessage(msg); } catch {} };
-    const log  = (text: string) => post({ type: 'installLog', text });
+    let fullLog = '';
+    const tee = (text: string) => { fullLog += text; post({ type: 'installLog', text }); };
 
     post({ type: 'installState', state: 'running' });
-    log('Checking for npm...\n');
 
-    // ── Step 1: silent npm install (no terminal, no sudo for most users) ──────
-    const env   = panel._buildExecEnv();
+    const env = panel._buildExecEnv();
+    const isPermError = (s: string) => /EACCES|permission denied|EPERM|not permitted/i.test(s);
+
+    // Spawn a command silently and stream output to the panel.
+    const runCaptured = (cmd: string, args: string[], opts: cp.SpawnOptions = {}): Promise<{ code: number }> =>
+      new Promise(resolve => {
+        const child = cp.spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+        child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
+        child.stderr?.on('data', (d: Buffer) => tee(d.toString()));
+        child.on('close', code => resolve({ code: code ?? 1 }));
+        child.on('error', err => { tee(`\nError: ${err.message}\n`); resolve({ code: 1 }); });
+      });
+
+    // Ask for sudo password via VS Code input, cache with `sudo -S -v`, return success.
+    const cacheSudo = async (prompt: string): Promise<boolean> => {
+      const password = await vscode.window.showInputBox({
+        password: true, prompt, placeHolder: 'Password (not stored)', ignoreFocusOut: true,
+      });
+      if (!password) return false;
+      tee('Verifying credentials...\n');
+      return new Promise(resolve => {
+        const child = cp.spawn('sudo', ['-S', '-v'], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+        child.stdin?.write(password + '\n');
+        child.stdin?.end();
+        child.on('close', code => resolve(code === 0));
+        child.on('error', () => resolve(false));
+      });
+    };
+
+    const fail = async () => {
+      post({ type: 'installState', state: 'failed' });
+      const platformDesc = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : `Linux (${arch})`;
+      await vscode.commands.executeCommand('void.openChatWithMessage', [
+        `OpenClaw installation failed on **${platformDesc}**.`,
+        ``, `**System info:**`,
+        `- Node.js: \`${process.version}\``,
+        `- Shell: \`${shell || 'unknown'}\``,
+        ``, `**Full output:**`, `\`\`\``, fullLog.trim(), `\`\`\``, ``,
+        `Please diagnose what went wrong and provide exact steps to fix it on this platform.`,
+        `If Node.js or npm is missing, explain how to install them first.`,
+      ].join('\n'));
+    };
+
+    // ── Step 1: try npm install -g openclaw ───────────────────────────────────
+    tee('Checking for npm...\n');
     const npmOk = await new Promise<boolean>(resolve =>
       cp.exec('npm --version', { env, timeout: 5000, windowsHide: true }, err => resolve(!err))
     );
 
     if (npmOk) {
-      log('npm found — attempting silent install (no terminal needed)...\n');
-      const silentOk = await new Promise<boolean>(resolve => {
-        let out = '';
-        const args  = ['install', '-g', 'openclaw'];
-        const child = platform === 'win32'
-          ? cp.spawn('npm', args, { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: true })
-          : cp.spawn('npm', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
-        child.stdout?.on('data', (d: Buffer) => { const t = d.toString(); out += t; log(t); });
-        child.stderr?.on('data', (d: Buffer) => { const t = d.toString(); out += t; log(t); });
-        child.on('close', code => resolve(code === 0));
-        child.on('error', err  => { log(`Error: ${err.message}\n`); resolve(false); });
-      });
-
-      if (silentOk) {
-        log('\n✅ OpenClaw installed successfully!\n');
+      tee('npm found — installing openclaw...\n');
+      const spawnOpts: cp.SpawnOptions = platform === 'win32' ? { shell: true, windowsHide: true } : {};
+      const r1 = await runCaptured('npm', ['install', '-g', 'openclaw'], spawnOpts);
+      if (r1.code === 0) {
+        tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
         setTimeout(() => HomePanel.refresh(), 1500);
         return;
       }
-      log('\nSilent install did not succeed — switching to terminal installer...\n');
-    } else {
-      log('npm not found on PATH — launching full installer...\n');
-    }
-
-    // ── Step 2: terminal fallback — reuse existing terminal if still open ─────
-    if (HomePanel._installTerminal) {
-      try {
-        HomePanel._installTerminal.show();
-        vscode.window.showInformationMessage(
-          'Installation already running — if you see a password prompt, type your password in the terminal.',
-        );
-        return;
-      } catch {
-        HomePanel._installTerminal = undefined;
+      // Permission error on Unix → ask for sudo, then retry
+      if (platform !== 'win32' && isPermError(fullLog)) {
+        tee('\nPermission error — elevated access required.\n');
+        const ok = await cacheSudo('Enter your system password to install OpenClaw');
+        if (!ok) { tee('Incorrect password or cancelled.\n'); await fail(); return; }
+        tee('Retrying with elevated permissions...\n');
+        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
+        if (r2.code === 0) {
+          tee('\n✅  Installed successfully!\n');
+          post({ type: 'installState', state: 'done' });
+          setTimeout(() => HomePanel.refresh(), 1500);
+          return;
+        }
       }
+      tee('\nnpm install did not succeed — trying full installer script...\n');
+    } else {
+      tee('npm not found — running full installer script...\n');
     }
 
-    // Build install command for platform/shell
-    let installCmd: string;
+    // ── Step 2: full install script, captured (no terminal) ───────────────────
     if (platform === 'win32') {
-      const isPs   = shell.includes('powershell') || shell.includes('pwsh');
-      const isBash = /bash\.exe|wsl\.exe|mintty/.test(shell) || shell.endsWith('bash');
-      if (isBash) {
-        installCmd = 'curl -fsSL https://openclaw.ai/install.sh | bash';
-      } else if (isPs) {
-        installCmd = [
-          `$ErrorActionPreference = 'Stop'`,
-          `$ProgressPreference = 'SilentlyContinue'`,
-          `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
-        ].join('; ');
-      } else {
-        installCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing 'https://openclaw.ai/install.ps1' | Invoke-Expression"`;
+      tee('Running PowerShell installer...\n');
+      const psArgs = [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+        `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; ` +
+        `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
+      ];
+      const r = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
+      if (r.code === 0) {
+        tee('\n✅  Installed successfully!\n');
+        post({ type: 'installState', state: 'done' });
+        setTimeout(() => HomePanel.refresh(), 1500);
+        return;
       }
     } else {
-      installCmd = 'curl -fsSL https://openclaw.ai/install.sh | bash';
-    }
-
-    // Warn user about password prompt before the terminal appears
-    if (platform !== 'win32') {
-      vscode.window.showInformationMessage(
-        'If the installer asks for your password, type it directly in the terminal — it will not show as you type. This is normal.',
-      );
-    }
-
-    const terminal = vscode.window.createTerminal('OpenClaw Install');
-    HomePanel._installTerminal = terminal;
-    terminal.show();
-    terminal.sendText(installCmd);
-    post({ type: 'installState', state: 'running' });
-
-    const disposable = vscode.window.onDidCloseTerminal(async closed => {
-      if (closed !== terminal) return;
-      disposable.dispose();
-      HomePanel._installTerminal = undefined;
-
-      const exitCode = closed.exitStatus?.code;
-      if (exitCode !== undefined && exitCode !== 0) {
-        post({ type: 'installState', state: 'failed' });
-        const platformDesc = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : `Linux (${arch})`;
-        const aiMessage = [
-          `OpenClaw installation **failed** on **${platformDesc}** (exit code ${exitCode}).`,
-          ``,
-          `**System info:**`,
-          `- Shell: \`${shell || 'unknown'}\``,
-          `- Node.js: \`${process.version}\``,
-          ``,
-          `**Install command attempted:**`,
-          `\`\`\``,
-          installCmd,
-          `\`\`\``,
-          ``,
-          `Please diagnose what went wrong and provide a step-by-step fix for this platform.`,
-          `If Node.js or npm is missing, explain how to install them first.`,
-        ].join('\n');
-        await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage);
-      } else {
+      tee('Running install script...\n');
+      const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+      if (r1.code === 0) {
+        tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
-        setTimeout(() => HomePanel.refresh(), 1000);
+        setTimeout(() => HomePanel.refresh(), 1500);
+        return;
       }
-    });
+      // Permission error → sudo cache → retry
+      if (isPermError(fullLog)) {
+        tee('\nPermission error in installer — elevated access required.\n');
+        const ok = await cacheSudo('Enter your system password to complete installation');
+        if (ok) {
+          tee('Retrying with cached credentials...\n');
+          const r2 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+          if (r2.code === 0) {
+            tee('\n✅  Installed successfully!\n');
+            post({ type: 'installState', state: 'done' });
+            setTimeout(() => HomePanel.refresh(), 1500);
+            return;
+          }
+        }
+      }
+    }
+
+    await fail();
   }
 
   public dispose() {
@@ -803,33 +814,67 @@ export class HomePanel {
     }
     .links a:hover { color: #dc2828; }
 
-    /* ── Install log ────────────────────────────────────────────── */
+    /* ── Install console ────────────────────────────────────────── */
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.25; }
+    }
     .install-wrap {
       width: 100%;
       max-width: min(560px, 96vw);
-      margin-top: 16px;
-      text-align: left;
+      margin-top: 20px;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+      animation: fadeSlideIn 0.28s ease both;
+      transition: border-color 0.4s ease;
     }
-    .install-label {
+    .install-wrap.state-done   { border-color: #238636; }
+    .install-wrap.state-failed { border-color: #6e1111; }
+    .install-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
       font-size: 11px;
-      color: #888;
-      margin-bottom: 6px;
-      padding-left: 4px;
-    }
-    .install-log {
-      background: #111;
-      border: 1px solid #333;
-      border-radius: 6px;
-      padding: 10px 12px;
+      color: #8b949e;
       font-family: var(--vscode-editor-font-family, monospace);
+      letter-spacing: 0.01em;
+    }
+    .install-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #3fb950;
+      flex-shrink: 0;
+      animation: pulseDot 1.3s ease-in-out infinite;
+      transition: background 0.3s;
+    }
+    .install-wrap.state-done   .install-dot { background: #3fb950; animation: none; }
+    .install-wrap.state-failed .install-dot { background: #f85149; animation: none; }
+    .install-log {
+      background: transparent;
+      margin: 0;
+      padding: 10px 14px;
+      font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
       font-size: 11px;
-      line-height: 1.5;
-      color: #b0b0b0;
+      line-height: 1.65;
+      color: #7ee787;
       overflow-y: auto;
-      max-height: 200px;
+      max-height: 190px;
       white-space: pre-wrap;
       word-break: break-all;
+      transition: color 0.3s;
     }
+    .install-wrap.state-failed .install-log { color: #ffa198; }
 
     /* ── Narrow panel adjustments (< 300px) ────────────────────── */
     @media (max-width: 299px) {
@@ -895,7 +940,10 @@ export class HomePanel {
     <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
   </div>
   <div id="install-wrap" class="install-wrap" style="display:none">
-    <div class="install-label">Installing OpenClaw<span class="loading-dots"></span></div>
+    <div class="install-header">
+      <span class="install-dot" id="install-dot"></span>
+      <span id="install-header-text">Installing OpenClaw…</span>
+    </div>
     <pre id="install-log" class="install-log"></pre>
   </div>
   <div class="links">
@@ -995,7 +1043,21 @@ export class HomePanel {
         if (log) { log.textContent += e.data.text; log.scrollTop = log.scrollHeight; }
       } else if (e.data.type === 'installState') {
         const wrap = document.getElementById('install-wrap');
-        if (wrap) wrap.style.display = e.data.state === 'running' ? 'block' : 'none';
+        const hdr  = document.getElementById('install-header-text');
+        if (!wrap) return;
+        if (e.data.state === 'running') {
+          wrap.className = 'install-wrap';
+          wrap.style.display = 'block';
+          if (hdr) hdr.textContent = 'Installing OpenClaw\u2026';
+        } else if (e.data.state === 'done') {
+          wrap.className = 'install-wrap state-done';
+          if (hdr) hdr.textContent = 'Installation complete \u2714';
+          setTimeout(() => { wrap.style.display = 'none'; }, 3000);
+        } else if (e.data.state === 'failed') {
+          wrap.className = 'install-wrap state-failed';
+          if (hdr) hdr.textContent = 'Installation failed \u2014 opening AI assistant\u2026';
+          setTimeout(() => { wrap.style.display = 'none'; }, 4500);
+        }
       }
     });
   </script>
