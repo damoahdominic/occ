@@ -218,7 +218,7 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 const defaultState = () => {
 	const d: VoidSettingsState = {
 		settingsOfProvider: deepClone(defaultSettingsOfProvider),
-		modelSelectionOfFeature: { 'Chat': { providerName: 'ocFreeModel', modelName: 'z-ai/glm-4.7-flash' }, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null },
+		modelSelectionOfFeature: { 'Chat': { providerName: 'ocFreeModel', modelName: 'moltpilot' }, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null },
 		globalSettings: deepClone(defaultGlobalSettings),
 		optionsOfModelSelection: { 'Chat': {}, 'Ctrl+K': {}, 'Autocomplete': {}, 'Apply': {}, 'SCM': {} },
 		overridesOfModel: deepClone(defaultOverridesOfModel),
