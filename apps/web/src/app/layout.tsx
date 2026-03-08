@@ -17,7 +17,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    default: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     template: "%s | OpenClaw Code",
   },
   description:
@@ -58,7 +58,7 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: SITE_URL,
     siteName: "OpenClaw Code",
-    title: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    title: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     description:
       "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux.",
     images: [
@@ -73,7 +73,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    title: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     description:
       "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux.",
     images: ["/OpenClawOGImage.png"],
