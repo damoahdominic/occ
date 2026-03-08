@@ -61,6 +61,10 @@ registerEditorContribution(QuickDiffEditorController.ID,
 
 const sourceControlViewIcon = registerIcon('source-control-view-icon', Codicon.sourceControl, localize('sourceControlViewIcon', 'View icon of the Source Control view.'));
 
+// OCcode: SCM/Git is fully hidden — git.enabled=false means no provider ever
+// registers, so hideIfEmpty:true keeps this out of both the activity bar and
+// any panel. Registered in Sidebar (not AuxiliaryBar) so it does not appear
+// as a tab in the right panel alongside the AI chat.
 const viewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
 	id: VIEWLET_ID,
 	title: localize2('source control', 'Source Control'),
@@ -95,6 +99,8 @@ viewsRegistry.registerViewWelcomeContent(HISTORY_VIEW_PANE_ID, {
 	when: ContextKeys.SCMHistoryItemCount.isEqualTo(0)
 });
 
+// OCcode: all SCM views are permanently hidden via ContextKeyExpr.false() so
+// the container is always empty → hideIfEmpty removes it from every panel.
 viewsRegistry.registerViews([{
 	id: REPOSITORIES_VIEW_PANE_ID,
 	containerTitle,
@@ -106,8 +112,7 @@ viewsRegistry.registerViews([{
 	canMoveView: true,
 	weight: 20,
 	order: 0,
-	when: ContextKeyExpr.and(ContextKeyExpr.has('scm.providerCount'), ContextKeyExpr.notEquals('scm.providerCount', 0)),
-	// readonly when = ContextKeyExpr.or(ContextKeyExpr.equals('config.scm.alwaysShowProviders', true), ContextKeyExpr.and(ContextKeyExpr.notEquals('scm.providerCount', 0), ContextKeyExpr.notEquals('scm.providerCount', 1)));
+	when: ContextKeyExpr.false(),
 	containerIcon: sourceControlViewIcon
 }], viewContainer);
 
@@ -121,18 +126,8 @@ viewsRegistry.registerViews([{
 	canMoveView: true,
 	weight: 40,
 	order: 1,
+	when: ContextKeyExpr.false(),
 	containerIcon: sourceControlViewIcon,
-	openCommandActionDescriptor: {
-		id: viewContainer.id,
-		mnemonicTitle: localize({ key: 'miViewSCM', comment: ['&& denotes a mnemonic'] }, "Source &&Control"),
-		keybindings: {
-			primary: 0,
-			win: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG },
-			linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyG },
-			mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.KeyG },
-		},
-		order: 2,
-	}
 }], viewContainer);
 
 viewsRegistry.registerViews([{
@@ -145,10 +140,7 @@ viewsRegistry.registerViews([{
 	canMoveView: true,
 	weight: 40,
 	order: 2,
-	when: ContextKeyExpr.and(
-		ContextKeyExpr.has('scm.historyProviderCount'),
-		ContextKeyExpr.notEquals('scm.historyProviderCount', 0),
-	),
+	when: ContextKeyExpr.false(),
 	containerIcon: sourceControlViewIcon
 }], viewContainer);
 

@@ -142,6 +142,7 @@ Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews
 	name: Messages.MARKERS_PANEL_TITLE_PROBLEMS,
 	canToggleVisibility: true,
 	canMoveView: true,
+	when: ContextKeyExpr.false(),
 	ctorDescriptor: new SyncDescriptor(MarkersView),
 	openCommandActionDescriptor: {
 		id: 'workbench.actions.view.problems',

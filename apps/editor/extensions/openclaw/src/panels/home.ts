@@ -37,10 +37,13 @@ function getOpenClawWorkspaceDir(): string {
 export class HomePanel {
   public static currentPanel: HomePanel | undefined;
   private static _installTerminal: vscode.Terminal | undefined;
+  /** Resolves with the password (or undefined on cancel) when the webview modal submits. */
+  private static _pendingPasswordResolve: ((pwd: string | undefined) => void) | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
   private _commandAction: 'start' | 'stop' | 'restart' | null = null;
+  private _sidebarOpen = false; // tracks chat sidebar open state across webview reloads
   private _pollingTimer: ReturnType<typeof setInterval> | undefined;
   private readonly _outputChannel: vscode.OutputChannel;
   private _lastInstalledState: boolean | undefined;
@@ -60,9 +63,7 @@ export class HomePanel {
     this._panel.onDidChangeViewState(e => {
       if (e.webviewPanel.visible) { void this._update(); }
     }, null, this._disposables);
-    // Watch ~/.openclaw/openclaw.json — the single install signal.
-    // Fires immediately when OpenClaw creates or deletes this file.
-    const configUri = vscode.Uri.file(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
+    // Watch ~/.openclaw/openclaw.json for when OpenClaw first initialises.
     const configWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(path.join(os.homedir(), '.openclaw')), 'openclaw.json'),
       false, true, false,
@@ -70,12 +71,33 @@ export class HomePanel {
     configWatcher.onDidCreate(() => void this._update(), null, this._disposables);
     configWatcher.onDidDelete(() => void this._update(), null, this._disposables);
     this._disposables.push(configWatcher);
-    void configUri; // suppress unused warning
+    // Also watch home dir for ~/.openclaw itself being created (npm install done).
+    const homeWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(os.homedir()), '.openclaw'),
+      false, true, false,
+    );
+    homeWatcher.onDidCreate(() => void this._update(), null, this._disposables);
+    homeWatcher.onDidDelete(() => void this._update(), null, this._disposables);
+    this._disposables.push(homeWatcher);
     this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
+      } else if (msg.command === 'runSetup') {
+        void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
+      } else if (msg.command === 'sudoPassword') {
+        // Password modal submitted or cancelled from the webview.
+        HomePanel._pendingPasswordResolve?.(msg.password as string | undefined);
+        HomePanel._pendingPasswordResolve = undefined;
+      } else if (msg.command === 'toggleChat') {
+        const cmd = this._sidebarOpen ? 'void.sidebar.close' : 'void.sidebar.open';
+        void vscode.commands.executeCommand(cmd).then(async () => {
+          // Let the sidebar finish opening/closing, then read real state.
+          await new Promise(r => setTimeout(r, 150));
+          this._sidebarOpen = await vscode.commands.executeCommand<boolean>('void.sidebar.isVisible').then(v => !!v, () => this._sidebarOpen);
+          try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
+        });
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'MEMORY.md']);
         const file = msg.file as string;
@@ -83,10 +105,50 @@ export class HomePanel {
         const workspaceDir = getOpenClawWorkspaceDir();
         const filePath = path.join(workspaceDir, file);
         if (!fs.existsSync(filePath)) {
-          vscode.window.showWarningMessage(
-            `${file} not found in ${workspaceDir}. OpenClaw may not have initialised its workspace yet.`
-          );
-          return;
+          if (file === 'MEMORY.md') {
+            // Auto-create MEMORY.md with a scaffolded long-term agent memory template
+            const scaffold = [
+              '# Agent Long-Term Memory',
+              '',
+              'This file is the persistent long-term memory for the AI agent embedded in OCcode.',
+              'The agent reads this file at the start of every session to recall important context,',
+              'preferences, and decisions made in previous conversations.',
+              '',
+              '---',
+              '',
+              '## About This File',
+              '',
+              '- **Purpose**: Stores facts, decisions, and context that should persist across agent sessions.',
+              '- **Owner**: You — edit freely to add, update, or remove entries.',
+              '- **Format**: Plain Markdown. Keep entries concise and well-organised.',
+              '',
+              '## User Preferences',
+              '',
+              '<!-- Add preferences the agent should always follow, e.g.:',
+              '- Prefer TypeScript over JavaScript',
+              '- Always use tabs for indentation',
+              '-->',
+              '',
+              '## Project Context',
+              '',
+              '<!-- Record important architectural decisions, repo layout notes, or recurring patterns. -->',
+              '',
+              '## Recurring Solutions',
+              '',
+              '<!-- Document fixes for problems that come up repeatedly. -->',
+              '',
+              '## Notes',
+              '',
+              '<!-- Anything else the agent should remember long-term. -->',
+            ].join('\n');
+            fs.mkdirSync(workspaceDir, { recursive: true });
+            fs.writeFileSync(filePath, scaffold, 'utf8');
+          } else {
+            vscode.window.showWarningMessage(
+              `${file} not found in ${workspaceDir}. OpenClaw may not have initialised its workspace yet.`
+            );
+            return;
+          }
         }
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command) {
@@ -149,10 +211,11 @@ export class HomePanel {
         child.on('error', err => { tee(`\nError: ${err.message}\n`); resolve({ code: 1 }); });
       });
 
-    // Ask for sudo password via VS Code input, cache with `sudo -S -v`, return success.
-    const cacheSudo = async (prompt: string): Promise<boolean> => {
-      const password = await vscode.window.showInputBox({
-        password: true, prompt, placeHolder: 'Password (not stored)', ignoreFocusOut: true,
+    // Ask for sudo password via in-webview modal, cache with `sudo -S -v`, return success.
+    const cacheSudo = async (_prompt: string): Promise<boolean> => {
+      const password = await new Promise<string | undefined>(resolve => {
+        HomePanel._pendingPasswordResolve = resolve;
+        post({ type: 'requestPassword' });
       });
       if (!password) return false;
       tee('Verifying credentials...\n');
@@ -177,6 +240,7 @@ export class HomePanel {
         `Please diagnose what went wrong and provide exact steps to fix it on this platform.`,
         `If Node.js or npm is missing, explain how to install them first.`,
       ].join('\n'));
+      void vscode.commands.executeCommand('openclaw.balance.spend');
     };
 
     // ── Step 1: try npm install -g openclaw ───────────────────────────────────
@@ -285,27 +349,28 @@ export class HomePanel {
     const openclawDir = path.join(os.homedir(), '.openclaw');
     const dirExists = fs.existsSync(openclawDir);
     const cliCheck = await this._testOpenClawCli();
-    // openclaw.json is the definitive signal — created by OpenClaw on first run.
-    // If it's absent, OpenClaw is not properly installed regardless of binaries.
     const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    const isInstalled = fs.existsSync(configFile);
+    const isConfigured = fs.existsSync(configFile);
+    const isInstalled = cliCheck.ok || isConfigured;
     this._lastInstalledState = isInstalled;
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
-    this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+
+    // Show setup wizard when CLI is present but not yet configured.
+    if (isInstalled && !isConfigured) {
+      this._panel.webview.html = this._getWizardHtml(iconUri.toString());
+    } else {
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+    }
     // Kick off gateway status polling now that the webview is ready.
     this._startPolling();
   }
 
   // ── Gateway status helpers ─────────────────────────────────────────────────
 
-  private async _checkGatewayStatus(): Promise<GatewayStatus> {
-    if (this._commandAction) {
-      return this._commandAction === 'start' ? 'starting'
-           : this._commandAction === 'stop'  ? 'stopping'
-           : 'restarting';
-    }
+  /** Raw HTTP probe — no _commandAction guard. Used by the polling loop. */
+  private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
     return new Promise(resolve => {
       const req = http.get('http://localhost:18789/', { timeout: 2000 }, res => {
         res.resume();
@@ -318,12 +383,32 @@ export class HomePanel {
     });
   }
 
+  private async _checkGatewayStatus(): Promise<GatewayStatus> {
+    if (this._commandAction) {
+      return this._commandAction === 'start' ? 'starting'
+           : this._commandAction === 'stop'  ? 'stopping'
+           : 'restarting';
+    }
+    return this._checkGatewayStatusRaw();
+  }
+
   /**
    * Fast synchronous check — ~/.openclaw/openclaw.json is the single
    * definitive signal that OpenClaw is installed and initialised.
    */
   private _quickInstallCheck(): boolean {
-    return fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
+    // True if openclaw.json exists, OR if the binary is on PATH (npm install done).
+    if (fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'))) return true;
+    // Fast synchronous binary check — look for openclaw in npm global bin.
+    try {
+      const npmGlobalBin = require('child_process')
+        .execSync('npm bin -g 2>/dev/null || npm prefix -g', { timeout: 2000, windowsHide: true })
+        .toString().trim().split('\n')[0].trim();
+      const binName = process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw';
+      return fs.existsSync(require('path').join(npmGlobalBin, binName));
+    } catch {
+      return false;
+    }
   }
 
   private _startPolling(): void {
@@ -344,12 +429,18 @@ export class HomePanel {
         }
       }
 
-      const [status, aiRunning] = await Promise.all([
+      const [status, aiRunning, sidebarVisible] = await Promise.all([
         this._checkGatewayStatus(),
         vscode.commands.executeCommand<boolean>('void.getIsRunning').then(v => !!v, () => false),
+        vscode.commands.executeCommand<boolean>('void.sidebar.isVisible').then(v => !!v, () => this._sidebarOpen),
       ]);
-      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status }); } catch {}
+      this._sidebarOpen = sidebarVisible;
+      // Don't overwrite the intermediary status while a gateway command is in progress.
+      if (!this._commandAction) {
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status }); } catch {}
+      }
       try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
+      try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
     };
     void tick();
     this._pollingTimer = setInterval(tick, 2000);
@@ -367,22 +458,6 @@ export class HomePanel {
    * or the timeout expires. Streams live status updates to the webview while
    * waiting so the UI stays accurate (still "Starting…" etc.).
    */
-  private async _waitForDesiredState(
-    expected: GatewayStatus,
-    intermediary: GatewayStatus,
-    timeoutMs = 20000,
-  ): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 1500));
-      const current = await this._checkGatewayStatus();
-      if (current === expected) return true;
-      // Still transitioning — keep the intermediary label in the UI.
-      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
-    }
-    return false;
-  }
-
   private async _handleGatewayAction(action: 'start' | 'stop' | 'restart'): Promise<void> {
     const intermediary: GatewayStatus =
       action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
@@ -391,58 +466,49 @@ export class HomePanel {
     this._commandAction = action;
     try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
 
-    const cliPath = await this._findOpenClawPath();
-    if (!cliPath) {
-      this._outputChannel.appendLine('[OpenClaw] Error: openclaw CLI not found');
-      this._commandAction = null;
-      return;
-    }
+    // Hand off to AI — it will run the command and handle any errors
+    const verb = action === 'restart' ? 'restart' : action;
+    const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+    const aiMessage = [
+      `Please ${verb} the OpenClaw gateway.`,
+      '',
+      `Run the following command in your terminal:`,
+      '```',
+      `openclaw gateway ${action}`,
+      '```',
+      '',
+      `Environment: ${osInfo}`,
+      '',
+      `Once the gateway is ${expectedState === 'running' ? 'running' : 'stopped'}, confirm it.`,
+      `If the command fails or the gateway does not reach the expected state, diagnose and fix the issue.`,
+    ].join('\n');
 
-    this._outputChannel.clear();
-    this._outputChannel.appendLine(`[OpenClaw] gateway ${action} …`);
+    await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage, 'agent');
+    void vscode.commands.executeCommand('openclaw.balance.spend');
 
-    let output = '';
-    const child = cp.spawn(cliPath, ['gateway', action], {
-      env: this._buildExecEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    child.stdout?.on('data', (d: Buffer) => { const t = d.toString(); output += t; this._outputChannel.append(t); });
-    child.stderr?.on('data', (d: Buffer) => { const t = d.toString(); output += t; this._outputChannel.append(t); });
-    child.on('close', async (code: number | null) => {
-      this._outputChannel.appendLine(`[OpenClaw] gateway ${action} exited (${code ?? 'signal'})`);
-      this._commandAction = null;
+    // Poll in the background until gateway reaches expected state
+    this._pollUntilState(expectedState, intermediary);
+  }
 
-      // Give the gateway time to actually reach the desired state before
-      // deciding anything — the CLI often exits before the service is up/down.
-      const reached = await this._waitForDesiredState(expectedState, intermediary);
-
-      if (reached) {
-        // All good — show the confirmed final state.
-        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: expectedState }); } catch {}
-      } else {
-        // Still not in the right state after waiting — hand off to AI.
-        this._outputChannel.appendLine(`[OpenClaw] Expected "${expectedState}" but gateway did not reach it. Invoking MoltPilot…`);
-        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: 'ai-fixing' }); } catch {}
-
-        const currentStatus = await this._checkGatewayStatus();
-        const aiMessage =
-          `I tried to run \`openclaw gateway ${action}\` but the gateway never reached the expected state ("${expectedState}"). ` +
-          `It is currently **${currentStatus}**.\n\n` +
-          `Here is the full command output:\n\`\`\`\n${output.trim()}\n\`\`\`\n\n` +
-          `Please diagnose the issue and provide the exact steps or commands to fix it.`;
-        await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage);
-
-        // Resume normal status polling after a moment.
-        setTimeout(async () => {
-          const final = await this._checkGatewayStatus();
-          try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: final }); } catch {}
-        }, 5000);
+  private _pollUntilState(expected: GatewayStatus, intermediary: GatewayStatus, maxWaitMs = 180000): void {
+    const deadline = Date.now() + maxWaitMs;
+    const tick = async () => {
+      if (Date.now() > deadline) {
+        this._commandAction = null;
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: await this._checkGatewayStatus() }); } catch {}
+        return;
       }
-    });
-    child.on('error', (err: Error) => {
-      this._outputChannel.appendLine(`[OpenClaw] Error: ${err.message}`);
-      this._commandAction = null;
-    });
+      // Use raw status check, bypassing _commandAction guard
+      const status = await this._checkGatewayStatusRaw();
+      if (status === expected) {
+        this._commandAction = null;
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status }); } catch {}
+      } else {
+        try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
+        setTimeout(tick, 4000);
+      }
+    };
+    setTimeout(tick, 4000);
   }
 
   // ── Version check ──────────────────────────────────────────────────────────
@@ -589,11 +655,379 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI powered local harness for OpenClaw installation, configuration and troubleshooting</p>
+  <p class="tagline">AI Powered Local Harness for OpenClaw</p>
   <div class="spinner-wrap">
     <div class="spinner"></div>
     <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
   </div>
+</body>
+</html>`;
+  }
+
+  // ── Setup wizard ───────────────────────────────────────────────────────────
+
+  private async _runSetup(data: { provider: string; apiKey: string; port: string }): Promise<void> {
+    const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
+    const env = this._buildExecEnv();
+    const cliPath = await this._findOpenClawPath() ?? 'openclaw';
+    const port = data.port && /^\d+$/.test(data.port) ? data.port : '18789';
+    const isFree = data.provider === 'free';
+
+    // Map provider choice to openclaw flags.
+    const providerFlags: Record<string, string[]> = {
+      free: [
+        '--auth-choice', 'custom-api-key',
+        '--custom-base-url', 'https://inference.mba.sh/v1',
+        '--custom-api-key', 'sk-moltpilot-prod',
+        '--custom-model-id', 'moltpilot',
+        '--custom-compatibility', 'openai',
+      ],
+      anthropic:   ['--auth-choice', 'apiKey',             '--anthropic-api-key',   data.apiKey],
+      openai:      ['--auth-choice', 'openai-api-key',     '--openai-api-key',      data.apiKey],
+      openrouter:  ['--auth-choice', 'openrouter-api-key', '--openrouter-api-key', data.apiKey],
+      gemini:      ['--auth-choice', 'gemini-api-key',     '--gemini-api-key',      data.apiKey],
+    };
+    const flags = providerFlags[data.provider];
+    if (!flags) {
+      post({ type: 'wizardLog', text: 'Unknown provider selected.\n', done: true, ok: false });
+      return;
+    }
+
+    const args = [
+      'onboard',
+      '--non-interactive', '--accept-risk',
+      '--flow', 'quickstart',
+      '--gateway-auth', 'token',
+      '--gateway-port', port,
+      '--skip-channels', '--skip-skills', '--skip-health',
+      ...flags,
+    ];
+
+    post({ type: 'wizardLog', text: isFree ? 'Setting up free MoltPilot access...\n' : 'Starting OpenClaw setup...\n', done: false, ok: false });
+
+    await new Promise<void>(resolve => {
+      const child = cp.spawn(cliPath, args, {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        ...(process.platform === 'win32' ? { shell: true, windowsHide: true } : {}),
+      });
+      child.stdout?.on('data', (d: Buffer) => post({ type: 'wizardLog', text: d.toString(), done: false, ok: false }));
+      child.stderr?.on('data', (d: Buffer) => post({ type: 'wizardLog', text: d.toString(), done: false, ok: false }));
+      child.on('close', code => {
+        const ok = code === 0;
+        post({ type: 'wizardLog', text: ok ? '\n✅ Setup complete!\n' : `\nSetup exited with code ${code}.\n`, done: true, ok });
+        if (ok) {
+          if (isFree) {
+            // Write local free-tier marker (no remote enforcement).
+            try {
+              const occDir = path.join(os.homedir(), '.occ');
+              if (!fs.existsSync(occDir)) fs.mkdirSync(occDir, { recursive: true });
+              fs.writeFileSync(
+                path.join(occDir, 'moltpilot-tier.json'),
+                JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
+              );
+            } catch { /* non-fatal */ }
+          }
+          setTimeout(() => {
+            HomePanel.refresh();
+            if (isFree) {
+              // Open chat immediately — moltpilot is already configured in OCcode.
+              vscode.commands.executeCommand('void.sidebar.open');
+            } else {
+              vscode.commands.executeCommand('openclaw.openWorkspace');
+            }
+          }, 1500);
+        }
+        resolve();
+      });
+      child.on('error', err => {
+        post({ type: 'wizardLog', text: `Error: ${err.message}\n`, done: true, ok: false });
+        resolve();
+      });
+    });
+  }
+
+  private _getWizardHtml(iconUri: string): string {
+    const providers = [
+      { id: 'anthropic',  label: 'Anthropic Claude', hint: 'console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
+      { id: 'openai',     label: 'OpenAI',           hint: 'platform.openai.com/api-keys',        placeholder: 'sk-...' },
+      { id: 'openrouter', label: 'OpenRouter',       hint: 'openrouter.ai/settings/keys',         placeholder: 'sk-or-...' },
+      { id: 'gemini',     label: 'Google Gemini',    hint: 'aistudio.google.com/apikey',          placeholder: 'AIza...' },
+    ];
+
+    const providerCards = providers.map(p =>
+      `<button class="prov-card" data-id="${p.id}" data-placeholder="${p.placeholder}" data-hint="${p.hint}" onclick="pickProvider(this)">
+        <span class="prov-label">${p.label}</span>
+        <span class="prov-hint">${p.hint}</span>
+      </button>`
+    ).join('\n      ');
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      background: #1a1a1a; color: #e0e0e0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 32px 20px; text-align: center;
+    }
+    .logo { width: 64px; height: 64px; margin-bottom: 16px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); }
+    h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    h1 .accent { color: #dc2828; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 32px; }
+    .step { width: min(520px, 96vw); }
+    .step-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+    h2 { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+    .step-desc { font-size: 12px; color: #888; margin-bottom: 24px; line-height: 1.5; }
+    /* Step 0 — tier choice */
+    .tier-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+    .tier-card {
+      background: rgba(255,255,255,0.03); border: 1px solid #2b2b2b;
+      border-radius: 10px; padding: 18px 16px 16px; cursor: pointer;
+      text-align: left; transition: border-color 0.15s, background 0.15s;
+      display: flex; flex-direction: column;
+    }
+    .tier-card:hover { border-color: #444; background: rgba(255,255,255,0.05); }
+    .tier-card.free-card { border-color: #2a3d2a; }
+    .tier-card.free-card:hover { border-color: #3d6b3d; background: rgba(40,160,80,0.06); }
+    .tier-price { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 3px; }
+    .tier-price .tier-unit { font-size: 12px; font-weight: 400; color: #777; }
+    .tier-sub { font-size: 11px; color: #555; margin-bottom: 14px; line-height: 1.5; }
+    .provider-logos { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .prov-icon {
+      width: 28px; height: 28px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+    }
+    .tier-cta {
+      margin-top: auto; padding: 8px 14px; border-radius: 7px;
+      font-size: 12px; font-weight: 600; border: none; cursor: pointer;
+      width: 100%; text-align: center;
+    }
+    .tier-cta.green { background: #16a34a; color: #fff; }
+    .tier-cta.green:hover { background: #15803d; }
+    .tier-cta.red { background: #dc2828; color: #fff; }
+    .tier-cta.red:hover { background: #b91c1c; }
+    .tier-note { font-size: 11px; color: #444; margin-top: 8px; text-align: center; }
+    /* Provider cards */
+    .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+    .prov-card {
+      background: rgba(255,255,255,0.03); border: 1px solid #2b2b2b;
+      border-radius: 8px; padding: 14px 12px; cursor: pointer;
+      text-align: left; transition: border-color 0.15s, background 0.15s;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .prov-card:hover { border-color: #444; background: rgba(255,255,255,0.05); }
+    .prov-card.selected { border-color: #dc2828; background: rgba(220,40,40,0.08); }
+    .prov-label { font-size: 13px; font-weight: 600; color: #e0e0e0; }
+    .prov-hint { font-size: 11px; color: #666; }
+    /* API key input */
+    .field-label { font-size: 11px; color: #888; text-align: left; margin-bottom: 5px; }
+    .key-input {
+      width: 100%; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
+      color: #e0e0e0; font-size: 13px; padding: 9px 12px; outline: none;
+      margin-bottom: 6px; box-sizing: border-box; font-family: monospace;
+    }
+    .key-input:focus { border-color: #dc2828; }
+    .key-hint { font-size: 11px; color: #555; text-align: left; margin-bottom: 20px; }
+    .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+    .port-label { font-size: 12px; color: #888; white-space: nowrap; }
+    .port-input {
+      width: 90px; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
+      color: #e0e0e0; font-size: 13px; padding: 7px 10px; outline: none;
+      box-sizing: border-box;
+    }
+    .port-input:focus { border-color: #dc2828; }
+    /* Buttons */
+    .btn-row { display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-back {
+      background: transparent; border: 1px solid #333; color: #888;
+      font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer;
+    }
+    .btn-back:hover { background: rgba(255,255,255,0.05); }
+    .btn-primary {
+      background: #dc2828; border: none; color: #fff;
+      font-size: 13px; font-weight: 600; padding: 8px 22px; border-radius: 6px;
+      cursor: pointer; display: flex; align-items: center; gap: 7px;
+    }
+    .btn-primary:hover { background: #b91c1c; }
+    .btn-primary:disabled { background: #7a1515; cursor: not-allowed; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.65s linear infinite; flex-shrink: 0;
+    }
+    /* Running step */
+    .run-status {
+      font-size: 12px; color: #555; margin-top: 16px;
+      max-width: 280px; text-align: center; line-height: 1.5;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .run-status.done { color: #4ade80; white-space: normal; }
+    .run-status.failed { color: #f87171; white-space: normal; }
+    /* Progress dots */
+    @keyframes dots { 0%,100%{content:''} 33%{content:'.'} 66%{content:'..'} 100%{content:'...'} }
+    .dots::after { content: ''; animation: dots 1.2s steps(1) infinite; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
+  <p class="subtitle">OpenClaw is installed. Let's get you connected to an AI.</p>
+
+  <!-- Step 0: Free vs BYOK -->
+  <div id="step0" class="step">
+    <h2>Get started</h2>
+    <p class="step-desc">How would you like to connect?</p>
+    <div class="tier-grid">
+      <!-- Free card -->
+      <div class="tier-card free-card">
+        <div class="tier-price">$1<span class="tier-unit"> to start</span></div>
+        <div class="tier-sub">We rent you our AI model.<br>Lasts about a week. No card needed.</div>
+        <button class="tier-cta green" onclick="chooseFree()">Start Free →</button>
+      </div>
+      <!-- BYOK card -->
+      <div class="tier-card">
+        <div class="provider-logos">
+          <!-- Anthropic -->
+          <div class="prov-icon" style="background:#c9b49a;color:#1a1008" title="Anthropic">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13.827 3.279L20.75 20.5h-3.06l-1.523-4.01H7.833L6.31 20.5H3.25l6.923-17.221zm-.662 4.02l-2.43 6.4h4.86z"/></svg>
+          </div>
+          <!-- OpenAI -->
+          <div class="prov-icon" style="background:#fff;color:#000" title="OpenAI">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.28a5.998 5.998 0 0 0-.52-4.93 6.17 6.17 0 0 0-6.6-2.96A6.004 6.004 0 0 0 10.64 0a6.17 6.17 0 0 0-5.88 4.27 5.999 5.999 0 0 0-4 2.91 6.17 6.17 0 0 0 .76 7.22 6 6 0 0 0 .52 4.93 6.17 6.17 0 0 0 6.6 2.96 6 6 0 0 0 4.52 2.39 6.17 6.17 0 0 0 5.89-4.28 5.999 5.999 0 0 0 3.99-2.91 6.17 6.17 0 0 0-.76-7.21zm-9.28 12.98a4.57 4.57 0 0 1-2.93-1.06l.14-.08 4.87-2.81a.8.8 0 0 0 .4-.69v-6.87l2.06 1.19a.07.07 0 0 1 .04.06v5.69a4.6 4.6 0 0 1-4.58 4.57zm-9.87-4.2a4.57 4.57 0 0 1-.55-3.07l.15.09 4.86 2.81a.8.8 0 0 0 .79 0l5.94-3.43v2.38a.07.07 0 0 1-.03.06l-4.92 2.84a4.6 4.6 0 0 1-6.24-1.68zm-1.28-10.7a4.56 4.56 0 0 1 2.38-2l-.01.17v5.62a.8.8 0 0 0 .4.69l5.94 3.43-2.06 1.19a.07.07 0 0 1-.07 0L3.53 13.2a4.6 4.6 0 0 1-.68-6.84zm16.9 3.95l-5.94-3.43 2.06-1.19a.07.07 0 0 1 .07 0l4.92 2.84a4.59 4.59 0 0 1-.71 8.29v-5.79a.8.8 0 0 0-.4-.72zm2.05-3.08l-.15-.09-4.86-2.8a.8.8 0 0 0-.79 0L9.16 9.29V6.91a.07.07 0 0 1 .03-.06l4.92-2.84a4.59 4.59 0 0 1 6.84 4.76v.01zm-12.84 4.22L5.9 10.26a.07.07 0 0 1-.04-.06V4.51a4.59 4.59 0 0 1 7.53-3.52l-.14.08-4.87 2.81a.8.8 0 0 0-.4.69v6.87l-2.05-1.18zm1.11-2.41l2.65-1.53 2.65 1.53v3.05l-2.65 1.53-2.65-1.53V9.84z"/></svg>
+          </div>
+          <!-- OpenRouter -->
+          <div class="prov-icon" style="background:#6366f1;color:#fff" title="OpenRouter">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="18" cy="19" r="2"/><path d="M8 11.5l8-5M8 12.5l8 5"/></svg>
+          </div>
+          <!-- Gemini -->
+          <div class="prov-icon" style="background:linear-gradient(135deg,#4285f4,#9b59b6);color:#fff" title="Google Gemini">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C9.91 6.55 6.55 9.91 2 12c4.55 2.09 7.91 5.45 10 10 2.09-4.55 5.45-7.91 10-10C17.45 9.91 14.09 6.55 12 2z"/></svg>
+          </div>
+        </div>
+        <div class="tier-sub" style="margin-bottom:14px">Use your own API key</div>
+        <button class="tier-cta red" onclick="chooseBYOK()">Use My Key →</button>
+      </div>
+    </div>
+    <p class="tier-note">Free credit tracked locally. No account needed.</p>
+  </div>
+
+  <!-- Step 1: Choose provider (BYOK only) -->
+  <div id="step1" class="step" style="display:none">
+    <p class="step-label">Step 1 of 2</p>
+    <h2>Choose your AI Provider</h2>
+    <p class="step-desc">OpenClaw uses an AI provider to power agent conversations.<br>You can change this later with <code>openclaw configure</code>.</p>
+    <div class="prov-grid">
+      ${providerCards}
+    </div>
+    <div class="btn-row">
+      <button class="btn-back" onclick="goStep0()">← Back</button>
+      <button class="btn-primary" id="btn-next1" onclick="goStep2()" disabled>Continue →</button>
+    </div>
+  </div>
+
+  <!-- Step 2: API key + port (BYOK only) -->
+  <div id="step2" class="step" style="display:none">
+    <p class="step-label">Step 2 of 2</p>
+    <h2 id="step2-title">Enter your API Key</h2>
+    <p class="step-desc" id="step2-desc">Your API key is stored locally in <code>~/.openclaw/openclaw.json</code>.</p>
+    <p class="field-label">API Key</p>
+    <input id="api-key" class="key-input" type="password" placeholder="sk-..." autocomplete="off" oninput="validateStep2()" />
+    <p class="key-hint" id="key-hint">Get your key at <span id="key-link"></span></p>
+    <div class="port-row">
+      <span class="port-label">Gateway port</span>
+      <input id="gw-port" class="port-input" type="text" value="18789" placeholder="18789" />
+    </div>
+    <div class="btn-row">
+      <button class="btn-back" onclick="goStep1()">← Back</button>
+      <button class="btn-primary" id="btn-run" onclick="runSetup()" disabled>Set Up OpenClaw</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Running -->
+  <div id="step3" class="step" style="display:none">
+    <h2><span class="dots">Setting up OpenClaw</span></h2>
+    <p class="run-status" id="run-status"></p>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    let selectedProvider = null;
+
+    function goStep0() {
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step0').style.display = '';
+    }
+
+    function chooseFree() {
+      document.getElementById('step0').style.display = 'none';
+      document.getElementById('step3').style.display = '';
+      vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: '', port: '18789' });
+    }
+
+    function chooseBYOK() {
+      document.getElementById('step0').style.display = 'none';
+      document.getElementById('step1').style.display = '';
+    }
+
+    function pickProvider(btn) {
+      document.querySelectorAll('.prov-card').forEach(c => c.classList.remove('selected'));
+      btn.classList.add('selected');
+      selectedProvider = btn.dataset.id;
+      document.getElementById('btn-next1').disabled = false;
+    }
+
+    function goStep2() {
+      if (!selectedProvider) return;
+      const card = document.querySelector('.prov-card.selected');
+      document.getElementById('step2-title').textContent = card.querySelector('.prov-label').textContent + ' API Key';
+      document.getElementById('api-key').placeholder = card.dataset.placeholder;
+      document.getElementById('key-link').textContent = card.dataset.hint;
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step2').style.display = '';
+      document.getElementById('api-key').focus();
+    }
+
+    function goStep1() {
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step1').style.display = '';
+    }
+
+    function validateStep2() {
+      const key = document.getElementById('api-key').value.trim();
+      document.getElementById('btn-run').disabled = key.length < 8;
+    }
+
+    function runSetup() {
+      const apiKey = document.getElementById('api-key').value.trim();
+      const port = document.getElementById('gw-port').value.trim() || '18789';
+      if (!apiKey || !selectedProvider) return;
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step3').style.display = '';
+      vscode.postMessage({ command: 'runSetup', provider: selectedProvider, apiKey, port });
+    }
+
+    const statusEl = document.getElementById('run-status');
+
+    window.addEventListener('message', e => {
+      if (e.data.type === 'wizardLog') {
+        if (e.data.done) {
+          statusEl.className = 'run-status ' + (e.data.ok ? 'done' : 'failed');
+          statusEl.textContent = e.data.ok ? "You're all set." : 'Something went wrong. The AI will help fix it.';
+        } else {
+          // Show the last meaningful line as live muted status
+          const line = (e.data.text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).pop();
+          if (line) { statusEl.className = 'run-status'; statusEl.textContent = line; }
+        }
+      }
+    });
+  </script>
 </body>
 </html>`;
   }
@@ -644,46 +1078,45 @@ export class HomePanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       min-height: 100vh;
-      padding: clamp(16px, 5vw, 48px) clamp(12px, 4vw, 32px);
+      padding: 16px clamp(12px, 4vw, 24px) 20px;
       text-align: center;
     }
 
     /* ── Hero ──────────────────────────────────────────────────── */
     .logo {
-      width: clamp(56px, 14vw, 96px);
-      height: clamp(56px, 14vw, 96px);
-      margin-bottom: clamp(12px, 3vw, 24px);
+      width: 96px;
+      height: 96px;
+      margin-bottom: 8px;
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
       flex-shrink: 0;
     }
     h1 {
-      font-size: clamp(15px, 4.5vw, 28px);
+      font-size: clamp(14px, 4vw, 22px);
       font-weight: 700;
-      margin-bottom: clamp(4px, 1vw, 8px);
+      margin-bottom: 2px;
       color: #fff;
       line-height: 1.2;
       word-break: break-word;
     }
     h1 .accent { color: #dc2828; }
     .tagline {
-      color: #888;
-      font-size: clamp(11px, 2.5vw, 14px);
-      margin-bottom: clamp(18px, 5vw, 32px);
-      max-width: 44ch;
-      line-height: 1.5;
+      color: #666;
+      font-size: clamp(10px, 2vw, 11px);
+      margin-bottom: 12px;
+      line-height: 1.4;
     }
 
     /* ── Status badge ──────────────────────────────────────────── */
     .status {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      font-size: clamp(11px, 2.5vw, 14px);
-      margin-bottom: clamp(16px, 4vw, 28px);
-      padding: clamp(5px, 1.5vw, 8px) clamp(10px, 3vw, 16px);
-      border-radius: 6px;
+      gap: 5px;
+      font-size: clamp(10px, 2vw, 12px);
+      margin-bottom: 10px;
+      padding: 4px 10px;
+      border-radius: 5px;
       background: rgba(255,255,255,0.04);
       max-width: 95vw;
     }
@@ -696,16 +1129,16 @@ export class HomePanel {
       background: rgba(255,255,255,0.03);
       border: 1px solid #2b2b2b;
       border-radius: 8px;
-      padding: clamp(8px, 2.5vw, 12px) clamp(10px, 3vw, 16px);
-      margin-bottom: clamp(16px, 4vw, 24px);
-      font-size: clamp(11px, 2.5vw, 13px);
+      padding: 6px clamp(10px, 3vw, 16px);
+      margin-bottom: 10px;
+      font-size: clamp(11px, 2.5vw, 12px);
     }
     .check-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      padding: clamp(4px, 1.2vw, 6px) 0;
+      padding: 4px 0;
       border-bottom: 1px solid #2b2b2b;
     }
     .check-row:last-child { border-bottom: none; }
@@ -727,9 +1160,6 @@ export class HomePanel {
     .check-row .value {
       flex: 0 0 auto;
       text-align: right;
-      max-width: 50%;
-      overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
     }
     .check-row .value.ok { color: #4ade80; }
@@ -742,7 +1172,6 @@ export class HomePanel {
       gap: 6px;
       flex-shrink: 0;
     }
-    @keyframes gw-spin { to { transform: rotate(360deg); } }
     .gw-spinner {
       width: 11px;
       height: 11px;
@@ -795,6 +1224,17 @@ export class HomePanel {
     }
     #molt-sparkle.visible { display: inline-block; }
     #molt-text { max-width: none; overflow: visible; }
+    .molt-chat-btn {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: transparent; border: none; cursor: pointer;
+      color: #555; padding: 2px 5px; border-radius: 4px;
+      font-size: 10px; font-family: inherit; line-height: 1;
+      transition: color 0.15s, background 0.15s;
+      vertical-align: middle; margin-left: 4px; white-space: nowrap;
+    }
+    .molt-chat-btn:hover { color: #ccc; background: rgba(255,255,255,0.07); }
+    .molt-chat-btn.open { color: #bbb; }
+    .molt-chat-btn.open:hover { color: #ddd; background: rgba(255,255,255,0.06); }
     .gw-btn {
       font-size: clamp(10px, 2vw, 11px);
       padding: 2px 9px;
@@ -819,17 +1259,17 @@ export class HomePanel {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: clamp(8px, 2vw, 12px);
+      gap: 8px;
       width: min(320px, 96vw);
-      margin-top: clamp(20px, 5vw, 32px);
+      margin-top: 12px;
     }
     .btn-primary {
       background: #dc2828;
       color: #fff;
       border: none;
-      padding: clamp(9px, 2.5vw, 12px) clamp(18px, 5vw, 28px);
+      padding: 9px 22px;
       border-radius: 8px;
-      font-size: clamp(13px, 3vw, 15px);
+      font-size: clamp(12px, 3vw, 14px);
       font-weight: 600;
       cursor: pointer;
       transition: background 0.15s, transform 0.1s;
@@ -842,13 +1282,24 @@ export class HomePanel {
     .btn-primary svg { flex-shrink: 0; }
     .btn-primary:hover { background: #b91c1c; }
     .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled { background: #7a1515; cursor: not-allowed; transform: none; }
+    @keyframes btn-spin { to { transform: rotate(360deg); } }
+    .btn-spin {
+      display: inline-block;
+      width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: btn-spin 0.65s linear infinite;
+      flex-shrink: 0;
+    }
     .btn-secondary {
       background: transparent;
       color: #aaa;
       border: 1px solid #444;
-      padding: clamp(7px, 2vw, 10px) clamp(14px, 4vw, 20px);
+      padding: 7px 16px;
       border-radius: 8px;
-      font-size: clamp(11px, 2.5vw, 13px);
+      font-size: clamp(11px, 2.5vw, 12px);
       cursor: pointer;
       transition: border-color 0.15s, color 0.15s, transform 0.1s;
       width: fit-content;
@@ -866,8 +1317,8 @@ export class HomePanel {
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
-      gap: 6px;
-      margin-top: clamp(12px, 3vw, 18px);
+      gap: 5px;
+      margin-top: 8px;
     }
     .pill {
       font-size: clamp(9px, 2vw, 11px);
@@ -887,23 +1338,78 @@ export class HomePanel {
       border-color: rgba(220,40,40,0.7);
     }
 
-    /* ── Footer links ──────────────────────────────────────────── */
-    .links {
-      margin-top: clamp(28px, 7vw, 48px);
+    /* ── More Options menu ──────────────────────────────────────── */
+    .more-menu-wrap {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 200;
+    }
+    .more-menu-btn {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: clamp(12px, 3vw, 24px);
+      align-items: center;
+      gap: 5px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #aaa;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    .links a {
-      color: #666;
-      text-decoration: none;
-      font-size: clamp(10px, 2vw, 12px);
-      transition: color 0.15s;
-      white-space: nowrap;
+    .more-menu-btn:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+      color: #fff;
     }
-    .links a:hover { color: #dc2828; }
-
+    .more-menu-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: #252525;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      min-width: 190px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+      overflow: hidden;
+    }
+    .more-menu-dropdown.open { display: block; }
+    .more-menu-section {
+      padding: 5px 0;
+    }
+    .more-menu-section + .more-menu-section {
+      border-top: 1px solid rgba(255,255,255,0.07);
+    }
+    .more-menu-section-label {
+      padding: 5px 13px 3px;
+      font-size: 10px;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-weight: 600;
+    }
+    .more-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 7px 13px;
+      background: none;
+      border: none;
+      color: #bbb;
+      font-size: 12.5px;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+    }
+    .more-menu-item:hover {
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+    }
 
     /* ── Narrow panel adjustments (< 300px) ────────────────────── */
     @media (max-width: 299px) {
@@ -920,14 +1426,113 @@ export class HomePanel {
         text-overflow: clip;
       }
     }
+
+    /* ── Password modal ─────────────────────────────────────────── */
+    .pwd-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.72);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .pwd-overlay.visible { display: flex; }
+    .pwd-card {
+      background: #242424;
+      border: 1px solid #383838;
+      border-radius: 12px;
+      padding: 28px 28px 24px;
+      width: min(380px, 92vw);
+      text-align: left;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+    }
+    .pwd-card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .pwd-card p {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+    .pwd-input {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 14px;
+      padding: 9px 12px;
+      outline: none;
+      margin-bottom: 18px;
+      letter-spacing: 0.1em;
+      box-sizing: border-box;
+    }
+    .pwd-input:focus { border-color: #dc2828; }
+    .pwd-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .pwd-cancel {
+      background: transparent;
+      border: 1px solid #444;
+      color: #aaa;
+      font-size: 13px;
+      padding: 7px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .pwd-cancel:hover { background: rgba(255,255,255,0.06); }
+    .pwd-submit {
+      background: #dc2828;
+      border: none;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .pwd-submit:hover { background: #b91c1c; }
   </style>
 </head>
 <body>
+  <!-- More Options menu (fixed top-right) -->
+  ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
+    <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+      More Options
+    </button>
+    <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
+      <div class="more-menu-section">
+        <div class="more-menu-section-label">TUI</div>
+        <button class="more-menu-item" role="menuitem" onclick="cmd('openclaw.configureTUI');closeMoreMenu()">${icTerminalBtn}Configure</button>
+      </div>
+    </div>
+  </div>` : ''}
+
+  <!-- Password modal (shown on sudo permission error) -->
+  <div id="pwd-overlay" class="pwd-overlay">
+    <div class="pwd-card">
+      <h2>🔐 Administrator Password Required</h2>
+      <p>OpenClaw needs elevated permissions to install globally.<br>Your password is used once and never stored.</p>
+      <input id="pwd-input" class="pwd-input" type="password" placeholder="Enter your system password" autocomplete="current-password" />
+      <div class="pwd-actions">
+        <button class="pwd-cancel" onclick="cancelPwd()">Cancel</button>
+        <button class="pwd-submit" onclick="submitPwd()">Continue</button>
+      </div>
+    </div>
+  </div>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI powered local harness for OpenClaw installation, configuration and troubleshooting</p>
+  <p class="tagline">AI Powered Local Harness for OpenClaw</p>
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
-  <div class="checks">
+  ${isInstalled ? `<div class="checks">
     <div class="check-row">
       <span class="row-icon">${icFolder}</span>
       <span class="label">Config (~/.openclaw/openclaw.json)</span>
@@ -954,29 +1559,55 @@ export class HomePanel {
         <span id="molt-sparkle">✨</span>
         <span id="molt-dot" class="molt-dot"></span>
         <span id="molt-text" class="value" style="color:#666">Idle</span>
+        <button id="molt-chat-btn" class="molt-chat-btn" title="Open AI chat" onclick="toggleChat()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="btn-lbl">Open chat</span>
+        </button>
       </span>
     </div>
-  </div>
+  </div>` : ''}
   ${isInstalled ? `<div class="pills-row">
     ${['AGENTS.md','IDENTITY.md','USER.md','TOOLS.md','MEMORY.md'].map(f =>
       `<span class="pill" onclick="openFile('${f}')">${f}</span>`
     ).join('\n    ')}
   </div>` : ''}
   <div class="btn-group">
-    <button class="btn-primary" onclick="cmd('${buttonCommand}')">${icBtnPrimary}${buttonLabel}</button>
-    <button class="btn-secondary" onclick="cmd('openclaw.configureTUI')">${icTerminalBtn}Configure (TUI)</button>
-    <button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates with OpenClaw</button>
-    <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
+    <button id="btn-primary" class="btn-primary" onclick="cmd('${buttonCommand}')">${icBtnPrimary}${buttonLabel}</button>
+    <div id="install-status" style="display:none;font-size:11px;color:#666;margin-top:1px;text-align:center;max-width:min(320px,94vw);line-height:1.4;"></div>
+    ${isInstalled ? `<button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates with OpenClaw</button>
+    <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>` : ''}
   </div>
-  <div class="links">
-    <a href="https://github.com/damoahdominic/occ">GitHub</a>
-    <a href="https://openclaw.ai">Website</a>
-    <a href="https://docs.openclaw.ai">Docs</a>
-  </div>
+
   <script>
     const vscode = acquireVsCodeApi();
-    function cmd(c) { vscode.postMessage({ command: c }); }
+    function cmd(c) {
+      if (c === 'openclaw.install') {
+        const btn = document.getElementById('btn-primary');
+        if (btn && !btn.disabled) {
+          btn.disabled = true;
+          btn.innerHTML = '<span class="btn-spin"></span>Installing…';
+        }
+      }
+      vscode.postMessage({ command: c });
+    }
     function openFile(name) { vscode.postMessage({ command: 'openWorkspaceFile', file: name }); }
+
+    // ── More Options menu ─────────────────────────────────────────
+    function toggleMoreMenu(e) {
+      e.stopPropagation();
+      const dd = document.getElementById('more-menu-dropdown');
+      const btn = e.currentTarget;
+      if (!dd) return;
+      const isOpen = dd.classList.toggle('open');
+      btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    }
+    function closeMoreMenu() {
+      const dd = document.getElementById('more-menu-dropdown');
+      const btn = document.querySelector('.more-menu-btn');
+      if (dd) dd.classList.remove('open');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+    document.addEventListener('click', closeMoreMenu);
 
     // ── Gateway status ────────────────────────────────────────────
     const GW = {
@@ -994,10 +1625,12 @@ export class HomePanel {
     const gwText    = document.getElementById('gw-text');
     const gwBtn     = document.getElementById('gw-btn');
 
-    // Show spinner while checking on load.
-    gwSpinner.style.display = 'inline-block';
+    // Show spinner while checking on load (only if gateway row is in DOM).
+    if (gwSpinner) gwSpinner.style.display = 'inline-block';
+
 
     function updateGateway(status) {
+      if (!gwSpinner || !gwText || !gwBtn) return;
       const cfg = GW[status] || GW.checking;
       gwSpinner.style.display = cfg.spin ? 'inline-block' : 'none';
       gwSpinner.classList.toggle('ai', !!cfg.aiSpin);
@@ -1015,20 +1648,24 @@ export class HomePanel {
       }
     }
 
-    gwBtn.addEventListener('click', () => {
-      const action = gwBtn.dataset.action;
-      if (!action) return;
-      gwBtn.disabled = true;
-      vscode.postMessage({ command: 'gatewayAction', action });
-    });
+    if (gwBtn) {
+      gwBtn.addEventListener('click', () => {
+        const action = gwBtn.dataset.action;
+        if (!action) return;
+        gwBtn.disabled = true;
+        vscode.postMessage({ command: 'gatewayAction', action });
+      });
+    }
 
     // ── MoltPilot status ──────────────────────────────────────────
     const moltDot     = document.getElementById('molt-dot');
     const moltText    = document.getElementById('molt-text');
     const moltSparkle = document.getElementById('molt-sparkle');
+    const moltChatBtn = document.getElementById('molt-chat-btn');
     let _moltRunning  = false;
 
     function updateMoltPilot(running) {
+      if (!moltDot || !moltText || !moltSparkle) return;
       if (_moltRunning === running) return;
       _moltRunning = running;
       moltDot.classList.toggle('working', running);
@@ -1037,29 +1674,85 @@ export class HomePanel {
       moltText.style.color = running ? '#a78bfa' : '#666';
     }
 
+    function applyChatState(open) {
+      if (!moltChatBtn) return;
+      moltChatBtn.classList.toggle('open', open);
+      const lbl = moltChatBtn.querySelector('.btn-lbl');
+      if (lbl) lbl.textContent = open ? 'Close chat' : 'Open chat';
+      moltChatBtn.title = open ? 'Close AI chat' : 'Open AI chat';
+    }
+
+    function toggleChat() {
+      vscode.postMessage({ command: 'toggleChat' });
+    }
+
     // ── Version check ─────────────────────────────────────────────
     function checkVersion() {
       const btn = document.getElementById('btn-version');
       const res = document.getElementById('version-result');
-      btn.disabled = true;
-      btn.textContent = 'Checking…';
-      res.style.display = 'none';
+      if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+      if (res) { res.style.display = 'none'; res.innerHTML = ''; }
       vscode.postMessage({ command: 'checkVersion' });
     }
 
+    // ── Password modal ────────────────────────────────────────────
+    const pwdOverlay = document.getElementById('pwd-overlay');
+    const pwdInput   = document.getElementById('pwd-input');
+
+    function showPwd() {
+      pwdInput.value = '';
+      pwdOverlay.classList.add('visible');
+      setTimeout(() => pwdInput.focus(), 50);
+    }
+    function cancelPwd() {
+      pwdOverlay.classList.remove('visible');
+      vscode.postMessage({ command: 'sudoPassword', password: undefined });
+    }
+    function submitPwd() {
+      const pwd = pwdInput.value;
+      pwdOverlay.classList.remove('visible');
+      vscode.postMessage({ command: 'sudoPassword', password: pwd || undefined });
+    }
+    // Allow Enter key to submit, Escape to cancel.
+    pwdInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); submitPwd(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancelPwd(); }
+    });
+
+    const installStatus = document.getElementById('install-status');
+
     window.addEventListener('message', e => {
-      if (e.data.type === 'gatewayStatus') {
+      if (e.data.type === 'requestPassword') {
+        showPwd();
+      } else if (e.data.type === 'installLog' && installStatus) {
+        // Show the latest non-empty line of install output as muted status text.
+        const lines = (e.data.text || '').split('\\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length) {
+          installStatus.textContent = lines[lines.length - 1];
+          installStatus.style.display = 'block';
+        }
+      } else if (e.data.type === 'installState' && installStatus) {
+        if (e.data.state === 'done') {
+          installStatus.style.display = 'none';
+        } else if (e.data.state === 'failed') {
+          installStatus.textContent = 'Installation failed — see AI chat for details.';
+          installStatus.style.color = '#f87171';
+          installStatus.style.display = 'block';
+        }
+      } else if (e.data.type === 'gatewayStatus') {
         updateGateway(e.data.status);
-        if (e.data.status === 'ai-fixing') updateMoltPilot(true);
+        if (e.data.status === 'ai-fixing') {
+          updateMoltPilot(true);
+        }
       } else if (e.data.type === 'aiRunning') {
         updateMoltPilot(e.data.running);
+      } else if (e.data.type === 'chatState') {
+        applyChatState(e.data.open);
       } else if (e.data.type === 'versionResult') {
         const btn = document.getElementById('btn-version');
         const res = document.getElementById('version-result');
-        btn.disabled = false;
-        btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw';
-        res.innerHTML = e.data.html;
-        res.style.display = 'block';
+        if (btn) { btn.disabled = false; btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw'; }
+        if (res) { res.innerHTML = e.data.html; res.style.display = 'block'; }
       }
     });
   </script>

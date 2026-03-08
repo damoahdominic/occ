@@ -79,6 +79,7 @@ Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews
 	containerIcon: outputViewIcon,
 	canMoveView: true,
 	canToggleVisibility: true,
+	when: ContextKeyExpr.false(),
 	ctorDescriptor: new SyncDescriptor(OutputViewPane),
 	openCommandActionDescriptor: {
 		id: 'workbench.action.output.toggleOutput',

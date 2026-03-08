@@ -39,6 +39,7 @@ import { IDirectoryStrService } from '../common/directoryStrService.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IMCPService } from '../common/mcpService.js';
 import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 
 
 // related to retrying when LLM message has error
@@ -327,6 +328,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		@IDirectoryStrService private readonly _directoryStringService: IDirectoryStrService,
 		@IFileService private readonly _fileService: IFileService,
 		@IMCPService private readonly _mcpService: IMCPService,
+		@ICommandService private readonly _commandService: ICommandService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
@@ -813,6 +815,8 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					separateSystemMessage: separateSystemMessage,
 					onText: ({ fullText, fullReasoning, toolCall }) => {
 						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
+						// Tick inference budget in real-time as tokens stream (~$0.0001 per chunk)
+						this._commandService.executeCommand('openclaw.balance.spend', 0.0001).catch(() => {})
 					},
 					onFinalMessage: async ({ fullText, fullReasoning, toolCall, anthropicReasoning, }) => {
 						resMessageIsDonePromise({ type: 'llmDone', toolCall, info: { fullText, fullReasoning, anthropicReasoning } }) // resolve with tool calls
