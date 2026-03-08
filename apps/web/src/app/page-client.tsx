@@ -380,8 +380,24 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
           <NavbarLogo />
           <NavItems
             items={[
-              { name: "Docs", link: "https://docs.openclaw.ai" },
-              { name: "OpenClaw", link: "https://openclaw.ai" },
+              {
+                name: "Docs",
+                link: "https://docs.openclaw.ai",
+                icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  </svg>
+                ),
+              },
+              {
+                name: "OpenClaw",
+                link: "https://openclaw.ai",
+                icon: (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src="https://openclaw.ai/favicon.svg" alt="" width={14} height={14} className="opacity-70" />
+                ),
+              },
             ]}
           />
           <div className="flex items-center gap-4">
