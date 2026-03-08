@@ -618,6 +618,8 @@ const ProviderSetting = ({ providerName, settingName, subTextMd }: { providerNam
 	const voidSettingsService = accessor.get('IVoidSettingsService')
 	const settingsState = useSettingsState()
 
+	if (settingTitle === '(never)') return null
+
 	const settingValue = settingsState.settingsOfProvider[providerName][settingName] as string // this should always be a string in this component
 	if (typeof settingValue !== 'string') {
 		console.log('Error: Provider setting had a non-string value.')
@@ -1111,22 +1113,40 @@ export const Settings = () => {
 							{/* Models section */}
 							<div className={shouldShowTab('models') ? `` : 'hidden'}>
 								<ErrorBoundary>
-									<h2 className={`text-3xl mb-2`}>Models</h2>
+									<h2 className={`text-3xl mb-4`}>Models</h2>
 
-									{/* OCC Legacy Model toggle */}
-									<div className='flex items-center gap-x-2 my-4'>
-										<VoidSwitch
-											size='xs'
-											value={useOccLegacyModel}
-											onChange={(newVal) => setUseOccLegacyModel(newVal)}
-										/>
-										<span className='text-void-fg-3 text-sm pointer-events-none'>Use OCC Legacy Model (Free)</span>
+									{/* Two-card choice: Free Tier vs BYOK */}
+									<div className='flex gap-4 mb-6'>
+										{/* OCC Free Tier card */}
+										<button
+											onClick={() => setUseOccLegacyModel(true)}
+											className={`flex-1 text-left rounded-lg border-2 p-4 transition-all duration-150 ${
+												useOccLegacyModel
+													? 'border-[#0e70c0] bg-[#0e70c0]/10'
+													: 'border-void-bg-2 bg-void-bg-2 hover:border-[#0e70c0]/50'
+											}`}
+										>
+											<div className='font-semibold mb-1'>OCC Free Tier</div>
+											<div className='text-sm text-void-fg-3'>Use the built-in model. No API key needed — $1 of free inference included.</div>
+										</button>
+
+										{/* BYOK card */}
+										<button
+											onClick={() => setUseOccLegacyModel(false)}
+											className={`flex-1 text-left rounded-lg border-2 p-4 transition-all duration-150 ${
+												!useOccLegacyModel
+													? 'border-[#0e70c0] bg-[#0e70c0]/10'
+													: 'border-void-bg-2 bg-void-bg-2 hover:border-[#0e70c0]/50'
+											}`}
+										>
+											<div className='font-semibold mb-1'>Bring Your Own Key</div>
+											<div className='text-sm text-void-fg-3'>Connect Anthropic, OpenAI, OpenRouter, Ollama, and more with your own API keys.</div>
+										</button>
 									</div>
 
-									{/* OCC Legacy Model settings */}
+									{/* OCC Free Tier settings */}
 									{useOccLegacyModel && (
 										<div className='mb-6'>
-											<p className='text-sm text-void-fg-3 mb-3'>{`A free model provided by OpenClaw Code. No API key required.`}</p>
 											<SettingsForProvider providerName='ocFreeModel' showProviderTitle={false} showProviderSuggestions={true} />
 										</div>
 									)}
@@ -1134,9 +1154,6 @@ export const Settings = () => {
 									{/* BYOK section */}
 									{!useOccLegacyModel && (
 										<div>
-											<h3 className='text-xl mb-1'>BYOK Settings</h3>
-											<p className='text-sm text-void-fg-3 mb-4'>{`Bring your own API key. Connect to Anthropic, OpenAI, OpenRouter, and more.`}</p>
-
 											<ModelDump filteredProviders={providerNames.filter(n => n !== 'ocFreeModel')} />
 											<div className='w-full h-[1px] my-4' />
 											<AutoDetectLocalModelsToggle />

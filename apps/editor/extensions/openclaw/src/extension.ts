@@ -22,14 +22,6 @@ function isWebServerReachable(): Promise<boolean> {
   });
 }
 
-/** Activity-bar container IDs to hide from every OCcode installation. */
-const HIDDEN_ACTIVITY_BAR_IDS = [
-  'workbench.view.scm',        // Source Control
-  'workbench.view.debug',      // Run and Debug
-  'workbench.view.extensions', // Extensions
-  'workbench.view.remote',     // Remote Explorer
-] as const;
-
 type PinnedContainer = {
   id: string;
   pinned: boolean;
@@ -38,47 +30,62 @@ type PinnedContainer = {
 };
 
 /**
- * Hides the specified activity bar containers.
- * Reads the current `workbench.activityBar.pinnedViewContainers` value,
- * marks the target containers as hidden, then persists to GlobalTarget
- * so the change applies across all workspaces on this machine.
+ * Writes a complete, authoritative activity-bar container list that keeps
+ * only Explorer and Search visible and hides everything else (SCM, Debug,
+ * Extensions, Remote Explorer, etc.).
+ *
+ * Writing a FULL list — rather than patching the existing one — is the only
+ * reliable way to override VS Code's built-in defaults on fresh installs where
+ * `pinnedViewContainers` is empty.
  */
 async function hideActivityBarItems(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  // Only run once per installation to avoid fighting user customisations.
-  const APPLIED_KEY = 'activityBarHiddenConfiguredV3';
+  // Bumped to V5 — disables git entirely so SCM button never appears.
+  const APPLIED_KEY = 'activityBarHiddenConfiguredV5';
   if (context.globalState.get<boolean>(APPLIED_KEY, false)) {
     return;
   }
 
   try {
     const config = vscode.workspace.getConfiguration();
-    const current =
+
+    // Disable git entirely — users don't need it and it causes the SCM button
+    // to reappear even after hiding it via pinnedViewContainers.
+    await config.update('git.enabled', false, vscode.ConfigurationTarget.Global);
+    await config.update('git.decorations.enabled', false, vscode.ConfigurationTarget.Global);
+
+    // Complete authoritative list of all standard VS Code activity-bar containers.
+    // Only Explorer and Search stay visible; everything else is hidden.
+    const authoritative: PinnedContainer[] = [
+      { id: 'workbench.view.explorer',   pinned: true,  visible: true,  order: 0 },
+      { id: 'workbench.view.search',     pinned: true,  visible: true,  order: 1 },
+      { id: 'workbench.view.scm',        pinned: false, visible: false, order: 2 },
+      { id: 'workbench.view.debug',      pinned: false, visible: false, order: 3 },
+      { id: 'workbench.view.extensions', pinned: false, visible: false, order: 4 },
+      { id: 'workbench.view.remote',     pinned: false, visible: false, order: 5 },
+    ];
+
+    // Preserve any extra containers the user may have added (e.g. third-party
+    // extensions) so we don't accidentally remove them.
+    const existing =
       config.get<PinnedContainer[]>('workbench.activityBar.pinnedViewContainers') ?? [];
-
-    // Clone array so we can mutate safely.
-    const updated: PinnedContainer[] = current.map(c => ({ ...c }));
-
-    for (const id of HIDDEN_ACTIVITY_BAR_IDS) {
-      const entry = updated.find(c => c.id === id);
-      if (entry) {
-        entry.visible = false;
-        entry.pinned = false;
-      } else {
-        updated.push({ id, pinned: false, visible: false });
+    const knownIds = new Set(authoritative.map(c => c.id));
+    for (const c of existing) {
+      if (!knownIds.has(c.id)) {
+        authoritative.push({ ...c });
       }
     }
 
     await config.update(
       'workbench.activityBar.pinnedViewContainers',
-      updated,
+      authoritative,
       vscode.ConfigurationTarget.Global,
     );
 
     await context.globalState.update(APPLIED_KEY, true);
   } catch {
-    // Non-fatal — wrapper's settings.json defaults already cover most cases.
+    // Non-fatal — settings.json defaults already cover most cases.
   }
 }
 
@@ -136,55 +143,110 @@ async function openOpenClawFolder(): Promise<void> {
   await vscode.commands.executeCommand('vscode.openFolder', workspaceFileUri);
 }
 
-/**
- * Cross-platform guide the AI can follow to install Node.js if it is missing
- * or too old on the user's machine.
- */
-function nodeInstallGuide(platform: string): string {
-  if (platform === 'win32') {
-    return [
-      `**Installing Node.js on Windows (choose one):**`,
-      `- **winget** (built into Windows 10+): \`winget install OpenJS.NodeJS.LTS\``,
-      `- **Chocolatey**: \`choco install nodejs-lts\``,
-      `- **Scoop**: \`scoop install nodejs-lts\``,
-      `- **nvm-windows**: download from https://github.com/coreybutler/nvm-windows/releases, then \`nvm install lts && nvm use lts\``,
-      `- **Volta**: \`winget install Volta.Volta\` then \`volta install node\``,
-      `- **Direct installer**: download the Windows MSI from https://nodejs.org/en/download/ (LTS recommended)`,
-      `After installing Node.js, open a **new** terminal and verify with \`node --version\` and \`npm --version\`.`,
-      `Then re-run the OpenClaw installer.`,
-    ].join('\n');
+
+// ── Inference balance status bar ──────────────────────────────────────────────
+const BALANCE_KEY = 'inferenceBalanceV1';
+const BALANCE_CAP = 1.00;
+
+function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => void {
+  let balance = context.globalState.get<number>(BALANCE_KEY, BALANCE_CAP);
+  // displayBalance is what's shown — animated separately from the true balance
+  let displayBalance = balance;
+  let animTimer: ReturnType<typeof setInterval> | undefined;
+
+  const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 16);
+  bar.command = 'openclaw.balance.details';
+  bar.name = 'OCC Free Tier';
+  context.subscriptions.push(bar);
+
+  function renderAt(value: number): void {
+    const pct = Math.max(0, value / BALANCE_CAP);
+    const filled = Math.round(pct * 10);
+    const track = '█'.repeat(filled) + '░'.repeat(10 - filled);
+
+    bar.text = `$(credit-card) $${value.toFixed(4)}`;
+
+    const tip = new vscode.MarkdownString(undefined, true);
+    tip.isTrusted = true;
+    tip.appendMarkdown(
+      `**OCC Free Tier**\n\n` +
+      `\`${track}\`  **$${value.toFixed(4)}** of $${BALANCE_CAP.toFixed(2)} remaining\n\n` +
+      `_$1 should typically last you for more than a week._`
+    );
+    bar.tooltip = tip;
+
+    if (pct > 0.5) {
+      bar.color = undefined;
+      bar.backgroundColor = undefined;
+    } else if (pct > 0.2) {
+      bar.color = new vscode.ThemeColor('statusBarItem.warningForeground');
+      bar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    } else {
+      bar.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+      bar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    }
+    bar.show();
   }
-  if (platform === 'darwin') {
-    return [
-      `**Installing Node.js on macOS (choose one):**`,
-      `- **Homebrew** (recommended): \`brew install node@lts\` or \`brew install node\``,
-      `- **nvm** (manages multiple versions):`,
-      `  \`curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash\``,
-      `  then restart the shell and run \`nvm install --lts && nvm use --lts\``,
-      `- **Volta**: \`curl https://get.volta.sh | bash\` then \`volta install node\``,
-      `- **Direct installer**: download the macOS pkg from https://nodejs.org/en/download/ (LTS recommended)`,
-      `After installing, open a **new** terminal and verify with \`node --version\` and \`npm --version\`.`,
-      `Then re-run the OpenClaw installer.`,
-    ].join('\n');
+
+  function animateTo(from: number, to: number): void {
+    if (animTimer !== undefined) { clearInterval(animTimer); }
+    const DURATION = 380; // ms
+    const FPS = 60;
+    const STEP = 1000 / FPS;
+    const start = Date.now();
+    animTimer = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const t = Math.min(elapsed / DURATION, 1);
+      // Ease-out cubic: decelerates as it approaches the target
+      const eased = 1 - Math.pow(1 - t, 3);
+      displayBalance = from + (to - from) * eased;
+      renderAt(displayBalance);
+      if (t >= 1) {
+        clearInterval(animTimer!);
+        animTimer = undefined;
+        displayBalance = to;
+        renderAt(to);
+      }
+    }, STEP);
   }
-  // Linux
-  return [
-    `**Installing Node.js on Linux (choose one):**`,
-    `- **Debian / Ubuntu / Mint**: \`sudo apt update && sudo apt install -y nodejs npm\``,
-    `  (for latest LTS via NodeSource: \`curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash - && sudo apt install -y nodejs\`)`,
-    `- **RHEL / CentOS / Fedora / Rocky**: \`sudo dnf install -y nodejs\``,
-    `  (for latest LTS via NodeSource: \`curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash - && sudo dnf install -y nodejs\`)`,
-    `- **Arch / Manjaro**: \`sudo pacman -S nodejs npm\``,
-    `- **Alpine**: \`apk add nodejs npm\``,
-    `- **nvm** (distro-agnostic, no sudo):`,
-    `  \`curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash\``,
-    `  then restart the shell and run \`nvm install --lts && nvm use --lts\``,
-    `- **Volta**: \`curl https://get.volta.sh | bash\` then \`volta install node\``,
-    `After installing, verify with \`node --version\` and \`npm --version\`, then re-run the OpenClaw installer.`,
-  ].join('\n');
+
+  function spend(amount: number = 0.0001): void {
+    const prev = displayBalance;
+    balance = Math.max(0, +(balance - amount).toFixed(6));
+    void context.globalState.update(BALANCE_KEY, balance);
+    animateTo(prev, balance);
+  }
+
+  renderAt(balance);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openclaw.balance.spend', (amount?: number) => {
+      spend(amount);
+    }),
+    vscode.commands.registerCommand('openclaw.balance.details', () => {
+      const pct = balance / BALANCE_CAP;
+      const statusLine =
+        pct > 0.5 ? `You have $${balance.toFixed(4)} remaining — you're in good shape.` :
+        pct > 0.2 ? `Running low — $${balance.toFixed(4)} of your $1.00 free credit left.` :
+                    `Almost depleted — $${balance.toFixed(4)} remaining.`;
+      vscode.window.showInformationMessage(
+        `OCC Free Tier · ${statusLine} $1 should typically last you for more than a week.`,
+        'Buy More Credits'
+      ).then(sel => {
+        if (sel === 'Buy More Credits') {
+          vscode.env.openExternal(vscode.Uri.parse('https://openclaw.ai/billing'));
+        }
+      });
+    }),
+  );
+
+  return spend;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  // Inference balance bar (shown at bottom-right, tracks $1.00 free budget).
+  const spendBalance = initBalanceBar(context);
+
   // Apply hidden activity bar items on first activation on this machine.
   await hideActivityBarItems(context);
 
@@ -207,6 +269,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           `\`\`\`\nopenclaw gateway start\n\`\`\`\n\n` +
           `Once it is running, I will be able to open the configuration UI at ${CONFIG_URL} inside the editor.`;
         await vscode.commands.executeCommand('void.openChatWithMessage', message);
+        spendBalance();
       }
     }),
     vscode.commands.registerCommand('openclaw.aiFixConfig', () => {
@@ -226,30 +289,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         `and provide a corrected version with an explanation of what you changed.\n\n` +
         `\`\`\`json\n${configContent}\n\`\`\``;
       vscode.commands.executeCommand('void.openChatWithMessage', message);
+      spendBalance();
     }),
-    vscode.commands.registerCommand('openclaw.install', async () => {
-      const platform = process.platform === 'darwin' ? 'macOS'
-        : process.platform === 'win32' ? 'Windows' : 'Linux';
-      const message = [
-        `Please install OpenClaw on this ${platform} computer on my behalf.`,
-        ``,
-        `Follow these steps:`,
-        `1. Use the terminal tool to run \`npm install -g openclaw\`.`,
-        `2. If the install fails with a permission error (EACCES or "permission denied"),`,
-        `   tell me you need my system password and ask me to type it here in the chat.`,
-        `   Then use it by running: \`echo "THE_PASSWORD" | sudo -S npm install -g openclaw\`.`,
-        `   Do not repeat or display my password back to me at any point.`,
-        `3. Once installed, confirm it worked by running \`openclaw --version\`.`,
-        ``,
-        `Do not give me commands to run myself — you must run everything for me.`,
-      ].join('\n');
-      try {
-        // Open the Void sidebar first, then send the message
-        await vscode.commands.executeCommand('void.sidebar.open');
-        await vscode.commands.executeCommand('void.openChatWithMessage', message);
-      } catch (err) {
-        vscode.window.showErrorMessage(`Could not open AI chat: ${err}`);
-      }
+    vscode.commands.registerCommand('openclaw.install', () => {
+      void HomePanel.runInstall(
+        context.extensionUri,
+        process.platform,
+        process.arch,
+        process.env.SHELL ?? '',
+      );
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();

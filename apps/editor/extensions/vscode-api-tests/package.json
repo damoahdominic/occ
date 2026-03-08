@@ -232,19 +232,7 @@
           }
         ]
       }
-    ],
-    "statusBarItems": {
-      "id": "myStaticItem",
-      "alignment": "right",
-      "priority": 17,
-      "name": "My Static Item",
-      "text": "Hello $(globe)",
-      "tooltip": "Hover World",
-      "accessibilityInformation": {
-        "label": "Hello World",
-        "role": "button"
-      }
-    }
+    ]
   },
   "scripts": {
     "compile": "node ./node_modules/vscode/bin/compile -watch -p ./",

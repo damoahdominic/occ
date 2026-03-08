@@ -235,6 +235,12 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 			placeholder: '(never)',
 		}
 	}
+	else if (settingName === 'deviceId') {
+		return {
+			title: '(never)',
+			placeholder: '(never)',
+		}
+	}
 
 	throw new Error(`displayInfo: Unknown setting name: "${settingName}"`)
 }
