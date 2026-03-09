@@ -33,6 +33,8 @@ const isFalsy = (u: unknown) => {
 
 const validateStr = (argName: string, value: unknown) => {
 	if (value === null) throw new Error(`Invalid LLM output: ${argName} was null.`)
+	// LLMs occasionally return an array of strings instead of a single string — coerce gracefully.
+	if (Array.isArray(value)) return value.join('\n')
 	if (typeof value !== 'string') throw new Error(`Invalid LLM output format: ${argName} must be a string, but its type is "${typeof value}". Full value: ${JSON.stringify(value)}.`)
 	return value
 }
