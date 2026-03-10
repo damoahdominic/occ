@@ -66,8 +66,8 @@ export const defaultProviderSettings = {
 		endpoint: '', // optionally allow overriding default
 	},
 	ocFreeModel: {
-		endpoint: 'https://inference.mba.sh/v1',
-		apiKey: 'sk-moltpilot-prod',
+		endpoint: (typeof process !== 'undefined' && process.env?.OCC_INFERENCE_ENDPOINT) || '',
+		apiKey: (typeof process !== 'undefined' && process.env?.OCC_INFERENCE_API_KEY) || '',
 		deviceId: '',
 	},
 

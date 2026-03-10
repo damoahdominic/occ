@@ -163,7 +163,7 @@ export class HomePanel {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'openclawHome', 'OpenClaw Home', vscode.ViewColumn.One,
+      'openclawHome', 'OCC Home', vscode.ViewColumn.One,
       { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] }
     );
     HomePanel.currentPanel = new HomePanel(panel, extensionUri);
@@ -677,8 +677,8 @@ export class HomePanel {
     const providerFlags: Record<string, string[]> = {
       free: [
         '--auth-choice', 'custom-api-key',
-        '--custom-base-url', 'https://inference.mba.sh/v1',
-        '--custom-api-key', 'sk-moltpilot-prod',
+        '--custom-base-url', process.env.OCC_INFERENCE_ENDPOINT || '',
+        '--custom-api-key', process.env.OCC_INFERENCE_API_KEY || '',
         '--custom-model-id', 'moltpilot',
         '--custom-compatibility', 'openai',
       ],
@@ -1080,7 +1080,7 @@ export class HomePanel {
       align-items: center;
       justify-content: flex-start;
       min-height: 100vh;
-      padding: 16px clamp(12px, 4vw, 24px) 20px;
+      padding: 70px clamp(12px, 4vw, 24px) 20px;
       text-align: center;
     }
 
@@ -1348,7 +1348,8 @@ export class HomePanel {
     .more-menu-btn {
       display: flex;
       align-items: center;
-      gap: 5px;
+      justify-content: space-between;
+      gap: 8px;
       background: rgba(255,255,255,0.05);
       border: 1px solid rgba(255,255,255,0.1);
       color: #aaa;
@@ -1505,8 +1506,8 @@ export class HomePanel {
   <!-- More Options menu (fixed top-right) -->
   ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
     <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
       More Options
+      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
     <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
       <div class="more-menu-section">
