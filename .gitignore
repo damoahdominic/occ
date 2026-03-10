@@ -4,3 +4,13 @@ dist/
 *.vsix
 .DS_Store
 apps/editor/.build/
+
+# Internal infrastructure docs — keep private
+APPLE.md
+AZURE.md
+SYSTEMS.md
+ISsues
+
+# Local secrets
+.env
+.env.local

@@ -110,6 +110,8 @@ jobs:
         run: node_modules/.bin/gulp bundle-vscode
         env:
           NODE_OPTIONS: --max-old-space-size=7168
+          OCC_INFERENCE_ENDPOINT: ${{ secrets.OCC_INFERENCE_ENDPOINT }}
+          OCC_INFERENCE_API_KEY: ${{ secrets.OCC_INFERENCE_API_KEY }}
 
       - name: Minify (out-vscode -> out-vscode-min)
         working-directory: apps/editor
@@ -312,6 +314,8 @@ jobs:
         run: node_modules/.bin/gulp bundle-vscode
         env:
           NODE_OPTIONS: --max-old-space-size=7168
+          OCC_INFERENCE_ENDPOINT: ${{ secrets.OCC_INFERENCE_ENDPOINT }}
+          OCC_INFERENCE_API_KEY: ${{ secrets.OCC_INFERENCE_API_KEY }}
 
       - name: Minify (out-vscode -> out-vscode-min)
         working-directory: apps/editor
@@ -514,6 +518,8 @@ jobs:
         run: node_modules/.bin/gulp bundle-vscode
         env:
           NODE_OPTIONS: --max-old-space-size=7168
+          OCC_INFERENCE_ENDPOINT: ${{ secrets.OCC_INFERENCE_ENDPOINT }}
+          OCC_INFERENCE_API_KEY: ${{ secrets.OCC_INFERENCE_API_KEY }}
 
       - name: Minify (out-vscode -> out-vscode-min)
         working-directory: apps/editor
@@ -716,6 +722,8 @@ jobs:
         run: node_modules/.bin/gulp bundle-vscode
         env:
           NODE_OPTIONS: --max-old-space-size=7168
+          OCC_INFERENCE_ENDPOINT: ${{ secrets.OCC_INFERENCE_ENDPOINT }}
+          OCC_INFERENCE_API_KEY: ${{ secrets.OCC_INFERENCE_API_KEY }}
 
       - name: Minify (out-vscode -> out-vscode-min)
         working-directory: apps/editor

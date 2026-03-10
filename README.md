@@ -1,62 +1,57 @@
-# OCcode
+# OCC — AI-native code editor
 
-**AI-native open-source code editor** for [OpenClaw](https://openclaw.ai), built on a fork of [Void](https://github.com/voideditor/void) (which is itself an open-source VS Code fork with built-in AI coding agent).
+OCC is a free, open-source AI code editor built for everyone — no technical setup required.
+It is based on [Void](https://github.com/voideditor/void), an open-source VS Code fork with built-in AI agent, chat, and inline edits.
 
-## Architecture
+[![Build](https://github.com/ninjaa/occ/actions/workflows/build-macos.yml/badge.svg)](https://github.com/ninjaa/occ/actions/workflows/build-macos.yml)
 
-```
-editor/           # Void fork (git submodule → github.com/ninjaa/void)
-                  #   Full VS Code fork with AI agent, chat, inline edits
-apps/
-  extension/      # OpenClaw VS Code extension — Home screen, Setup wizard, Status panel
-  web/            # OCcode marketing website
-  wrapper/        # Legacy Electron wrapper (VSCodium-based, being replaced by editor/)
-packages/
-  control-center/ # OpenClaw control center UI components
-scripts/          # Build & packaging scripts
-```
+## Features
 
-## Getting Started
+- AI chat, inline edits, and agentic code execution built in
+- **OCC Free Tier** — $1 of free inference, no API key needed
+- **Bring Your Own Key** — connect Anthropic, OpenAI, OpenRouter, Ollama, and more
+- Ships as a native desktop app for macOS (Apple Silicon + Intel), Windows, and Linux
 
-### Editor (Void fork — new base)
+## Repository structure
 
+| Path | Description |
+|------|-------------|
+| `apps/editor` | OCC editor (Void/VS Code fork — full source) |
+| `apps/web` | Marketing website (Next.js) |
+| `apps/extension` | OpenClaw VS Code extension bundled in the editor |
+| `packages/control-center` | Shared React UI components |
+
+## Getting started
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full build instructions.
+
+**Quick start — website:**
 ```bash
-cd editor
-# Follow Void's build instructions in VOID_CODEBASE_GUIDE.md
+npm install && npm run web   # http://localhost:3000
 ```
 
-### Extension (OpenClaw integration)
-
+**Quick start — editor (requires Node 20.18.2):**
 ```bash
-cd apps/extension
-npm install
-npm run compile
+cd apps/editor
+npm ci --ignore-scripts
+node_modules/.bin/gulp transpile-client-esbuild
+cd extensions/openclaw && npx tsc -p ./ && cd ../..
+# Launch on macOS:
+VSCODE_SKIP_PRELAUNCH=1 NODE_ENV=development VSCODE_DEV=1 \
+  ./.build/electron/OCcode.app/Contents/MacOS/Electron .
 ```
 
-### Website
+## Contributing
 
-```bash
-cd apps/web
-npm install
-npm run dev
-```
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-### Legacy Wrapper (Electron — being phased out)
+## Security
 
-```bash
-cd apps/wrapper
-npm install
-npm start
-```
-
-## Roadmap
-
-- [x] Fork Void as editor base (`editor/` submodule)
-- [ ] Integrate OpenClaw extension into Void's extension host
-- [ ] Rebrand Void → OCcode (icons, product.json, splash)
-- [ ] Remove legacy VSCodium wrapper (`apps/wrapper/`)
-- [ ] Ship cross-platform builds (Win/Mac/Linux)
+To report a security vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE)
+
+> The underlying VS Code and Void codebases are licensed under MIT.
+> OpenClaw's API/billing layer is a separate closed-source service.
