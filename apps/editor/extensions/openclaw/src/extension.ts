@@ -5,7 +5,6 @@ import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
-import { OnboardingPanel } from './panels/onboarding';
 import { StatusPanel } from './panels/status';
 import { ConfigPanel, stopConfigProxy } from './panels/config';
 
@@ -256,7 +255,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      HomePanel.createOrShow(context.extensionUri, context);
+      HomePanel.createOrShow(context.extensionUri);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const reachable = await isWebServerReachable();
@@ -350,13 +349,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }).catch(() => {}); // silent — never block the app
   }
 
-  // Auto-show on startup: onboarding on first launch, OCC Home on subsequent launches.
+  // ── Walkthrough commands ────────────────────────────────────────────────────
+  const WALKTHROUGH_DONE_KEY = 'occ.walkthroughDone';
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('occ.onboarding.chooseMoltPilot', async () => {
+      await context.globalState.update('occ.aiPreference', 'moltpilot');
+      vscode.window.showInformationMessage(
+        'MoltPilot selected — sign up at MBA.sh to activate your $5 free credits.',
+        'Open MBA.sh'
+      ).then(sel => {
+        if (sel === 'Open MBA.sh') {
+          vscode.env.openExternal(vscode.Uri.parse('https://mba.sh/signup?ref=occ-editor'));
+        }
+      });
+    }),
+
+    vscode.commands.registerCommand('occ.onboarding.chooseBYOK', async () => {
+      const providers = ['Anthropic Claude', 'OpenAI', 'OpenRouter', 'Google Gemini', 'Ollama'];
+      const pick = await vscode.window.showQuickPick(providers, {
+        placeHolder: 'Which provider would you like to use?',
+      });
+      if (pick) {
+        await context.globalState.update('occ.aiPreference', pick.toLowerCase().replace(/\s+/g, '-'));
+        vscode.window.showInformationMessage(
+          `${pick} selected — you'll enter your API key when you install OpenClaw from OCC Home.`,
+        );
+      }
+    }),
+
+    vscode.commands.registerCommand('occ.onboarding.darkTheme', async () => {
+      await vscode.workspace.getConfiguration('workbench').update(
+        'colorTheme', 'OpenClaw Dark', vscode.ConfigurationTarget.Global,
+      );
+    }),
+
+    vscode.commands.registerCommand('occ.onboarding.lightTheme', async () => {
+      await vscode.workspace.getConfiguration('workbench').update(
+        'colorTheme', 'OpenClaw Light', vscode.ConfigurationTarget.Global,
+      );
+    }),
+  );
+
+  // Auto-show Home panel on startup (after activation settles).
+  // On first launch also open the Get Started walkthrough.
   setTimeout(() => {
-    const shown = OnboardingPanel.showIfNeeded(context, context.extensionUri);
-    if (!shown) {
-      HomePanel.createOrShow(context.extensionUri, context);
+    HomePanel.createOrShow(context.extensionUri);
+    const walkthroughDone = context.globalState.get<boolean>(WALKTHROUGH_DONE_KEY) ?? false;
+    if (!walkthroughDone) {
+      void context.globalState.update(WALKTHROUGH_DONE_KEY, true);
+      void vscode.commands.executeCommand(
+        'workbench.action.openWalkthrough',
+        { category: 'openclaw.occGettingStarted', step: 'chooseAI' },
+        false,
+      );
     }
-  }, 250);
+  }, 500);
 }
 
 export function deactivate() {

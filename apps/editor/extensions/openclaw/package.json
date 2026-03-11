@@ -38,6 +38,39 @@
 				"path": "./themes/openclaw-light.json"
 			}
 		],
+		"walkthroughs": [
+			{
+				"id": "occGettingStarted",
+				"title": "Get Started with OCC",
+				"description": "Set up your AI and theme in two quick steps.",
+				"steps": [
+					{
+						"id": "chooseAI",
+						"title": "Choose your AI",
+						"description": "Pick MoltPilot free credits or connect your own API key.",
+						"media": {
+							"markdown": "./walkthrough/chooseAI.md"
+						},
+						"completionEvents": [
+							"onCommand:occ.onboarding.chooseMoltPilot",
+							"onCommand:occ.onboarding.chooseBYOK"
+						]
+					},
+					{
+						"id": "chooseTheme",
+						"title": "Choose your theme",
+						"description": "Pick OCC Dark or OCC Light — you can change this any time.",
+						"media": {
+							"markdown": "./walkthrough/chooseTheme.md"
+						},
+						"completionEvents": [
+							"onCommand:occ.onboarding.darkTheme",
+							"onCommand:occ.onboarding.lightTheme"
+						]
+					}
+				]
+			}
+		],
 		"keybindings": [
 			{
 				"command": "openclaw.home",
