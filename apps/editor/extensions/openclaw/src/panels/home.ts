@@ -39,6 +39,7 @@ export class HomePanel {
   private static _installTerminal: vscode.Terminal | undefined;
   /** Resolves with the password (or undefined on cancel) when the webview modal submits. */
   private static _pendingPasswordResolve: ((pwd: string | undefined) => void) | undefined;
+  private static _context: vscode.ExtensionContext | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
@@ -89,6 +90,14 @@ export class HomePanel {
       } else if (msg.command === 'setTheme') {
         const theme = msg.theme as string;
         void vscode.workspace.getConfiguration('workbench').update('colorTheme', theme, vscode.ConfigurationTarget.Global);
+      } else if (msg.command === 'occOnboarding') {
+        // OCC onboarding complete — save AI preference and go to OCC Home.
+        const aiPreference = msg.aiPreference as string | undefined;
+        if (aiPreference) {
+          void HomePanel._context?.globalState.update('occ.aiPreference', aiPreference);
+        }
+        void HomePanel._context?.globalState.update('occ.onboardingDone', true);
+        HomePanel.refresh();
       } else if (msg.command === 'sudoPassword') {
         // Password modal submitted or cancelled from the webview.
         HomePanel._pendingPasswordResolve?.(msg.password as string | undefined);
@@ -160,7 +169,8 @@ export class HomePanel {
     }, null, this._disposables);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri) {
+  public static createOrShow(extensionUri: vscode.Uri, context?: vscode.ExtensionContext) {
+    if (context) { HomePanel._context = context; }
     if (HomePanel.currentPanel) {
       HomePanel.currentPanel._panel.reveal();
       return;
@@ -360,12 +370,7 @@ export class HomePanel {
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
 
-    // Show setup wizard when CLI is present but not yet configured.
-    if (isInstalled && !isConfigured) {
-      this._panel.webview.html = this._getWizardHtml(iconUri.toString());
-    } else {
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
-    }
+    this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
     // Kick off gateway status polling now that the webview is ready.
     this._startPolling();
   }
@@ -780,7 +785,7 @@ export class HomePanel {
     });
   }
 
-  private _getWizardHtml(iconUri: string): string {
+  private _getOnboardingHtml(iconUri: string): string {
     const providers = [
       { id: 'anthropic',  label: 'Anthropic Claude', hint: 'console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
       { id: 'openai',     label: 'OpenAI',           hint: 'platform.openai.com/api-keys',        placeholder: 'sk-...' },
@@ -991,21 +996,17 @@ export class HomePanel {
     </div>
   </div>
 
-  <!-- Step 2: API key + port (BYOK only) -->
+  <!-- Step 2: Confirm provider (BYOK only) — key entry happens in OCC Home -->
   <div id="step2" class="step" style="display:none">
     <p class="step-label">Step 2 of 2</p>
-    <h2 id="step2-title">Enter your API Key</h2>
-    <p class="step-desc" id="step2-desc">Your API key is stored locally in <code>~/.openclaw/openclaw.json</code>.</p>
-    <p class="field-label">API Key</p>
-    <input id="api-key" class="key-input" type="password" placeholder="sk-..." autocomplete="off" oninput="validateStep2()" />
-    <p class="key-hint" id="key-hint">Get your key at <span id="key-link"></span></p>
-    <div class="port-row">
-      <span class="port-label">Gateway port</span>
-      <input id="gw-port" class="port-input" type="text" value="18789" placeholder="18789" />
-    </div>
+    <h2 id="step2-title">Almost there</h2>
+    <p class="step-desc" id="step2-desc">
+      You've chosen to use your own API key. Once OCC is set up you'll be
+      prompted to enter your key and connect your provider.
+    </p>
     <div class="btn-row">
       <button class="btn-back" onclick="goStep1()">← Back</button>
-      <button class="btn-primary" id="btn-run" onclick="collectAndShowTheme()" disabled>Continue →</button>
+      <button class="btn-primary" onclick="collectAndShowTheme()">Continue →</button>
     </div>
   </div>
 
@@ -1051,16 +1052,10 @@ export class HomePanel {
     </div>
   </div>
 
-  <!-- Step 4: Running setup -->
-  <div id="step3" class="step" style="display:none">
-    <h2><span class="dots">Setting up OpenClaw</span></h2>
-    <p class="run-status" id="run-status"></p>
-  </div>
-
   <script>
     const vscode = acquireVsCodeApi();
     let selectedProvider = null;
-    let pendingSetup = null; // holds setup data while theme step is shown
+    let aiPreference = null; // 'moltpilot' or the chosen BYOK provider id
 
     function goStep0() {
       ['step1','step2','step-theme'].forEach(id => document.getElementById(id).style.display = 'none');
@@ -1068,7 +1063,7 @@ export class HomePanel {
     }
 
     function chooseFree() {
-      pendingSetup = { provider: 'free', apiKey: '', port: '18789' };
+      aiPreference = 'moltpilot';
       showThemeStep('step0');
     }
 
@@ -1096,10 +1091,8 @@ export class HomePanel {
     }
 
     function collectAndShowTheme() {
-      const apiKey = document.getElementById('api-key').value.trim();
-      const port = document.getElementById('gw-port').value.trim() || '18789';
-      if (!apiKey || !selectedProvider) return;
-      pendingSetup = { provider: selectedProvider, apiKey, port };
+      if (!selectedProvider) return;
+      aiPreference = selectedProvider;
       showThemeStep('step2');
     }
 
@@ -1110,9 +1103,8 @@ export class HomePanel {
 
     function chooseTheme(theme) {
       vscode.postMessage({ command: 'setTheme', theme });
-      document.getElementById('step-theme').style.display = 'none';
-      document.getElementById('step3').style.display = '';
-      vscode.postMessage({ command: 'runSetup', ...pendingSetup });
+      // OCC onboarding complete — go to OCC Home. OpenClaw install happens from there.
+      vscode.postMessage({ command: 'occOnboarding', aiPreference });
     }
 
     function goStep1() {
