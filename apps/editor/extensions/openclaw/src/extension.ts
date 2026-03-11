@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
+import { OnboardingPanel } from './panels/onboarding';
 import { StatusPanel } from './panels/status';
 import { ConfigPanel, stopConfigProxy } from './panels/config';
 
@@ -255,7 +256,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      HomePanel.createOrShow(context.extensionUri);
+      HomePanel.createOrShow(context.extensionUri, context);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const reachable = await isWebServerReachable();
@@ -349,9 +350,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }).catch(() => {}); // silent — never block the app
   }
 
-  // Auto-show Home panel on startup (after activation settles)
+  // Auto-show on startup: onboarding on first launch, OCC Home on subsequent launches.
   setTimeout(() => {
-    HomePanel.createOrShow(context.extensionUri);
+    const shown = OnboardingPanel.showIfNeeded(context, context.extensionUri);
+    if (!shown) {
+      HomePanel.createOrShow(context.extensionUri, context);
+    }
   }, 250);
 }
 
