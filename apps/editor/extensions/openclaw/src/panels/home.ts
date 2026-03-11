@@ -39,7 +39,6 @@ export class HomePanel {
   private static _installTerminal: vscode.Terminal | undefined;
   /** Resolves with the password (or undefined on cancel) when the webview modal submits. */
   private static _pendingPasswordResolve: ((pwd: string | undefined) => void) | undefined;
-  private static _context: vscode.ExtensionContext | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
@@ -87,17 +86,6 @@ export class HomePanel {
         void this._checkLatestVersion();
       } else if (msg.command === 'runSetup') {
         void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
-      } else if (msg.command === 'setTheme') {
-        const theme = msg.theme as string;
-        void vscode.workspace.getConfiguration('workbench').update('colorTheme', theme, vscode.ConfigurationTarget.Global);
-      } else if (msg.command === 'occOnboarding') {
-        // OCC onboarding complete — save AI preference and go to OCC Home.
-        const aiPreference = msg.aiPreference as string | undefined;
-        if (aiPreference) {
-          void HomePanel._context?.globalState.update('occ.aiPreference', aiPreference);
-        }
-        void HomePanel._context?.globalState.update('occ.onboardingDone', true);
-        HomePanel.refresh();
       } else if (msg.command === 'sudoPassword') {
         // Password modal submitted or cancelled from the webview.
         HomePanel._pendingPasswordResolve?.(msg.password as string | undefined);
@@ -169,8 +157,7 @@ export class HomePanel {
     }, null, this._disposables);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri, context?: vscode.ExtensionContext) {
-    if (context) { HomePanel._context = context; }
+  public static createOrShow(extensionUri: vscode.Uri) {
     if (HomePanel.currentPanel) {
       HomePanel.currentPanel._panel.reveal();
       return;
@@ -370,7 +357,12 @@ export class HomePanel {
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
 
-    this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+    // Show setup wizard when CLI is present but not yet configured.
+    if (isInstalled && !isConfigured) {
+      this._panel.webview.html = this._getWizardHtml(iconUri.toString());
+    } else {
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+    }
     // Kick off gateway status polling now that the webview is ready.
     this._startPolling();
   }
@@ -785,7 +777,7 @@ export class HomePanel {
     });
   }
 
-  private _getOnboardingHtml(iconUri: string): string {
+  private _getWizardHtml(iconUri: string): string {
     const providers = [
       { id: 'anthropic',  label: 'Anthropic Claude', hint: 'console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
       { id: 'openai',     label: 'OpenAI',           hint: 'platform.openai.com/api-keys',        placeholder: 'sk-...' },
@@ -911,33 +903,6 @@ export class HomePanel {
     /* Progress dots */
     @keyframes dots { 0%,100%{content:''} 33%{content:'.'} 66%{content:'..'} 100%{content:'...'} }
     .dots::after { content: ''; animation: dots 1.2s steps(1) infinite; }
-    /* Theme step */
-    .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
-    .theme-card {
-      background: transparent; border: 2px solid #2b2b2b; border-radius: 10px;
-      padding: 14px 14px 12px; cursor: pointer; text-align: left;
-      transition: border-color 0.15s, background 0.15s;
-      display: flex; flex-direction: column; gap: 8px;
-    }
-    .theme-card:hover { border-color: #dc2828; background: rgba(220,40,40,0.05); }
-    .theme-preview {
-      width: 100%; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden;
-      display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.06);
-    }
-    .dark-preview { background: #1a1a1a; }
-    .light-preview { background: #f5f5f5; border-color: rgba(0,0,0,0.1); }
-    .tp-titlebar { height: 14%; background: #dc2828; flex-shrink: 0; }
-    .light-preview .tp-titlebar { background: #dc2828; }
-    .tp-body { flex: 1; display: flex; overflow: hidden; }
-    .tp-sidebar { width: 22%; background: rgba(255,255,255,0.04); border-right: 1px solid rgba(255,255,255,0.06); }
-    .light-preview .tp-sidebar { background: #ebebeb; border-right-color: #e0e0e0; }
-    .tp-editor { flex: 1; padding: 8% 10%; display: flex; flex-direction: column; gap: 6%; }
-    .tp-line { height: 8%; border-radius: 2px; background: rgba(255,255,255,0.12); }
-    .light-preview .tp-line { background: rgba(0,0,0,0.12); }
-    .tp-line.accent { background: #dc2828; opacity: 0.7; }
-    .tp-statusbar { height: 12%; background: #dc2828; flex-shrink: 0; }
-    .theme-label { font-size: 13px; font-weight: 600; color: #e0e0e0; }
-    .theme-sub { font-size: 11px; color: #555; }
   </style>
 </head>
 <body>
@@ -945,15 +910,15 @@ export class HomePanel {
   <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
   <p class="subtitle">OpenClaw is installed. Let's get you connected to an AI.</p>
 
-  <!-- Step 0: MoltPilot vs BYOK -->
+  <!-- Step 0: Free vs BYOK -->
   <div id="step0" class="step">
-    <h2>Choose your AI</h2>
-    <p class="step-desc">How would you like to power OpenClaw?</p>
+    <h2>Get started</h2>
+    <p class="step-desc">How would you like to connect?</p>
     <div class="tier-grid">
-      <!-- MoltPilot card -->
+      <!-- Free card -->
       <div class="tier-card free-card">
-        <div class="tier-price">$5<span class="tier-unit"> free to start</span></div>
-        <div class="tier-sub">MoltPilot's AI Brain, powered by MBA.sh.<br>Sign up required. No card needed.</div>
+        <div class="tier-price">$1<span class="tier-unit"> to start</span></div>
+        <div class="tier-sub">We rent you our AI model.<br>Lasts about a week. No card needed.</div>
         <button class="tier-cta green" onclick="chooseFree()">Start Free →</button>
       </div>
       <!-- BYOK card -->
@@ -965,7 +930,7 @@ export class HomePanel {
           </div>
           <!-- OpenAI -->
           <div class="prov-icon" style="background:#fff;color:#000" title="OpenAI">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.28a5.998 5.998 0 0 0-.52-4.93 6.17 6.17 0 0 0-6.6-2.96A6.004 6.004 0 0 0 10.64 0a6.17 6.17 0 0 0-5.88 4.27 5.999 5.999 0 0 0-4 2.91 6.17 6.17 0 0 0 .76 7.22 6 6 0 0 0 .52 4.93 6.17 6.17 0 0 0 6.6 2.96 6 6 0 0 0 4.52 2.39 6.17 6.17 0 0 0 5.89-4.28 5.999 5.999 0 0 0 3.99-2.91 6.17 6.17 0 0 0-.76-7.21zm-9.28 12.98a4.57 4.57 0 0 1-2.93-1.06l.14-.08 4.87-2.81a.8.8 0 0 0 .4-.69v-6.87l2.06 1.19a.07.07 0 0 1 .04.06v5.69a4.6 4.6 0 0 1-4.58 4.57zm-9.87-4.2a4.57 4.57 0 0 1-.55-3.07l.15.09 4.86 2.81a.8.8 0 0 0 .79 0l5.94-3.43v2.38a.07.07 0 0 1-.03.06l-4.92 2.84a4.6 4.6 0 0 1-6.24-1.68zm-1.28-10.7a4.56 4.56 0 0 1 2.38-2l-.01.17v5.62a.8.8 0 0 0 .4.69l5.94 3.43-2.06 1.19a.07.07 0 0 1-.07 0L3.53 13.2a4.6 4.6 0 0 1-.68-6.84zm16.9 3.95l-5.94-3.43 2.06-1.19a.07.07 0 0 1 .07 0l4.92 2.84a4.59 4.59 0 0 1-.71 8.29v-5.79a.8.8 0 0 0-.4-.72zm2.05-3.08l-.15-.09-4.86-2.8a.8.8 0 0 0-.79 0L9.16 9.29V6.91a.07.07 0 0 1 .03-.06l4.92-2.84a4.59 4.59 0 0 1 6.84 4.76v.01zm-12.84 4.22L5.9 10.26a.07.07 0 0 1-.04-.06V4.51a4.59 4.57 0 0 1 7.53-3.52l-.14.08-4.87 2.81a.8.8 0 0 0-.4.69v6.87l-2.05-1.18zm1.11-2.41l2.65-1.53 2.65 1.53v3.05l-2.65 1.53-2.65-1.53V9.84z"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.28a5.998 5.998 0 0 0-.52-4.93 6.17 6.17 0 0 0-6.6-2.96A6.004 6.004 0 0 0 10.64 0a6.17 6.17 0 0 0-5.88 4.27 5.999 5.999 0 0 0-4 2.91 6.17 6.17 0 0 0 .76 7.22 6 6 0 0 0 .52 4.93 6.17 6.17 0 0 0 6.6 2.96 6 6 0 0 0 4.52 2.39 6.17 6.17 0 0 0 5.89-4.28 5.999 5.999 0 0 0 3.99-2.91 6.17 6.17 0 0 0-.76-7.21zm-9.28 12.98a4.57 4.57 0 0 1-2.93-1.06l.14-.08 4.87-2.81a.8.8 0 0 0 .4-.69v-6.87l2.06 1.19a.07.07 0 0 1 .04.06v5.69a4.6 4.6 0 0 1-4.58 4.57zm-9.87-4.2a4.57 4.57 0 0 1-.55-3.07l.15.09 4.86 2.81a.8.8 0 0 0 .79 0l5.94-3.43v2.38a.07.07 0 0 1-.03.06l-4.92 2.84a4.6 4.6 0 0 1-6.24-1.68zm-1.28-10.7a4.56 4.56 0 0 1 2.38-2l-.01.17v5.62a.8.8 0 0 0 .4.69l5.94 3.43-2.06 1.19a.07.07 0 0 1-.07 0L3.53 13.2a4.6 4.6 0 0 1-.68-6.84zm16.9 3.95l-5.94-3.43 2.06-1.19a.07.07 0 0 1 .07 0l4.92 2.84a4.59 4.59 0 0 1-.71 8.29v-5.79a.8.8 0 0 0-.4-.72zm2.05-3.08l-.15-.09-4.86-2.8a.8.8 0 0 0-.79 0L9.16 9.29V6.91a.07.07 0 0 1 .03-.06l4.92-2.84a4.59 4.59 0 0 1 6.84 4.76v.01zm-12.84 4.22L5.9 10.26a.07.07 0 0 1-.04-.06V4.51a4.59 4.59 0 0 1 7.53-3.52l-.14.08-4.87 2.81a.8.8 0 0 0-.4.69v6.87l-2.05-1.18zm1.11-2.41l2.65-1.53 2.65 1.53v3.05l-2.65 1.53-2.65-1.53V9.84z"/></svg>
           </div>
           <!-- OpenRouter -->
           <div class="prov-icon" style="background:#6366f1;color:#fff" title="OpenRouter">
@@ -976,10 +941,11 @@ export class HomePanel {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C9.91 6.55 6.55 9.91 2 12c4.55 2.09 7.91 5.45 10 10 2.09-4.55 5.45-7.91 10-10C17.45 9.91 14.09 6.55 12 2z"/></svg>
           </div>
         </div>
-        <div class="tier-sub" style="margin-bottom:14px">Use your own API key. Always free. No account needed.</div>
+        <div class="tier-sub" style="margin-bottom:14px">Use your own API key</div>
         <button class="tier-cta red" onclick="chooseBYOK()">Use My Key →</button>
       </div>
     </div>
+    <p class="tier-note">Free credit tracked locally. No account needed.</p>
   </div>
 
   <!-- Step 1: Choose provider (BYOK only) -->
@@ -996,75 +962,43 @@ export class HomePanel {
     </div>
   </div>
 
-  <!-- Step 2: Confirm provider (BYOK only) — key entry happens in OCC Home -->
+  <!-- Step 2: API key + port (BYOK only) -->
   <div id="step2" class="step" style="display:none">
     <p class="step-label">Step 2 of 2</p>
-    <h2 id="step2-title">Almost there</h2>
-    <p class="step-desc" id="step2-desc">
-      You've chosen to use your own API key. Once OCC is set up you'll be
-      prompted to enter your key and connect your provider.
-    </p>
+    <h2 id="step2-title">Enter your API Key</h2>
+    <p class="step-desc" id="step2-desc">Your API key is stored locally in <code>~/.openclaw/openclaw.json</code>.</p>
+    <p class="field-label">API Key</p>
+    <input id="api-key" class="key-input" type="password" placeholder="sk-..." autocomplete="off" oninput="validateStep2()" />
+    <p class="key-hint" id="key-hint">Get your key at <span id="key-link"></span></p>
+    <div class="port-row">
+      <span class="port-label">Gateway port</span>
+      <input id="gw-port" class="port-input" type="text" value="18789" placeholder="18789" />
+    </div>
     <div class="btn-row">
       <button class="btn-back" onclick="goStep1()">← Back</button>
-      <button class="btn-primary" onclick="collectAndShowTheme()">Continue →</button>
+      <button class="btn-primary" id="btn-run" onclick="runSetup()" disabled>Set Up OpenClaw</button>
     </div>
   </div>
 
-  <!-- Step 3: Choose Theme -->
-  <div id="step-theme" class="step" style="display:none">
-    <h2>Choose your theme</h2>
-    <p class="step-desc">Pick a look for OCC. You can change this any time in Settings.</p>
-    <div class="theme-grid">
-      <!-- Dark card -->
-      <button class="theme-card" onclick="chooseTheme('OpenClaw Dark')">
-        <div class="theme-preview dark-preview">
-          <div class="tp-titlebar"></div>
-          <div class="tp-body">
-            <div class="tp-sidebar"></div>
-            <div class="tp-editor">
-              <div class="tp-line" style="width:60%"></div>
-              <div class="tp-line accent" style="width:40%"></div>
-              <div class="tp-line" style="width:75%"></div>
-            </div>
-          </div>
-          <div class="tp-statusbar"></div>
-        </div>
-        <div class="theme-label">OCC Dark</div>
-        <div class="theme-sub">Dark background · Red accents</div>
-      </button>
-      <!-- Light card -->
-      <button class="theme-card" onclick="chooseTheme('OpenClaw Light')">
-        <div class="theme-preview light-preview">
-          <div class="tp-titlebar"></div>
-          <div class="tp-body">
-            <div class="tp-sidebar"></div>
-            <div class="tp-editor">
-              <div class="tp-line" style="width:60%"></div>
-              <div class="tp-line accent" style="width:40%"></div>
-              <div class="tp-line" style="width:75%"></div>
-            </div>
-          </div>
-          <div class="tp-statusbar"></div>
-        </div>
-        <div class="theme-label">OCC Light</div>
-        <div class="theme-sub">Light background · Red accents</div>
-      </button>
-    </div>
+  <!-- Step 3: Running -->
+  <div id="step3" class="step" style="display:none">
+    <h2><span class="dots">Setting up OpenClaw</span></h2>
+    <p class="run-status" id="run-status"></p>
   </div>
 
   <script>
     const vscode = acquireVsCodeApi();
     let selectedProvider = null;
-    let aiPreference = null; // 'moltpilot' or the chosen BYOK provider id
 
     function goStep0() {
-      ['step1','step2','step-theme'].forEach(id => document.getElementById(id).style.display = 'none');
+      document.getElementById('step1').style.display = 'none';
       document.getElementById('step0').style.display = '';
     }
 
     function chooseFree() {
-      aiPreference = 'moltpilot';
-      showThemeStep('step0');
+      document.getElementById('step0').style.display = 'none';
+      document.getElementById('step3').style.display = '';
+      vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: '', port: '18789' });
     }
 
     function chooseBYOK() {
@@ -1090,23 +1024,6 @@ export class HomePanel {
       document.getElementById('api-key').focus();
     }
 
-    function collectAndShowTheme() {
-      if (!selectedProvider) return;
-      aiPreference = selectedProvider;
-      showThemeStep('step2');
-    }
-
-    function showThemeStep(fromStep) {
-      document.getElementById(fromStep).style.display = 'none';
-      document.getElementById('step-theme').style.display = '';
-    }
-
-    function chooseTheme(theme) {
-      vscode.postMessage({ command: 'setTheme', theme });
-      // OCC onboarding complete — go to OCC Home. OpenClaw install happens from there.
-      vscode.postMessage({ command: 'occOnboarding', aiPreference });
-    }
-
     function goStep1() {
       document.getElementById('step2').style.display = 'none';
       document.getElementById('step1').style.display = '';
@@ -1118,7 +1035,12 @@ export class HomePanel {
     }
 
     function runSetup() {
-      collectAndShowTheme();
+      const apiKey = document.getElementById('api-key').value.trim();
+      const port = document.getElementById('gw-port').value.trim() || '18789';
+      if (!apiKey || !selectedProvider) return;
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step3').style.display = '';
+      vscode.postMessage({ command: 'runSetup', provider: selectedProvider, apiKey, port });
     }
 
     const statusEl = document.getElementById('run-status');
