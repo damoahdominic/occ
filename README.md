@@ -51,7 +51,7 @@ To report a security vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE)
 
 > The underlying VS Code and Void codebases are licensed under MIT.
 > OpenClaw's API/billing layer is a separate closed-source service.
