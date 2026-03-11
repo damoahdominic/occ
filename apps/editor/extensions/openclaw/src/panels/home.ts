@@ -369,10 +369,28 @@ export class HomePanel {
 
   // ── Gateway status helpers ─────────────────────────────────────────────────
 
-  /** Raw HTTP probe — no _commandAction guard. Used by the polling loop. */
+  /**
+   * Reads the gateway port from ~/.openclaw/openclaw.json.
+   * Falls back to 18789 if the file is missing or the field is absent.
+   */
+  private _getConfiguredPort(): number {
+    try {
+      const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(raw) as Record<string, unknown>;
+      const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
+      const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
+      return Number.isFinite(n) && n > 0 && n < 65536 ? n : 18789;
+    } catch {
+      return 18789;
+    }
+  }
+
+  /** Raw HTTP probe against the configured port — no _commandAction guard. Used by the polling loop. */
   private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
+    const port = this._getConfiguredPort();
     return new Promise(resolve => {
-      const req = http.get('http://localhost:18789/', { timeout: 2000 }, res => {
+      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
       });
@@ -469,6 +487,10 @@ export class HomePanel {
     // Hand off to AI — it will run the command and handle any errors
     const verb = action === 'restart' ? 'restart' : action;
     const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+    const port = this._getConfiguredPort();
+    const portCheckCmd = process.platform === 'win32'
+      ? `netstat -ano | findstr :${port}`
+      : `lsof -iTCP:${port} -sTCP:LISTEN -n -P 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port}`;
     const aiMessage = [
       `Please ${verb} the OpenClaw gateway.`,
       '',
@@ -478,9 +500,17 @@ export class HomePanel {
       '```',
       '',
       `Environment: ${osInfo}`,
+      `Configured gateway port: ${port}`,
       '',
-      `Once the gateway is ${expectedState === 'running' ? 'running' : 'stopped'}, confirm it.`,
-      `If the command fails or the gateway does not reach the expected state, diagnose and fix the issue.`,
+      `After running the command, verify the gateway has reached the expected state by checking`,
+      `whether port ${port} is ${expectedState === 'running' ? 'actively listening' : 'no longer listening'}:`,
+      '```',
+      portCheckCmd,
+      '```',
+      '',
+      `The gateway is confirmed ${expectedState === 'running' ? 'running' : 'stopped'} when port ${port} ` +
+      `${expectedState === 'running' ? 'shows an active LISTEN entry' : 'shows no LISTEN entry'}.`,
+      `If the command fails or the port does not reach the expected state, diagnose and fix the issue.`,
     ].join('\n');
 
     await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage, 'agent');

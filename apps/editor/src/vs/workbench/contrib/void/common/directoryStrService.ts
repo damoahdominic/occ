@@ -452,7 +452,14 @@ class DirectoryStrService extends Disposable implements IDirectoryStrService {
 			str += `Directory of ${f.uri.fsPath}:\n`;
 			const rootURI = f.uri;
 
-			const eRoot = await this.fileService.resolve(rootURI)
+			let eRoot: Awaited<ReturnType<typeof this.fileService.resolve>>;
+			try {
+				eRoot = await this.fileService.resolve(rootURI);
+			} catch {
+				// Workspace folder does not exist yet (e.g. ~/.openclaw before first run).
+				str += '(directory does not exist yet)\n';
+				continue;
+			}
 			if (!eRoot) continue;
 
 			// First try with START_MAX_DEPTH and startMaxItemsPerDir

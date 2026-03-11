@@ -18,6 +18,7 @@ import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 const MODEL_DISPLAY_ALIASES: Record<string, Record<string, string>> = {
 	ocFreeModel: {
 		'z-ai/glm-4.7-flash': 'OCC Legacy Model (Free)',
+		'moltpilot': 'occ-legacy-model',
 	},
 }
 
