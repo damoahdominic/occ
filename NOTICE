@@ -1,0 +1,19 @@
+OCC
+Copyright 2026 OCC Contributors
+
+This product is licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+This product includes software from the following open source projects:
+
+Visual Studio Code
+  Copyright (c) Microsoft Corporation
+  Licensed under the MIT License
+  https://github.com/microsoft/vscode
+
+Void Editor
+  Copyright (c) Void Editor Contributors
+  Licensed under the MIT License
+  https://github.com/voideditor/void
