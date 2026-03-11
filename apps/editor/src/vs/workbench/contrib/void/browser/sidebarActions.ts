@@ -22,6 +22,8 @@ import { VOID_CTRL_L_ACTION_ID } from './actionIDs.js';
 import { localize2 } from '../../../../nls.js';
 import { IChatThreadService } from './chatThreadService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
+import { IVoidSettingsService } from '../common/voidSettingsService.js';
+import { ChatMode } from '../common/voidSettingsTypes.js';
 
 // ---------- Register commands and keybindings ----------
 
@@ -71,6 +73,24 @@ registerAction2(class extends Action2 {
 		const chatThreadsService = accessor.get(IChatThreadService)
 		viewsService.openViewContainer(VOID_VIEW_CONTAINER_ID)
 		await chatThreadsService.focusCurrentChat()
+	}
+})
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'void.sidebar.isVisible', title: localize2('voidSidebarIsVisible', 'OCC: Is Sidebar Visible'), f1: false });
+	}
+	run(accessor: ServicesAccessor): boolean {
+		return accessor.get(IViewsService).isViewContainerVisible(VOID_VIEW_CONTAINER_ID)
+	}
+})
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'void.sidebar.close', title: localize2('voidCloseSidebar', 'OCC: Close Sidebar'), f1: true });
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(IViewsService).closeViewContainer(VOID_VIEW_CONTAINER_ID)
 	}
 })
 
@@ -144,16 +164,23 @@ registerAction2(class extends Action2 {
 
 
 // Opens a new Void chat thread and immediately sends a message — callable by extensions.
+// Optional second argument: chatMode ('agent' | 'gather' | 'normal') — overrides the global setting for this chat.
 export const VOID_OPEN_CHAT_WITH_MESSAGE_ID = 'void.openChatWithMessage'
 registerAction2(class extends Action2 {
 	constructor() {
 		super({ id: VOID_OPEN_CHAT_WITH_MESSAGE_ID, title: localize2('voidOpenChatWithMessage', 'OCC: Open Chat with Message') });
 	}
-	async run(accessor: ServicesAccessor, message: string): Promise<void> {
+	async run(accessor: ServicesAccessor, message: string, chatMode?: ChatMode): Promise<void> {
 		if (!message) return
 		const commandService = accessor.get(ICommandService)
 		const viewsService = accessor.get(IViewsService)
 		const chatThreadService = accessor.get(IChatThreadService)
+		const settingsService = accessor.get(IVoidSettingsService)
+
+		// Optionally switch chat mode before opening (e.g. 'agent' so AI can run commands)
+		if (chatMode) {
+			settingsService.setGlobalSetting('chatMode', chatMode)
+		}
 
 		// Ensure the sidebar is open
 		const wasAlreadyOpen = viewsService.isViewContainerVisible(VOID_VIEW_CONTAINER_ID)

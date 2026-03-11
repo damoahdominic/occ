@@ -45,8 +45,91 @@ export function getOrStartConfigProxy(): Promise<number> {
             delete headers['content-security-policy'];
           }
         }
-        res.writeHead(proxyRes.statusCode ?? 200, headers);
-        proxyRes.pipe(res, { end: true });
+
+        const contentType = (headers['content-type'] as string | undefined) ?? '';
+        const isHtml = contentType.includes('text/html');
+
+        if (isHtml) {
+          // Collect the full response so we can inject the clipboard bridge script.
+          const chunks: Buffer[] = [];
+          proxyRes.on('data', (chunk: Buffer) => chunks.push(chunk));
+          proxyRes.on('end', () => {
+            let body = Buffer.concat(chunks).toString('utf-8');
+            // Clipboard bridge injected into the gateway page.
+            // KEY INSIGHT: keyboard events inside a focused cross-origin iframe never
+            // bubble to the parent document. So the iframe must intercept its own keys
+            // and use postMessage to ask the parent (outer webview) for clipboard access,
+            // since navigator.clipboard requires HTTPS and the gateway runs on HTTP.
+            const bridge = `<script>
+(function(){
+  // ── PASTE: intercept Cmd/Ctrl+V inside the iframe ──
+  document.addEventListener('keydown', function(ev) {
+    var mod = ev.metaKey || ev.ctrlKey;
+    if (!mod) return;
+
+    if (ev.key === 'v') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      // Ask the outer webview for clipboard text — it can read it via VS Code API.
+      window.parent.postMessage({ type: 'occ-request-paste' }, '*');
+    }
+
+    if (ev.key === 'c' || ev.key === 'x') {
+      // Read selection and send to parent to write to clipboard.
+      var text = '';
+      var sel = window.getSelection ? window.getSelection() : null;
+      if (sel) text = sel.toString();
+      if (!text) {
+        var ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) {
+          text = ae.value.slice(ae.selectionStart, ae.selectionEnd);
+          if (ev.key === 'x') {
+            ae.value = ae.value.slice(0, ae.selectionStart) + ae.value.slice(ae.selectionEnd);
+            ae.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      }
+      if (text) window.parent.postMessage({ type: 'occ-copy-data', text: text }, '*');
+    }
+  }, true);
+
+  // ── PASTE DELIVERY: receive text back from the outer webview ──
+  window.addEventListener('message', function(ev) {
+    var d = ev.data;
+    if (!d || d.type !== 'occ-paste') return;
+    var text = d.text || '';
+    var el = document.activeElement;
+    if (!el) return;
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      var s = el.selectionStart, e = el.selectionEnd;
+      el.value = el.value.slice(0, s) + text + el.value.slice(e);
+      el.selectionStart = el.selectionEnd = s + text.length;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (el.isContentEditable) {
+      document.execCommand('insertText', false, text);
+    }
+  });
+})();
+<\/script>`;
+            // Inject just before </body> or </html>, fallback: append.
+            if (body.includes('</body>')) {
+              body = body.replace('</body>', bridge + '</body>');
+            } else if (body.includes('</html>')) {
+              body = body.replace('</html>', bridge + '</html>');
+            } else {
+              body += bridge;
+            }
+            const buf = Buffer.from(body, 'utf-8');
+            headers['content-length'] = String(buf.length);
+            delete headers['transfer-encoding'];
+            res.writeHead(proxyRes.statusCode ?? 200, headers);
+            res.end(buf);
+          });
+        } else {
+          res.writeHead(proxyRes.statusCode ?? 200, headers);
+          proxyRes.pipe(res, { end: true });
+        }
       });
       proxyReq.on('error', () => {
         if (!res.headersSent) res.writeHead(502);
@@ -126,9 +209,17 @@ export class ConfigPanel {
       void vscode.commands.executeCommand('workbench.action.focusAuxiliaryBar')
         .then(() => vscode.commands.executeCommand('workbench.view.void'));
     }, null, this._disposables);
-    this._panel.webview.onDidReceiveMessage(msg => {
+    this._panel.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'openExternal' && msg.url) {
         vscode.env.openExternal(vscode.Uri.parse(msg.url));
+      }
+      // Clipboard fallbacks via VS Code host API (when navigator.clipboard unavailable).
+      if (msg.command === 'readClipboard') {
+        const text = await vscode.env.clipboard.readText();
+        void this._panel.webview.postMessage({ type: 'occ-clipboard-text', text });
+      }
+      if (msg.command === 'writeClipboard' && typeof msg.text === 'string') {
+        await vscode.env.clipboard.writeText(msg.text);
       }
     }, null, this._disposables);
     this._panel.webview.html = this._loadingHtml();
@@ -256,6 +347,43 @@ export class ConfigPanel {
     document.getElementById('btn-back').onclick     = () => frame.contentWindow.history.back();
     document.getElementById('btn-forward').onclick  = () => frame.contentWindow.history.forward();
     document.getElementById('btn-external').onclick = () => vscode.postMessage({ command: 'openExternal', url: '${externalSrc}' });
+
+    // ── Clipboard bridge ─────────────────────────────────────────────────────
+    // The iframe intercepts its own keyboard events and posts requests here.
+    // This outer document relays them via navigator.clipboard (Electron context)
+    // or falls back to the VS Code extension host clipboard API.
+
+    window.addEventListener('message', async function(ev) {
+      var d = ev.data;
+      if (!d || typeof d !== 'object') return;
+
+      // Iframe wants to paste — send it clipboard text.
+      if (d.type === 'occ-request-paste') {
+        var text = '';
+        try {
+          text = await navigator.clipboard.readText();
+        } catch (_) {
+          // navigator.clipboard unavailable — ask extension host.
+          vscode.postMessage({ command: 'readClipboard' });
+          return; // extension host will respond with occ-clipboard-text
+        }
+        frame.contentWindow.postMessage({ type: 'occ-paste', text: text }, '*');
+      }
+
+      // Iframe copied text — write it to the clipboard.
+      if (d.type === 'occ-copy-data' && d.text) {
+        try {
+          await navigator.clipboard.writeText(d.text);
+        } catch (_) {
+          vscode.postMessage({ command: 'writeClipboard', text: d.text });
+        }
+      }
+
+      // Extension host responded with clipboard text (fallback path).
+      if (d.type === 'occ-clipboard-text') {
+        frame.contentWindow.postMessage({ type: 'occ-paste', text: d.text || '' }, '*');
+      }
+    });
   </script>
 </body>
 </html>`;

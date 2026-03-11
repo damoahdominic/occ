@@ -2562,7 +2562,7 @@
           "type": "boolean",
           "scope": "resource",
           "description": "%config.enabled%",
-          "default": true
+          "default": false
         },
         "git.path": {
           "type": [
