@@ -111,8 +111,9 @@ export class HomePanel {
       } else if (msg.command === 'openDashboard') {
         void vscode.env.openExternal(vscode.Uri.parse('https://occ.mba.sh/dashboard'));
       } else if (msg.command === 'signOut') {
-        // Clear JWT from both the renderer settings service and the extension-host globalState
+        // Clear JWT, moltpilot key, and extension-host globalState
         void vscode.commands.executeCommand('occ.auth.setLegacyJwt', '');
+        void vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         void vscode.commands.executeCommand('openclaw.jwt.set', '');
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'MEMORY.md']);
@@ -377,13 +378,13 @@ export class HomePanel {
     this._lastJwt = occJwt;
 
     // Fetch user info from extension host (avoids CORS — webview origin is vscode-webview://)
-    let occUser: { email: string; picture: string | null; balance_usd: number } | null = null;
+    let occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null;
     if (occJwt) {
       try {
         const r = await fetch('https://occ.mba.sh/api/v1/me', {
           headers: { Authorization: `Bearer ${occJwt}` },
         });
-        if (r.ok) occUser = await r.json() as { email: string; picture: string | null; balance_usd: number };
+        if (r.ok) occUser = await r.json() as { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
       } catch { /* network error — leave null */ }
     }
 
@@ -1139,7 +1140,7 @@ export class HomePanel {
     cliCheck: { ok: boolean; output?: string; error?: string; command: string },
     iconUri: string,
     occJwt: string = '',
-    occUser: { email: string; picture: string | null; balance_usd: number } | null = null
+    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null
   ): string {
     const statusIcon = isInstalled ? '✅' : '⚠️';
     const statusText = isInstalled ? 'OpenClaw detected' : 'OpenClaw not found';
@@ -1475,6 +1476,52 @@ export class HomePanel {
       transition: background 0.15s;
     }
     .sign-in-btn:hover { background: rgba(220,40,40,0.16); }
+    /* ── Apps grid button ────────────────────────────────────────── */
+    .apps-grid-btn {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+      color: #aaa;
+    }
+    .apps-grid-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .apps-grid-btn svg { display: block; }
+    .apps-panel {
+      display: none; position: absolute;
+      top: calc(100% + 8px); right: 0;
+      background: #1e1e1e; border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px; width: 256px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      z-index: 300; padding: 16px;
+    }
+    .apps-panel.open { display: block; }
+    .apps-panel-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #555; margin-bottom: 14px; text-align: center;
+    }
+    .apps-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    }
+    .app-tile {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 7px; padding: 12px 6px;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.03);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .app-tile:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+    .app-tile-icon {
+      width: 34px; height: 34px; border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .app-tile-icon svg { opacity: 0.35; }
+    .app-tile-label { font-size: 10px; color: #555; text-align: center; white-space: nowrap; }
+    .apps-panel-wrap { position: relative; }
     /* User popover — Google-style account card */
     .user-popover {
       display: none; position: absolute;
@@ -1532,6 +1579,14 @@ export class HomePanel {
       transition: background 0.12s, color 0.12s;
     }
     .user-popover-signout:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .user-popover-keys { padding: 10px 16px 6px; }
+    .user-popover-keys-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #555; margin-bottom: 8px; }
+    .user-key-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .user-key-label { font-size: 11px; color: #777; min-width: 58px; }
+    .user-key-value { font-size: 11px; font-family: monospace; color: #bbb; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .user-key-copy { background: none; border: 1px solid rgba(255,255,255,0.1); color: #888; border-radius: 4px; padding: 1px 5px; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+    .user-key-copy:hover { background: rgba(255,255,255,0.08); color: #ccc; }
+    .user-key-endpoint { display: none; }
     /* ── More Options menu ──────────────────────────────────────── */
     .more-menu-wrap {
       position: relative;
@@ -1699,7 +1754,7 @@ export class HomePanel {
     <!-- More Options menu (left of avatar) -->
     ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
       <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
-        More Options
+        Quick Actions
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
@@ -1709,6 +1764,39 @@ export class HomePanel {
         </div>
       </div>
     </div>` : ''}
+
+    <!-- Apps grid button -->
+    <div class="apps-panel-wrap" id="apps-panel-wrap">
+      <button class="apps-grid-btn" onclick="toggleAppsPanel(event)" title="OCC Apps" aria-haspopup="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+          <circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+        </svg>
+      </button>
+      <div class="apps-panel" id="apps-panel">
+        <div class="apps-panel-title">OCC Apps</div>
+        <div class="apps-grid">
+          ${[
+            { label: 'Home' },
+            { label: 'MoltPilot' },
+            { label: 'OpenClaw' },
+            { label: 'Dashboard' },
+            { label: 'Docs' },
+            { label: 'Settings' },
+            { label: 'Billing' },
+            { label: 'Support' },
+            { label: 'More' },
+          ].map(app => `
+          <div class="app-tile">
+            <div class="app-tile-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </div>
+            <span class="app-tile-label">${app.label}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
 
     <!-- User avatar / sign-in (right, populated by JS) -->
     <div id="user-area" style="position:relative;"></div>
@@ -1796,9 +1884,20 @@ export class HomePanel {
     function signIn() { vscode.postMessage({ command: 'signIn' }); }
     function openDashboard() { vscode.postMessage({ command: 'openDashboard' }); }
     function signOut() { vscode.postMessage({ command: 'signOut' }); }
+    function copyKey(id, btn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const full = el.dataset.full;
+      navigator.clipboard.writeText(full).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => {});
+    }
 
     function toggleUserPopover(e) {
       e.stopPropagation();
+      closeAppsPanel(); closeMoreMenu();
       const pop = document.getElementById('user-popover');
       if (pop) pop.classList.toggle('open');
     }
@@ -1837,6 +1936,16 @@ export class HomePanel {
             </a>
           </div>
           <div class="user-popover-divider"></div>
+          \${_occUser.api_keys?.occKey ? \`
+          <div class="user-popover-keys">
+            <div class="user-popover-keys-title">API Key</div>
+            <div class="user-key-row">
+              <span class="user-key-label">OpenClaw</span>
+              <span class="user-key-value" id="key-occ" data-full="\${_occUser.api_keys.occKey}" data-masked="\${_occUser.api_keys.occKey.slice(0,8)}···\${_occUser.api_keys.occKey.slice(-4)}">\${_occUser.api_keys.occKey.slice(0,8)}···\${_occUser.api_keys.occKey.slice(-4)}</span>
+              <button class="user-key-copy" onclick="copyKey('key-occ',this)" title="Copy">⎘</button>
+            </div>
+          </div>
+          <div class="user-popover-divider"></div>\` : ''}
           <button class="user-popover-signout" onclick="signOut()">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             Sign out
@@ -1862,7 +1971,17 @@ export class HomePanel {
       if (dd) dd.classList.remove('open');
       if (btn) btn.setAttribute('aria-expanded', 'false');
     }
-    document.addEventListener('click', () => { closeMoreMenu(); closeUserPopover(); });
+    function toggleAppsPanel(e) {
+      e.stopPropagation();
+      closeMoreMenu(); closeUserPopover();
+      const panel = document.getElementById('apps-panel');
+      if (panel) panel.classList.toggle('open');
+    }
+    function closeAppsPanel() {
+      const panel = document.getElementById('apps-panel');
+      if (panel) panel.classList.remove('open');
+    }
+    document.addEventListener('click', () => { closeMoreMenu(); closeUserPopover(); closeAppsPanel(); });
 
     // ── Gateway status ────────────────────────────────────────────
     const GW = {
