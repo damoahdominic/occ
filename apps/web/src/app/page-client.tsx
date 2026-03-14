@@ -542,25 +542,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                     </a>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center md:gap-4 w-full sm:w-auto gap-6">
-                    <a
-                      href="https://mba.sh"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-[75%] sm:w-auto mx-auto group/skool inline-flex items-center justify-center gap-2.5 px-5 py-2.5 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 group-hover/skool:stroke-emerald-400 transition-colors duration-300">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                        <circle cx="9" cy="7" r="4" />
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                      </svg>
-                      Join our community on Skool
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover/skool:opacity-100 group-hover/skool:translate-x-0.5 transition-all duration-300">
-                        <path d="M7 17l9.2-9.2M17 17V8H8" />
-                      </svg>
-                    </a>
-                  </div>
+
                 </div>
               }
             >
