@@ -522,30 +522,24 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                     Just download, open, and you&apos;re ready to go.
                   </p>
 
-                  {/* Download buttons */}
-                  <div className="flex flex-col sm:flex-row items-center gap-3 mb-10">
-                    {(["windows", "macos"] as Platform[]).map((p) =>
-                      p === platform ? (
-                        <div key={p} className="relative btn-glow rounded-xl">
-                          <a
-                            href={downloadUrls[p]}
-                            className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all"
-                          >
-                            {platformIcons[p]}
-                            Download for {platformLabels[p]}
-                          </a>
-                        </div>
-                      ) : (
-                        <a
-                          key={p}
-                          href={downloadUrls[p]}
-                          className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
-                        >
-                          {platformIcons[p]}
-                          Download for {platformLabels[p]}
-                        </a>
-                      )
-                    )}
+                  {/* Download button — detected platform only */}
+                  <div className="flex flex-col items-center gap-3 mb-10">
+                    <div className="relative btn-glow rounded-xl">
+                      <a
+                        href={downloadUrls[platform]}
+                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all"
+                      >
+                        {platformIcons[platform]}
+                        Download for {platformLabels[platform]}
+                      </a>
+                    </div>
+                    <a
+                      href={downloadUrls[platform === "windows" ? "macos" : "windows"]}
+                      className="text-sm text-[var(--text-muted)] hover:text-white transition-colors"
+                    >
+                      Also available for{" "}
+                      {platform === "windows" ? "macOS" : "Windows"}
+                    </a>
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center md:gap-4 w-full sm:w-auto gap-6">
@@ -677,29 +671,23 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                   Download OCCode and go from zero to a fully configured OpenClaw environment — no manual setup required.
                 </p>
 
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                  {(["windows", "macos"] as Platform[]).map((p) =>
-                    p === platform ? (
-                      <div key={p} className="relative btn-glow rounded-xl">
-                        <a
-                          href={downloadUrls[p]}
-                          className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-colors"
-                        >
-                          {platformIcons[p]}
-                          Download for {platformLabels[p]}
-                        </a>
-                      </div>
-                    ) : (
+                <div className="flex flex-col items-center justify-center gap-3">
+                    <div className="relative btn-glow rounded-xl">
                       <a
-                        key={p}
-                        href={downloadUrls[p]}
-                        className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)]/60 text-base font-semibold text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-200"
+                        href={downloadUrls[platform]}
+                        className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-colors"
                       >
-                        {platformIcons[p]}
-                        Download for {platformLabels[p]}
+                        {platformIcons[platform]}
+                        Download for {platformLabels[platform]}
                       </a>
-                    )
-                  )}
+                    </div>
+                    <a
+                      href={downloadUrls[platform === "windows" ? "macos" : "windows"]}
+                      className="text-sm text-[var(--text-muted)] hover:text-white transition-colors"
+                    >
+                      Also available for{" "}
+                      {platform === "windows" ? "macOS" : "Windows"}
+                    </a>
                 </div>
               </div>
 
