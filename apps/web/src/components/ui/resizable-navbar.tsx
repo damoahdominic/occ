@@ -24,7 +24,6 @@ interface NavItemsProps {
   items: {
     name: string;
     link: string;
-    icon?: React.ReactNode;
   }[];
   className?: string;
   onItemClick?: () => void;
@@ -138,10 +137,7 @@ export const NavItems = ({ items, className, onItemClick }: NavItemsProps) => {
               className="absolute inset-0 h-full w-full rounded-full bg-white/[0.06]"
             />
           )}
-          <span className="relative z-20 flex items-center gap-1.5">
-            {item.icon}
-            {item.name}
-          </span>
+          <span className="relative z-20">{item.name}</span>
         </a>
       ))}
     </motion.div>
