@@ -552,7 +552,7 @@ jobs:
 
       - name: Sign Windows installers (Azure Trusted Signing)
         if: ${{ secrets.AZURE_CLIENT_ID != '' }}
-        uses: azure/trusted-signing-action@acc6d03023f35c22bfc9ac05d2981db9dc008330
+        uses: azure/trusted-signing-action@87c2e83e6868da99d3380aa309851b32ed9a8346
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
