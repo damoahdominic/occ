@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  scroll-behavior: smooth;
+}
+
 :root {
   --accent: #EF4444;
   --accent-hover: #DC2626;
@@ -85,4 +89,49 @@ h1, h2, h3 {
   box-shadow:
     0 0 12px 3px rgba(239, 68, 68, 0.55),
     0 0 32px 6px rgba(239, 68, 68, 0.25);
+}
+/* Globe logo markers — pop up and shrink */
+@keyframes globeLogoPulse {
+  0%, 100% { transform: scale(0); opacity: 0; }
+  15% { transform: scale(1.15); opacity: 1; }
+  25% { transform: scale(1); opacity: 1; }
+  75% { transform: scale(1); opacity: 1; }
+  90% { transform: scale(0.3); opacity: 0; }
+}
+
+.globe-logo-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Globe ripple — single ring synced with toast rotation (3.5s) */
+.globe-ripple {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1.5px solid rgba(239, 68, 68, 0.35);
+  animation: globeRipple 3.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite;
+  pointer-events: none;
+}
+
+@keyframes globeRipple {
+  0% {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.5;
+    border-color: rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.15;
+    border-color: rgba(239, 68, 68, 0.15);
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
 }
