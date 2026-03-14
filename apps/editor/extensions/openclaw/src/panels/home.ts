@@ -48,6 +48,8 @@ export class HomePanel {
   private readonly _outputChannel: vscode.OutputChannel;
   private _lastInstalledState: boolean | undefined;
   private _pollTick = 0;
+  private _lastJwt = '';
+  private _lastInstalledVersion: string | null = null;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
@@ -84,6 +86,12 @@ export class HomePanel {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
+      } else if (msg.command === 'runUpdate') {
+        void vscode.commands.executeCommand(
+          'void.openChatWithMessage',
+          'Please run `openclaw update` to upgrade OpenClaw to the latest version.',
+          'agent',
+        );
       } else if (msg.command === 'runSetup') {
         void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
       } else if (msg.command === 'sudoPassword') {
@@ -98,6 +106,14 @@ export class HomePanel {
           this._sidebarOpen = await vscode.commands.executeCommand<boolean>('void.sidebar.isVisible').then(v => !!v, () => this._sidebarOpen);
           try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
         });
+      } else if (msg.command === 'signIn') {
+        void vscode.env.openExternal(vscode.Uri.parse('https://occ.mba.sh/login?ref=occ-editor'));
+      } else if (msg.command === 'openDashboard') {
+        void vscode.env.openExternal(vscode.Uri.parse('https://occ.mba.sh/dashboard'));
+      } else if (msg.command === 'signOut') {
+        // Clear JWT from both the renderer settings service and the extension-host globalState
+        void vscode.commands.executeCommand('occ.auth.setLegacyJwt', '');
+        void vscode.commands.executeCommand('openclaw.jwt.set', '');
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'MEMORY.md']);
         const file = msg.file as string;
@@ -353,18 +369,40 @@ export class HomePanel {
     const isConfigured = fs.existsSync(configFile);
     const isInstalled = cliCheck.ok || isConfigured;
     this._lastInstalledState = isInstalled;
+    this._lastInstalledVersion = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
+    const occJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt').then(r => r ?? '', () => '');
+    this._lastJwt = occJwt;
+
+    // Fetch user info from extension host (avoids CORS — webview origin is vscode-webview://)
+    let occUser: { email: string; picture: string | null; balance_usd: number } | null = null;
+    if (occJwt) {
+      try {
+        const r = await fetch('https://occ.mba.sh/api/v1/me', {
+          headers: { Authorization: `Bearer ${occJwt}` },
+        });
+        if (r.ok) occUser = await r.json() as { email: string; picture: string | null; balance_usd: number };
+      } catch { /* network error — leave null */ }
+    }
 
     // Show setup wizard when CLI is present but not yet configured.
     if (isInstalled && !isConfigured) {
       this._panel.webview.html = this._getWizardHtml(iconUri.toString());
     } else {
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString());
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser);
     }
     // Kick off gateway status polling now that the webview is ready.
     this._startPolling();
+    // Auto-check version on every load so the banner is always current.
+    // Small delay so the webview JS finishes loading before the postMessage arrives.
+    if (isInstalled) {
+      setTimeout(() => {
+        try { this._panel.webview.postMessage({ type: 'autoCheckVersion' }); } catch {}
+        void this._checkLatestVersion();
+      }, 800);
+    }
   }
 
   // ── Gateway status helpers ─────────────────────────────────────────────────
@@ -447,10 +485,30 @@ export class HomePanel {
         }
       }
 
-      const [status, aiRunning, sidebarVisible] = await Promise.all([
+      // Every 15 ticks (~30s): re-fetch CLI version fresh via login shell — no cache.
+      // Always push the latest value and refresh the update banner.
+      if (this._pollTick % 15 === 0) {
+        void this._testOpenClawCli().then(result => {
+          const current = result.ok ? (result.output ?? '').trim() : null;
+          const changed = current !== this._lastInstalledVersion;
+          this._lastInstalledVersion = current;
+          // Always push fresh version to the CLI row span.
+          try {
+            this._panel.webview.postMessage({ type: 'cliVersion', text: current ?? 'not found', ok: result.ok });
+          } catch {}
+          // Refresh the update banner whenever the version changed.
+          if (changed) {
+            try { this._panel.webview.postMessage({ type: 'autoCheckVersion' }); } catch {}
+            void this._checkLatestVersion();
+          }
+        });
+      }
+
+      const [status, aiRunning, sidebarVisible, jwt] = await Promise.all([
         this._checkGatewayStatus(),
         vscode.commands.executeCommand<boolean>('void.getIsRunning').then(v => !!v, () => false),
         vscode.commands.executeCommand<boolean>('void.sidebar.isVisible').then(v => !!v, () => this._sidebarOpen),
+        vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt').then(r => r ?? '', () => ''),
       ]);
       this._sidebarOpen = sidebarVisible;
       // Don't overwrite the intermediary status while a gateway command is in progress.
@@ -459,6 +517,12 @@ export class HomePanel {
       }
       try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
       try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
+      // Full re-render if JWT changed (e.g. deep-link auth arrived while panel was open).
+      // We do a full _update() so the extension host fetches /api/v1/me fresh (avoids webview CORS).
+      if (jwt !== this._lastJwt) {
+        void this._update();
+        return;
+      }
     };
     void tick();
     this._pollingTimer = setInterval(tick, 2000);
@@ -584,15 +648,22 @@ export class HomePanel {
       return;
     }
 
-    // Normalise versions for comparison (strip leading 'v', build metadata, etc.)
-    const norm = (v: string) => v.replace(/^v/i, '').split(/[-+]/)[0];
+    // Extract the bare version number from any format:
+    // "OpenClaw 2026.3.12 (6472949)" → "2026.3.12"
+    // "v2026.3.12" → "2026.3.12"
+    // "2026.3.12-beta.1" → "2026.3.12"
+    const norm = (v: string) => {
+      const match = v.match(/\d+\.\d+(?:\.\d+)*/);
+      return match ? match[0] : v.replace(/^v/i, '').split(/[-+(]/)[0].trim();
+    };
     if (norm(installed) === norm(latest)) {
       post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${installed}</strong></span>`);
     } else {
       post(
-        `<span style="color:#fbbf24">Update available: <strong>${latest}</strong> ` +
-        `&mdash; you have <strong>${installed}</strong>. ` +
-        `Run <code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:3px">openclaw update</code> to upgrade.</span>`,
+        `<span style="color:#fbbf24">Update available: <strong>${latest}</strong> &mdash; you have <strong>${installed}</strong>.</span>` +
+        `<button onclick="runUpdate()" style="margin-top:10px;display:flex;align-items:center;gap:6px;background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%;justify-content:center;" ` +
+        `onmouseover="this.style.background='#fbbf24'" onmouseout="this.style.background='#f59e0b'">` +
+        `⬆ Update to ${latest} →</button>`,
       );
     }
   }
@@ -1066,7 +1137,9 @@ export class HomePanel {
     isInstalled: boolean,
     dirExists: boolean,
     cliCheck: { ok: boolean; output?: string; error?: string; command: string },
-    iconUri: string
+    iconUri: string,
+    occJwt: string = '',
+    occUser: { email: string; picture: string | null; balance_usd: number } | null = null
   ): string {
     const statusIcon = isInstalled ? '✅' : '⚠️';
     const statusText = isInstalled ? 'OpenClaw detected' : 'OpenClaw not found';
@@ -1216,6 +1289,7 @@ export class HomePanel {
       border-color: rgba(167,139,250,0.2);
       border-top-color: #a78bfa;
     }
+    @keyframes gw-spin { to { transform: rotate(360deg); } }
 
     /* ── MoltPilot row ──────────────────────────────────────────── */
     .molt-cell {
@@ -1368,12 +1442,99 @@ export class HomePanel {
       border-color: rgba(220,40,40,0.7);
     }
 
-    /* ── More Options menu ──────────────────────────────────────── */
-    .more-menu-wrap {
+    /* ── Header bar (user avatar + more options) ────────────────── */
+    .header-bar {
       position: fixed;
       top: 12px;
       right: 12px;
       z-index: 200;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .user-avatar-btn {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #dc2828; color: #fff;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+      border: 1.5px solid rgba(255,255,255,0.15);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: opacity 0.15s, border-color 0.15s;
+      overflow: hidden;
+    }
+    .user-avatar-btn img {
+      width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+    }
+    .user-avatar-btn:hover { opacity: 0.85; border-color: rgba(255,255,255,0.3); }
+    .sign-in-btn {
+      font-size: 11.5px; font-weight: 600; color: #dc2828;
+      background: rgba(220,40,40,0.08);
+      border: 1px solid rgba(220,40,40,0.22);
+      padding: 4px 10px; border-radius: 6px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .sign-in-btn:hover { background: rgba(220,40,40,0.16); }
+    /* User popover — Google-style account card */
+    .user-popover {
+      display: none; position: absolute;
+      top: calc(100% + 8px); right: 0;
+      background: #1e1e1e; border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px; min-width: 240px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      overflow: hidden;
+      z-index: 300;
+    }
+    .user-popover.open { display: block; }
+    .user-popover-header {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 20px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .user-popover-avatar {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: #dc2828; color: #fff;
+      font-size: 20px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 10px; overflow: hidden; flex-shrink: 0;
+      border: 2px solid rgba(255,255,255,0.1);
+    }
+    .user-popover-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .user-popover-email {
+      font-size: 12.5px; color: #ddd; font-weight: 500;
+      margin-bottom: 4px; word-break: break-all; text-align: center;
+    }
+    .user-popover-balance {
+      font-size: 12px; color: #4ade80; font-weight: 600;
+      background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.2);
+      padding: 2px 10px; border-radius: 20px; margin-top: 2px;
+    }
+    .user-popover-actions {
+      padding: 8px 0;
+    }
+    .user-popover-action {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 9px 16px;
+      background: none; border: none;
+      color: #ccc; font-size: 13px; font-family: inherit;
+      text-align: left; cursor: pointer; text-decoration: none;
+      transition: background 0.12s, color 0.12s;
+    }
+    .user-popover-action:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .user-popover-divider {
+      height: 1px; background: rgba(255,255,255,0.07); margin: 0;
+    }
+    .user-popover-signout {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 9px 16px;
+      background: none; border: none;
+      color: #888; font-size: 13px; font-family: inherit;
+      text-align: left; cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .user-popover-signout:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    /* ── More Options menu ──────────────────────────────────────── */
+    .more-menu-wrap {
+      position: relative;
     }
     .more-menu-btn {
       display: flex;
@@ -1533,19 +1694,25 @@ export class HomePanel {
   </style>
 </head>
 <body>
-  <!-- More Options menu (fixed top-right) -->
-  ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
-    <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
-      More Options
-      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-    </button>
-    <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
-      <div class="more-menu-section">
-        <div class="more-menu-section-label">TUI</div>
-        <button class="more-menu-item" role="menuitem" onclick="cmd('openclaw.configureTUI');closeMoreMenu()">${icTerminalBtn}Configure</button>
+  <!-- Header bar: more options (left) + user avatar (right) -->
+  <div class="header-bar">
+    <!-- More Options menu (left of avatar) -->
+    ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
+      <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
+        More Options
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
+        <div class="more-menu-section">
+          <div class="more-menu-section-label">TUI</div>
+          <button class="more-menu-item" role="menuitem" onclick="cmd('openclaw.configureTUI');closeMoreMenu()">${icTerminalBtn}Configure</button>
+        </div>
       </div>
-    </div>
-  </div>` : ''}
+    </div>` : ''}
+
+    <!-- User avatar / sign-in (right, populated by JS) -->
+    <div id="user-area" style="position:relative;"></div>
+  </div>
 
   <!-- Password modal (shown on sudo permission error) -->
   <div id="pwd-overlay" class="pwd-overlay">
@@ -1572,7 +1739,7 @@ export class HomePanel {
     <div class="check-row">
       <span class="row-icon">${icTerminal}</span>
       <span class="label">CLI (openclaw --version)</span>
-      <span class="value ${cliClass}">${cliText}${cliHint}</span>
+      <span id="cli-version-value" class="value ${cliClass}">${cliText}${cliHint}</span>
     </div>
     <div class="check-row">
       <span class="row-icon">${icServer}</span>
@@ -1605,7 +1772,7 @@ export class HomePanel {
   <div class="btn-group">
     <button id="btn-primary" class="btn-primary" onclick="cmd('${buttonCommand}')">${icBtnPrimary}${buttonLabel}</button>
     <div id="install-status" style="display:none;font-size:11px;color:#666;margin-top:1px;text-align:center;max-width:min(320px,94vw);line-height:1.4;"></div>
-    ${isInstalled ? `<button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates with OpenClaw</button>
+    ${isInstalled ? `<button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates</button>
     <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>` : ''}
   </div>
 
@@ -1623,6 +1790,63 @@ export class HomePanel {
     }
     function openFile(name) { vscode.postMessage({ command: 'openWorkspaceFile', file: name }); }
 
+    // ── User avatar (data pre-fetched by extension host — no CORS issues) ────
+    const _occUser = ${JSON.stringify(occUser)};
+
+    function signIn() { vscode.postMessage({ command: 'signIn' }); }
+    function openDashboard() { vscode.postMessage({ command: 'openDashboard' }); }
+    function signOut() { vscode.postMessage({ command: 'signOut' }); }
+
+    function toggleUserPopover(e) {
+      e.stopPropagation();
+      const pop = document.getElementById('user-popover');
+      if (pop) pop.classList.toggle('open');
+    }
+    function closeUserPopover() {
+      const pop = document.getElementById('user-popover');
+      if (pop) pop.classList.remove('open');
+    }
+
+    function renderUserArea() {
+      const area = document.getElementById('user-area');
+      if (!area) return;
+      if (!_occUser) {
+        area.innerHTML = '<button class="sign-in-btn" onclick="signIn()">Sign In</button>';
+        return;
+      }
+      const initial = (_occUser.email || '?')[0].toUpperCase();
+      const balance = '$' + parseFloat(_occUser.balance_usd || 0).toFixed(2);
+      const avatarContent = _occUser.picture
+        ? \`<img src="\${_occUser.picture}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none';this.parentElement.textContent='\${initial}'">\`
+        : initial;
+      const popoverAvatarContent = _occUser.picture
+        ? \`<img src="\${_occUser.picture}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none';this.parentElement.textContent='\${initial}'">\`
+        : initial;
+      area.innerHTML = \`
+        <button class="user-avatar-btn" title="\${_occUser.email}" onclick="toggleUserPopover(event)" aria-haspopup="true">\${avatarContent}</button>
+        <div class="user-popover" id="user-popover">
+          <div class="user-popover-header">
+            <div class="user-popover-avatar">\${popoverAvatarContent}</div>
+            <div class="user-popover-email">\${_occUser.email}</div>
+            <div class="user-popover-balance">\${balance} credits</div>
+          </div>
+          <div class="user-popover-actions">
+            <a class="user-popover-action" href="#" onclick="openDashboard();return false;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+              Open Dashboard
+            </a>
+          </div>
+          <div class="user-popover-divider"></div>
+          <button class="user-popover-signout" onclick="signOut()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
+          </button>
+        </div>
+      \`;
+    }
+
+    renderUserArea();
+
     // ── More Options menu ─────────────────────────────────────────
     function toggleMoreMenu(e) {
       e.stopPropagation();
@@ -1638,7 +1862,7 @@ export class HomePanel {
       if (dd) dd.classList.remove('open');
       if (btn) btn.setAttribute('aria-expanded', 'false');
     }
-    document.addEventListener('click', closeMoreMenu);
+    document.addEventListener('click', () => { closeMoreMenu(); closeUserPopover(); });
 
     // ── Gateway status ────────────────────────────────────────────
     const GW = {
@@ -1726,6 +1950,10 @@ export class HomePanel {
       vscode.postMessage({ command: 'checkVersion' });
     }
 
+    function runUpdate() {
+      vscode.postMessage({ command: 'runUpdate' });
+    }
+
     // ── Password modal ────────────────────────────────────────────
     const pwdOverlay = document.getElementById('pwd-overlay');
     const pwdInput   = document.getElementById('pwd-input');
@@ -1782,8 +2010,33 @@ export class HomePanel {
       } else if (e.data.type === 'versionResult') {
         const btn = document.getElementById('btn-version');
         const res = document.getElementById('version-result');
-        if (btn) { btn.disabled = false; btn.innerHTML = '${icRefreshCw}Check for Updates with OpenClaw'; }
-        if (res) { res.innerHTML = e.data.html; res.style.display = 'block'; }
+        if (btn) { btn.disabled = false; btn.innerHTML = '${icRefreshCw}Check for Updates'; }
+        if (res) {
+          res.innerHTML = e.data.html;
+          res.style.display = 'block';
+          res.style.opacity = '1';
+          res.style.transition = '';
+          // Only auto-dismiss "up to date" messages — keep update banners visible
+          if (e.data.html && e.data.html.includes('4ade80')) {
+            clearTimeout(res._fadeTimer);
+            res._fadeTimer = setTimeout(function() {
+              res.style.transition = 'opacity 1.2s ease';
+              res.style.opacity = '0';
+              setTimeout(function() { res.style.display = 'none'; res.innerHTML = ''; }, 1200);
+            }, 5000);
+          }
+        }
+      } else if (e.data.type === 'cliVersion') {
+        const el = document.getElementById('cli-version-value');
+        if (el) {
+          el.textContent = e.data.text;
+          el.className = 'value ' + (e.data.ok ? 'ok' : 'warn');
+        }
+      } else if (e.data.type === 'autoCheckVersion') {
+        const btn = document.getElementById('btn-version');
+        const res = document.getElementById('version-result');
+        if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+        if (res) { res.style.display = 'none'; res.innerHTML = ''; }
       }
     });
   </script>
@@ -1830,6 +2083,52 @@ export class HomePanel {
     }
 
     // ── Mac / Linux ──────────────────────────────────────────────────────────────
+    // Strategy: source nvm/nvm.sh first so the nvm-managed binary takes priority
+    // over any stale system install (e.g. /usr/local/bin/openclaw). Falls back to
+    // enumerating ~/.nvm/versions/node/*/bin/openclaw (newest version first),
+    // then the existing path-based search.
+    const home = os.homedir();
+    const nvmSh = path.join(home, '.nvm', 'nvm.sh');
+
+    // 1. Try sourcing nvm so it activates the default alias / current version.
+    if (fs.existsSync(nvmSh)) {
+      const nvmCmd = `bash -c '. "${nvmSh}" 2>/dev/null && openclaw --version 2>&1'`;
+      const nvmResult = await new Promise<{ ok: boolean; output?: string; error?: string; command: string }>(resolve => {
+        cp.exec(nvmCmd, { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+          const out = (stdout || '').toString().trim();
+          // Extract just the version line (ignores nvm banner noise)
+          const line = out.split('\n').find(l => /\d/.test(l) && !l.startsWith('nvm') && !l.startsWith('Now')) || '';
+          if (!error && line) {
+            resolve({ ok: true, output: line.trim(), command: nvmCmd });
+          } else {
+            resolve({ ok: false, error: out || error?.message || 'not found', command: nvmCmd });
+          }
+        });
+      });
+      if (nvmResult.ok) return nvmResult;
+    }
+
+    // 2. Enumerate ~/.nvm/versions/node/*/bin/openclaw — newest node version first.
+    const nvmVersionsDir = path.join(home, '.nvm', 'versions', 'node');
+    if (fs.existsSync(nvmVersionsDir)) {
+      const nodeVersions = fs.readdirSync(nvmVersionsDir)
+        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true })); // newest first
+      for (const ver of nodeVersions) {
+        const candidate = path.join(nvmVersionsDir, ver, 'bin', 'openclaw');
+        if (fs.existsSync(candidate)) {
+          const result = await new Promise<{ ok: boolean; output?: string; error?: string; command: string }>(resolve => {
+            cp.execFile(candidate, ['--version'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+              const out = (stdout || stderr || '').toString().trim();
+              if (error || !out) resolve({ ok: false, error: out || error?.message, command: `${candidate} --version` });
+              else resolve({ ok: true, output: out, command: `${candidate} --version` });
+            });
+          });
+          if (result.ok) return result;
+        }
+      }
+    }
+
+    // 3. Fall back to path-based search.
     const cliPath = await this._findOpenClawPath();
     if (!cliPath) {
       return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
@@ -1837,7 +2136,7 @@ export class HomePanel {
     return new Promise(resolve => {
       cp.execFile(
         cliPath, ['--version'],
-        { timeout: 30000, maxBuffer: 1024 * 1024, env: this._buildExecEnv() },
+        { timeout: 15000, maxBuffer: 1024 * 1024, env: this._buildExecEnv() },
         (error, stdout, stderr) => {
           if (error) {
             resolve({ ok: false, error: stderr?.toString().trim() || error.message || `Exit ${(error as any).code}`, command: `${cliPath} --version` });

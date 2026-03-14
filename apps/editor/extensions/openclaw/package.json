@@ -1,5 +1,5 @@
 {
-	"name": "openclaw",
+	"name": "home",
 	"displayName": "OpenClaw",
 	"description": "OpenClaw home screen, install wizard, configuration, and status panel",
 	"version": "0.2.2",
@@ -12,7 +12,8 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onStartupFinished"
+		"onStartupFinished",
+		"onUri"
 	],
 	"main": "./out/extension",
 	"contributes": {

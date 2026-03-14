@@ -105,12 +105,30 @@ const removeWhitespaceExceptNewlines = (str: string): string => {
 	return str.replace(/[^\S\n]+/g, '');
 }
 
+// Normalize line endings to LF and trim trailing whitespace per line
+const normalizeLinesForMatch = (str: string): string => {
+	return str.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+		.split('\n').map(l => l.trimEnd()).join('\n')
+}
+
+// Unescape literal \n / \t sequences if the string has no real newlines
+// (happens when LLMs double-encode strings through structured output)
+const unescapeLiteralEscapes = (str: string): string => {
+	if (!str.includes('\n') && (str.includes('\\n') || str.includes('\\t'))) {
+		return str.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '')
+	}
+	return str
+}
 
 
 // finds block.orig in fileContents and return its range in file
 // startingAtLine is 1-indexed and inclusive
 // returns 1-indexed lines
 const findTextInCode = (text: string, fileContents: string, canFallbackToRemoveWhitespace: boolean, opts: { startingAtLine?: number, returnType: 'lines' }) => {
+
+	// Normalize CRLF to LF for matching (model always returns LF, but LLM may supply CRLF)
+	text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+	fileContents = fileContents.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
 	const returnAns = (fileContents: string, idx: number) => {
 		const startLine = numLinesOfStr(fileContents.substring(0, idx + 1))
@@ -135,7 +153,17 @@ const findTextInCode = (text: string, fileContents: string, canFallbackToRemoveW
 	if (!canFallbackToRemoveWhitespace)
 		return 'Not found' as const
 
-	// try to find it ignoring all whitespace this time
+	// Fallback 1: trim trailing whitespace per line (LLMs often omit trailing spaces)
+	const textTrimmed = normalizeLinesForMatch(text)
+	const fileContentsTrimmed = normalizeLinesForMatch(fileContents)
+	idx = fileContentsTrimmed.indexOf(textTrimmed, startingAtLineIdx(fileContentsTrimmed))
+	if (idx !== -1) {
+		const lastIdx2 = fileContentsTrimmed.lastIndexOf(textTrimmed)
+		if (lastIdx2 === idx) return returnAns(fileContentsTrimmed, idx)
+		// unique check failed — fall through to more aggressive whitespace removal
+	}
+
+	// Fallback 2: remove all intra-line whitespace
 	text = removeWhitespaceExceptNewlines(text)
 	fileContents = removeWhitespaceExceptNewlines(fileContents)
 	idx = fileContents.indexOf(text, startingAtLineIdx(fileContents));
@@ -1230,6 +1258,9 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			}
 		}
 
+		// Normalize CRLF and unescape any LLM double-encoded strings
+		newContent = newContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+		newContent = unescapeLiteralEscapes(newContent)
 		this._writeURIText(uri, newContent, 'wholeFileRange', { shouldRealignDiffAreas: true })
 		onDone()
 	}
@@ -1614,6 +1645,9 @@ class EditCodeService extends Disposable implements IEditCodeService {
 
 
 	private _instantlyApplySRBlocks(uri: URI, blocksStr: string) {
+		// Normalize CRLF and unescape any LLM double-encoded strings
+		blocksStr = blocksStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+		blocksStr = unescapeLiteralEscapes(blocksStr)
 		const blocks = extractSearchReplaceBlocks(blocksStr)
 		if (blocks.length === 0) throw new Error(`No Search/Replace blocks were received!`)
 

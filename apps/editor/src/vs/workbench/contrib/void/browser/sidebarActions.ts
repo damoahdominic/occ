@@ -24,6 +24,9 @@ import { IChatThreadService } from './chatThreadService.js';
 import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { ChatMode } from '../common/voidSettingsTypes.js';
+import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { URI } from '../../../../base/common/uri.js';
+import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 
 // ---------- Register commands and keybindings ----------
 
@@ -318,6 +321,47 @@ registerAction2(class extends Action2 {
 	run(accessor: ServicesAccessor): boolean {
 		const streamState = accessor.get(IChatThreadService).streamState
 		return Object.values(streamState).some(s => s?.isRunning && s.isRunning !== 'idle')
+	}
+})
+
+// Opens the OCC signup page in the system browser — runs in renderer so it's always reliable.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'occ.onboarding.openSignupUrl', title: localize2('occOpenSignupUrl', 'OCC: Open Signup URL') });
+	}
+	run(accessor: ServicesAccessor): void {
+		accessor.get(IOpenerService).open(URI.parse('https://occ.mba.sh/signup?ref=occ-editor'));
+	}
+})
+
+// Called by the openclaw extension URI handler when MBA.sh redirects back with a JWT.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'occ.auth.setLegacyJwt', title: localize2('occSetLegacyJwt', 'OCC: Set Legacy JWT') });
+	}
+	async run(accessor: ServicesAccessor, token: string): Promise<void> {
+		if (typeof token === 'string') {
+			const settingsService = accessor.get(IVoidSettingsService);
+			const commandService = accessor.get(ICommandService);
+			await settingsService.setGlobalSetting('occLegacyJwt', token);
+			if (token) {
+				commandService.executeCommand('occ.onboarding.darkTheme');
+				await settingsService.setGlobalSetting('isOnboardingComplete', true);
+			}
+			// Sync JWT to extension-host storage so balance bar can read it without renderer IPC.
+			// openclaw.jwt.set also triggers fetchAndUpdateBackendBalance internally.
+			commandService.executeCommand('openclaw.jwt.set', token);
+		}
+	}
+})
+
+// Returns the stored OCC Legacy JWT so the HomePanel webview can show the user avatar.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'occ.auth.getLegacyJwt', title: localize2('occGetLegacyJwt', 'OCC: Get Legacy JWT') });
+	}
+	run(accessor: ServicesAccessor): string {
+		return accessor.get(IVoidSettingsService).state.globalSettings.occLegacyJwt ?? '';
 	}
 })
 

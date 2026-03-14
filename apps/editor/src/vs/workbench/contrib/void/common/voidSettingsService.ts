@@ -148,13 +148,29 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 
 	let newSettingsOfProvider = state.settingsOfProvider
 
+	// If user signed up via OCC Legacy, wire their JWT into the ocFreeModel provider
+	const legacyJwt = state.globalSettings.occLegacyJwt
+	if (legacyJwt && (
+		newSettingsOfProvider.ocFreeModel.apiKey !== legacyJwt ||
+		newSettingsOfProvider.ocFreeModel.endpoint !== 'https://occ.mba.sh/v1'
+	)) {
+		newSettingsOfProvider = {
+			...newSettingsOfProvider,
+			ocFreeModel: {
+				...newSettingsOfProvider.ocFreeModel,
+				endpoint: 'https://occ.mba.sh/v1',
+				apiKey: legacyJwt,
+			},
+		}
+	}
+
 	// recompute _didFillInProviderSettings
 	for (const providerName of providerNames) {
 		const settingsAtProvider = newSettingsOfProvider[providerName]
 
-		// ocFreeModel is always pre-configured with a baked-in endpoint and apiKey
+		// ocFreeModel is pre-configured, but only considered "filled" when the user has a JWT
 		const didFillInProviderSettings = providerName === 'ocFreeModel'
-			? true
+			? !!state.globalSettings.occLegacyJwt
 			: Object.keys(defaultProviderSettings[providerName]).every(key => !!settingsAtProvider[key as keyof typeof settingsAtProvider])
 
 		if (didFillInProviderSettings === settingsAtProvider._didFillInProviderSettings) continue
@@ -338,12 +354,22 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 				}
 
 				// ocFreeModel is always pre-configured — force pre-baked endpoint/apiKey into stored
-				// state so _validatedModelState computes _didFillInProviderSettings = true
+				// state so _validatedModelState computes _didFillInProviderSettings = true.
+				// If the user signed up via OCC Legacy (occ.mba.sh), use their personal JWT
+				// as the apiKey and point to the OCC inference proxy instead.
 				if (providerName === 'ocFreeModel') {
-					readS.settingsOfProvider[providerName].endpoint = defaultProviderSettings.ocFreeModel.endpoint
-					readS.settingsOfProvider[providerName].apiKey = defaultProviderSettings.ocFreeModel.apiKey
-					readS.settingsOfProvider[providerName]._didFillInProviderSettings = true
-					// generate a persistent device ID for per-user budget tracking on LiteLLM
+					const legacyJwt = readS.globalSettings.occLegacyJwt
+					if (legacyJwt) {
+						readS.settingsOfProvider[providerName].endpoint = 'https://occ.mba.sh/v1'
+						readS.settingsOfProvider[providerName].apiKey = legacyJwt
+					} else {
+						// No JWT — clear credentials so inference is blocked
+						readS.settingsOfProvider[providerName].endpoint = ''
+						readS.settingsOfProvider[providerName].apiKey = ''
+					}
+					// Only mark as configured when a JWT is present
+					readS.settingsOfProvider[providerName]._didFillInProviderSettings = !!legacyJwt
+					// generate a persistent device ID for per-user budget tracking
 					if (!readS.settingsOfProvider[providerName].deviceId) {
 						readS.settingsOfProvider[providerName].deviceId = generateUuid()
 					}
@@ -437,8 +463,8 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			}
 		}
 		this.state = _validatedModelState(newState)
+		this._onDidChangeState.fire() // fire immediately so React updates without waiting for storage
 		await this._storeState()
-		this._onDidChangeState.fire()
 
 		// hooks
 		if (this.state.globalSettings.syncApplyToChat) this._onUpdate_syncApplyToChat()
