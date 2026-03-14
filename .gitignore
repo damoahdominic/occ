@@ -14,3 +14,4 @@ ISsues
 # Local secrets
 .env
 .env.local
+occ-backend

@@ -382,7 +382,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             items={[
               {
                 name: "Docs",
-                link: "https://docs.openclaw.ai",
+                link: "https://docs.openclawcode.ai",
                 icon: (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -437,7 +437,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             isOpen={isMobileMenuOpen}
             onClose={() => setIsMobileMenuOpen(false)}
           >
-            <a href="https://docs.openclaw.ai" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
+            <a href="https://docs.openclawcode.ai" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
               Docs
             </a>
             <a href="https://openclaw.ai" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
@@ -712,7 +712,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-[var(--text-muted)]">
-              <a href="https://docs.openclaw.ai" className="flex items-center gap-1.5 hover:text-white transition-colors">
+              <a href="https://docs.openclawcode.ai" className="flex items-center gap-1.5 hover:text-white transition-colors">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                   <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />

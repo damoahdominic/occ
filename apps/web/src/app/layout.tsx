@@ -5,7 +5,7 @@ import SmoothScrolling from "@/components/ui/scroller";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 
-const SITE_URL = "https://openclawcode.org";
+const SITE_URL = "https://openclawcode.ai";
 
 export const viewport: Viewport = {
   themeColor: "#b91c1c",
