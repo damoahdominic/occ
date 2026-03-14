@@ -398,6 +398,18 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                   <img src="https://openclaw.ai/favicon.svg" alt="" width={14} height={14} className="opacity-70" />
                 ),
               },
+              {
+                name: "Community",
+                link: "https://mba.sh",
+                icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                ),
+              },
             ]}
           />
           <div className="flex items-center gap-4">
@@ -412,15 +424,15 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               noiseIntensity={0.15}
             >
               <a
-                href="#download"
+                href="https://occ.mba.sh"
                 className="inline-flex items-center gap-2 cursor-pointer rounded-full bg-[var(--bg)] px-5 py-2 text-sm font-semibold text-white shadow-[0px_1px_0px_0px_rgba(255,255,255,0.06)_inset,0px_1px_2px_0px_rgba(0,0,0,0.4)] transition-all duration-100 hover:brightness-110 active:scale-[0.98]"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                  <polyline points="10 17 15 12 10 7" />
+                  <line x1="15" y1="12" x2="3" y2="12" />
                 </svg>
-                Download
+                Sign In
               </a>
             </NoiseBackground>
           </div>
@@ -442,6 +454,9 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             </a>
             <a href="https://openclaw.ai" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
               OpenClaw
+            </a>
+            <a href="https://mba.sh" className="text-sm text-[var(--text-muted)] hover:text-white transition-colors w-full">
+              Community
             </a>
             <NoiseBackground
               containerClassName="w-full p-1 rounded-full border border-red-500/40"
