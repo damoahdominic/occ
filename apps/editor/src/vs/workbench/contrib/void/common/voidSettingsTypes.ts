@@ -470,6 +470,7 @@ export type GlobalSettings = {
 	isOnboardingComplete: boolean;
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
+	occLegacyJwt: string;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -741,6 +742,7 @@ Non-interactive: \`openclaw uninstall --all --yes --non-interactive\`
 	isOnboardingComplete: false,
 	disableSystemMessage: false,
 	autoAcceptLLMChanges: false,
+	occLegacyJwt: '',
 }
 
 export type GlobalSettingName = keyof GlobalSettings

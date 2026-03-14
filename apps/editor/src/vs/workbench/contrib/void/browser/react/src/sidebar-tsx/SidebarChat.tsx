@@ -26,6 +26,7 @@ import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, U
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolName, LintErrorItem, ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js';
 import { CopyButton, EditToolAcceptRejectButtonsHTML, IconShell1, JumpToFileButton, JumpToTerminalButton, StatusIndicator, StatusIndicatorForApplyButton, useApplyStreamState, useEditToolStreamState } from '../markdown/ApplyBlockHoverButtons.js';
+import { QRDisplay, splitOutQRBlocks, extractURL } from '../util/QRDisplay.js';
 import { IsRunningType } from '../../../chatThreadService.js';
 import { acceptAllBg, acceptBorder, buttonFontSize, buttonTextColor, rejectAllBg, rejectBg, rejectBorder } from '../../../../common/helpers/colors.js';
 import { builtinToolNames, isABuiltinToolName, MAX_FILE_CHARS_PAGE, MAX_TERMINAL_INACTIVE_TIME } from '../../../../common/prompt/prompts.js';
@@ -1818,10 +1819,16 @@ const CommandTool = ({ toolMessage, type, threadId }: { threadId: string } & ({
 			componentParams.info = persistentTerminalNameOfId(toolMessage.params.persistentTerminalId)
 		}
 
+		const msgTrimmed = msg.trim()
+		const qrSegments = splitOutQRBlocks(msgTrimmed)
+		const qrBlocks = qrSegments.filter(s => s.isQR)
 		componentParams.children = <ToolChildrenWrapper className='whitespace-pre text-nowrap text-sm'>
+			{qrBlocks.map((seg, idx) => (
+				<QRDisplay key={idx} qrText={seg.text} url={extractURL(msgTrimmed)} />
+			))}
 			<div className='max-h-[160px] overflow-y-auto overflow-x-auto'>
 				<div className='!select-text cursor-auto'>
-					<BlockCode initValue={`${msg.trim()}`} language='shellscript' />
+					<BlockCode initValue={msgTrimmed} language='shellscript' />
 				</div>
 			</div>
 		</ToolChildrenWrapper>
@@ -3081,9 +3088,11 @@ export const SidebarChat = () => {
 
 	const initiallySuggestedPromptsHTML = <div className='flex flex-col gap-2 w-full text-nowrap text-void-fg-3 select-none'>
 		{[
-			'Summarize my codebase',
-			'How do types work in Rust?',
-			'Create a .voidrules file for me'
+			'Update OpenClaw to latest',
+			'Show my OpenClaw config',
+			'Add a new AI provider',
+			'Restart the gateway',
+			'Check gateway logs for errors',
 		].map((text, index) => (
 			<div
 				key={index}

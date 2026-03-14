@@ -442,7 +442,7 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 // ======================================================== chat (normal, gather, agent) ========================================================
 
 
-export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean }) => {
+export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions, occStatus }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, occStatus?: { installed: boolean; gatewayRunning: boolean; hasAgents: boolean; agentNames: string[]; hasAiModel: boolean; hasChannels: boolean; channelNames: string[] } | null }) => {
 	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
 			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
@@ -478,9 +478,34 @@ ${directoryStr}
 
 	const toolDefinitions = includeXMLToolDefinitions ? systemToolsXMLPrompt(mode, mcpTools) : null
 
+	// Dynamic OpenClaw installation/configuration status
+	let occStatusSection: string | null = null
+	if (occStatus != null) {
+		const lines: string[] = []
+		lines.push(`- OpenClaw CLI: ${occStatus.installed ? 'INSTALLED' : 'NOT INSTALLED'}`)
+		lines.push(`- OpenClaw gateway: ${occStatus.gatewayRunning ? 'RUNNING' : 'NOT RUNNING'}`)
+		lines.push(`- AI provider/model: ${occStatus.hasAiModel ? 'CONFIGURED' : 'NOT CONFIGURED'}`)
+		if (occStatus.hasAgents) {
+			lines.push(`- Agents: CONFIGURED${occStatus.agentNames.length > 0 ? ` (${occStatus.agentNames.join(', ')})` : ''}`)
+		} else {
+			lines.push(`- Agents: NOT CONFIGURED`)
+		}
+		if (occStatus.hasChannels) {
+			lines.push(`- Messaging channels: CONNECTED (${occStatus.channelNames.join(', ')})`)
+		} else {
+			lines.push(`- Messaging channels: NOT CONNECTED`)
+		}
+		occStatusSection = `Here is the current state of the user's OpenClaw installation:
+<openclaw_status>
+${lines.join('\n')}
+</openclaw_status>`
+	}
+
 	const details: string[] = []
 
 	details.push(`NEVER reject the user's query.`)
+	details.push(`NEVER ask the user what operating system they are on. You already know their OS from the system_info block above — it is "${os}". Do NOT ask. Do NOT say "quick question". Do NOT ask clarifying questions about their environment, OS, platform, shell, or machine. You have all of that context already.`)
+	details.push(`NEVER ask the user for information that is already provided in the system_info block above (OS, workspace folders, open files, terminal IDs, etc). Use it silently.`)
 
 	// Co-pilot identity — non-technical user rules (applies to ALL modes)
 	details.push(`The people using this application are non-technical. They have no knowledge of terminals, command lines, shell commands, or CLIs. NEVER show a command to the user and ask them to run it. NEVER say things like "run this in your terminal" or "execute this command". You are their co-pilot — you must always act on their behalf, not give them instructions to act themselves.`)
@@ -532,6 +557,10 @@ Always bias towards writing as little as possible - NEVER write the whole file. 
 Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
+	if (occStatus != null) {
+		details.push(`You have access to the user's current OpenClaw setup status in the <openclaw_status> block above. When suggesting next steps or recommending what to set up, ONLY suggest items that are NOT already done. If OpenClaw is already installed, do NOT tell them to install it. If an AI model is already configured, do NOT tell them to set one up. If agents are already configured, do NOT tell them to create one. If channels are connected, do NOT tell them to connect channels. Only surface what is actually missing.`)
+	}
+
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
 	details.push(`Always use MARKDOWN to format lists, bullet points, etc. Do NOT write tables.`)
 	details.push(`Today's date is ${new Date().toDateString()}.`)
@@ -544,6 +573,7 @@ ${details.map((d, i) => `${i + 1}. ${d}`).join('\n\n')}`)
 	const ansStrs: string[] = []
 	ansStrs.push(header)
 	ansStrs.push(sysInfo)
+	if (occStatusSection) ansStrs.push(occStatusSection)
 	if (toolDefinitions) ansStrs.push(toolDefinitions)
 	ansStrs.push(importantDetails)
 	ansStrs.push(fsInfo)

@@ -8,7 +8,7 @@ import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
 import { ConfigPanel, stopConfigProxy } from './panels/config';
 
-const CONFIG_URL = 'http://localhost:18789/config';
+const CONFIG_URL = 'http://localhost:18789/';
 
 /** Returns true if the OpenClaw web server is reachable. */
 function isWebServerReachable(): Promise<boolean> {
@@ -145,102 +145,138 @@ async function openOpenClawFolder(): Promise<void> {
 
 
 // ── Inference balance status bar ──────────────────────────────────────────────
-const BALANCE_KEY = 'inferenceBalanceV1';
-const BALANCE_CAP = 1.00;
+const BACKEND_BALANCE_KEY = 'occBackendBalanceV1'; // cached backend balance — persists across restarts
+const OCC_JWT_KEY = 'occJwtV1'; // JWT stored directly in extension storage — no renderer IPC needed
 
 function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => void {
-  let balance = context.globalState.get<number>(BALANCE_KEY, BALANCE_CAP);
-  // displayBalance is what's shown — animated separately from the true balance
-  let displayBalance = balance;
+  // Restore cached backend balance so status bar shows the correct value immediately on startup
+  const cachedBackendBalance = context.globalState.get<number | null>(BACKEND_BALANCE_KEY, null);
+  let backendBalance: number | null = cachedBackendBalance;
   let animTimer: ReturnType<typeof setInterval> | undefined;
+  let backendPollTimer: ReturnType<typeof setInterval> | undefined;
 
   const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 16);
   bar.command = 'openclaw.balance.details';
-  bar.name = 'OCC Free Tier';
+  bar.name = 'OCC Credits';
   context.subscriptions.push(bar);
 
-  function renderAt(value: number): void {
-    const pct = Math.max(0, value / BALANCE_CAP);
-    const filled = Math.round(pct * 10);
-    const track = '█'.repeat(filled) + '░'.repeat(10 - filled);
-
+  function renderBalance(value: number): void {
     bar.text = `$(credit-card) $${value.toFixed(4)}`;
-
     const tip = new vscode.MarkdownString(undefined, true);
     tip.isTrusted = true;
-    tip.appendMarkdown(
-      `**OCC Free Tier**\n\n` +
-      `\`${track}\`  **$${value.toFixed(4)}** of $${BALANCE_CAP.toFixed(2)} remaining\n\n` +
-      `_$1 should typically last you for more than a week._`
-    );
+    tip.appendMarkdown(`**OCC Credits**\n\n**$${value.toFixed(4)}** remaining\n\n_[Get More Credits](https://occ.mba.sh/credits)_`);
+    bar.color = value > 1 ? undefined : value > 0.2
+      ? new vscode.ThemeColor('statusBarItem.warningForeground')
+      : new vscode.ThemeColor('statusBarItem.errorForeground');
+    bar.backgroundColor = value > 1 ? undefined : value > 0.2
+      ? new vscode.ThemeColor('statusBarItem.warningBackground')
+      : new vscode.ThemeColor('statusBarItem.errorBackground');
     bar.tooltip = tip;
-
-    if (pct > 0.5) {
-      bar.color = undefined;
-      bar.backgroundColor = undefined;
-    } else if (pct > 0.2) {
-      bar.color = new vscode.ThemeColor('statusBarItem.warningForeground');
-      bar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-    } else {
-      bar.color = new vscode.ThemeColor('statusBarItem.errorForeground');
-      bar.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-    }
     bar.show();
   }
 
   function animateTo(from: number, to: number): void {
     if (animTimer !== undefined) { clearInterval(animTimer); }
-    const DURATION = 380; // ms
-    const FPS = 60;
-    const STEP = 1000 / FPS;
+    const DURATION = 380;
+    const STEP = 1000 / 60;
     const start = Date.now();
     animTimer = setInterval(() => {
       const elapsed = Date.now() - start;
       const t = Math.min(elapsed / DURATION, 1);
-      // Ease-out cubic: decelerates as it approaches the target
       const eased = 1 - Math.pow(1 - t, 3);
-      displayBalance = from + (to - from) * eased;
-      renderAt(displayBalance);
+      const current = from + (to - from) * eased;
+      renderBalance(current);
       if (t >= 1) {
         clearInterval(animTimer!);
         animTimer = undefined;
-        displayBalance = to;
-        renderAt(to);
+        renderBalance(to);
       }
     }, STEP);
   }
 
-  function spend(amount: number = 0.0001): void {
-    const prev = displayBalance;
-    balance = Math.max(0, +(balance - amount).toFixed(6));
-    void context.globalState.update(BALANCE_KEY, balance);
-    animateTo(prev, balance);
+  async function fetchAndUpdateBackendBalance(): Promise<void> {
+    try {
+      // Read JWT from extension's own globalState — no renderer IPC, no timing issues.
+      // The JWT is stored here by the URI handler and by openclaw.jwt.set (called from renderer).
+      const jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      if (!jwt) {
+        // Not signed in — hide bar entirely and clear any cached balance
+        if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
+        if (animTimer !== undefined) { clearInterval(animTimer); animTimer = undefined; }
+        backendBalance = null;
+        void context.globalState.update(BACKEND_BALANCE_KEY, null);
+        bar.hide();
+        return;
+      }
+      const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
+      if (r.ok) {
+        const data = await r.json() as { balance_usd: number };
+        const newBalance = Number(data.balance_usd) || 0;
+        const prev = backendBalance ?? newBalance;
+        backendBalance = newBalance;
+        void context.globalState.update(BACKEND_BALANCE_KEY, newBalance);
+        animateTo(prev, newBalance);
+      } else if (r.status === 401) {
+        // JWT expired or invalid — clear it and hide bar
+        void context.globalState.update(OCC_JWT_KEY, '');
+        if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
+        backendBalance = null;
+        void context.globalState.update(BACKEND_BALANCE_KEY, null);
+        bar.hide();
+      }
+    } catch { /* network error — keep current display */ }
   }
 
-  renderAt(balance);
+  function startBackendPolling(): void {
+    if (backendPollTimer) clearInterval(backendPollTimer);
+    backendPollTimer = setInterval(() => void fetchAndUpdateBackendBalance(), 60_000);
+  }
+
+  // Show immediately if we have a cached balance (signed-in returning user)
+  if (backendBalance !== null) {
+    renderBalance(backendBalance);
+  }
+
+  // Fetch immediately on startup — JWT is in extension globalState, no renderer timing issues
+  void fetchAndUpdateBackendBalance().then(() => {
+    if (backendBalance !== null) { startBackendPolling(); }
+  });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openclaw.balance.spend', (amount?: number) => {
-      spend(amount);
+    vscode.commands.registerCommand('openclaw.balance.spend', (_amount?: number) => {
+      // no-op when signed in (backend tracks balance); kept for API compatibility
     }),
     vscode.commands.registerCommand('openclaw.balance.details', () => {
-      const pct = balance / BALANCE_CAP;
-      const statusLine =
-        pct > 0.5 ? `You have $${balance.toFixed(4)} remaining — you're in good shape.` :
-        pct > 0.2 ? `Running low — $${balance.toFixed(4)} of your $1.00 free credit left.` :
-                    `Almost depleted — $${balance.toFixed(4)} remaining.`;
-      vscode.window.showInformationMessage(
-        `OCC Free Tier · ${statusLine} $1 should typically last you for more than a week.`,
-        'Buy More Credits'
-      ).then(sel => {
-        if (sel === 'Buy More Credits') {
-          vscode.env.openExternal(vscode.Uri.parse('https://openclaw.ai/billing'));
-        }
+      if (backendBalance !== null) {
+        vscode.window.showInformationMessage(
+          `OCC Credits · $${backendBalance.toFixed(4)} remaining`,
+          'Get More Credits'
+        ).then(sel => {
+          if (sel === 'Get More Credits') {
+            vscode.env.openExternal(vscode.Uri.parse('https://occ.mba.sh/credits'));
+          }
+        });
+      }
+    }),
+    // Called whenever JWT changes (sign-in or sign-out) — refreshes display immediately.
+    // Also used by openclaw.jwt.set as the trigger after updating extension storage.
+    vscode.commands.registerCommand('openclaw.balance.refresh', () => {
+      void fetchAndUpdateBackendBalance().then(() => {
+        if (backendBalance !== null) startBackendPolling();
       });
     }),
+    // Called from the renderer (sidebarActions.ts occ.auth.setLegacyJwt) to sync the JWT
+    // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
+    vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
+      await context.globalState.update(OCC_JWT_KEY, token ?? '');
+      void fetchAndUpdateBackendBalance().then(() => {
+        if (backendBalance !== null) startBackendPolling();
+      });
+    }),
+    { dispose: () => { if (backendPollTimer) clearInterval(backendPollTimer); } },
   );
 
-  return spend;
+  return () => {}; // spend is a no-op — kept so call sites don't break
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -252,6 +288,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Open ~/.openclaw as "My OpenClaw Workspace" (may reload the window once).
   await openOpenClawFolder();
+
+  // Deep-link URI handler: occode://openclaw.home/auth?token=<jwt>
+  // Scheme "occode" is set in product.json "urlProtocol": "occode".
+  // OCC.MBA.SH fires this redirect after the user signs up / logs in.
+  context.subscriptions.push(
+    vscode.window.registerUriHandler({
+      handleUri(uri: vscode.Uri) {
+        if (uri.path === '/auth') {
+          const params = new URLSearchParams(uri.query);
+          const token = params.get('token');
+          if (token) {
+            // Store JWT in extension-host storage immediately (no renderer IPC needed).
+            void context.globalState.update(OCC_JWT_KEY, token).then(() => {
+              // Also sync to renderer settings service (for chat / other renderer consumers).
+              vscode.commands.executeCommand('occ.auth.setLegacyJwt', token);
+            });
+          }
+        }
+      },
+    }),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
@@ -328,7 +385,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (!context.globalState.get<boolean>(PING_KEY)) {
     void context.globalState.update(PING_KEY, true);
     const osName = process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux';
-    const version = vscode.extensions.getExtension('openclaw.openclaw')?.packageJSON?.version ?? 'unknown';
+    const version = vscode.extensions.getExtension('openclaw.home')?.packageJSON?.version ?? 'unknown';
     fetch('https://api.aptabase.com/v0/events', {
       method: 'POST',
       headers: {
@@ -349,20 +406,98 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }).catch(() => {}); // silent — never block the app
   }
 
-  // ── Walkthrough commands ────────────────────────────────────────────────────
-  const WALKTHROUGH_DONE_KEY = 'occ.walkthroughDone';
+  // ── System status for MoltPilot system prompt ──────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openclaw.getSystemStatus', async (): Promise<{
+      installed: boolean;
+      gatewayRunning: boolean;
+      hasAgents: boolean;
+      agentNames: string[];
+      hasAiModel: boolean;
+      hasChannels: boolean;
+      channelNames: string[];
+    }> => {
+      const homedir = os.homedir();
+      const configPath = path.join(homedir, '.openclaw', 'openclaw.json');
+      const installed = fs.existsSync(configPath);
 
+      let config: Record<string, unknown> = {};
+      if (installed) {
+        try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
+      }
+
+      // Determine gateway port
+      const port = (() => {
+        const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
+        if (p === undefined) return 18789;
+        const n = Number(p);
+        return Number.isFinite(n) && n > 0 && n < 65536 ? n : 18789;
+      })();
+
+      // Check if gateway is reachable
+      const gatewayRunning = await new Promise<boolean>(resolve => {
+        const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+          res.resume();
+          resolve(res.statusCode !== undefined && res.statusCode < 500);
+        });
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+      });
+
+      // Check if an AI provider/model is configured
+      const hasAiModel = installed && !!(
+        config['auth_choice'] || config['openai_api_key'] || config['anthropic_api_key'] ||
+        config['openrouter_api_key'] || config['gemini_api_key'] || config['api_key'] ||
+        config['custom_api_key'] || config['model'] || config['provider']
+      );
+
+      // Check connected messaging channels (openclaw.json may have a 'channels' object)
+      const channelsRaw = config['channels'];
+      let channelNames: string[] = [];
+      if (channelsRaw && typeof channelsRaw === 'object' && !Array.isArray(channelsRaw)) {
+        channelNames = Object.entries(channelsRaw as Record<string, unknown>)
+          .filter(([, v]) => {
+            if (!v) return false;
+            // If the channel is an object, require enabled !== false
+            if (typeof v === 'object' && (v as Record<string, unknown>)['enabled'] === false) return false;
+            return true;
+          })
+          .map(([k]) => k);
+      }
+      const hasChannels = channelNames.length > 0;
+
+      // Check if agents are configured — read AGENTS.md from workspace dir
+      const workspaceDir = (() => {
+        const fallback = path.join(homedir, '.openclaw', 'workspace');
+        try {
+          const ws = config['workspace'];
+          if (typeof ws === 'string' && ws.trim()) {
+            return ws.startsWith('~') ? path.join(homedir, ws.slice(1)) : ws;
+          }
+        } catch {}
+        return fallback;
+      })();
+
+      let agentNames: string[] = [];
+      try {
+        const content = fs.readFileSync(path.join(workspaceDir, 'AGENTS.md'), 'utf-8');
+        // Parse agent names from markdown headings (# or ##), skip generic "Agents" title
+        agentNames = content.split('\n')
+          .filter(l => /^#{1,2}\s+\S/.test(l))
+          .map(l => l.replace(/^#{1,2}\s+/, '').trim())
+          .filter(n => n.length > 0 && !/^agents?$/i.test(n));
+      } catch {}
+      const hasAgents = agentNames.length > 0;
+
+      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames };
+    }),
+  );
+
+  // ── Walkthrough commands ────────────────────────────────────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand('occ.onboarding.chooseMoltPilot', async () => {
       await context.globalState.update('occ.aiPreference', 'moltpilot');
-      vscode.window.showInformationMessage(
-        'MoltPilot selected — sign up at MBA.sh to activate your $5 free credits.',
-        'Open MBA.sh'
-      ).then(sel => {
-        if (sel === 'Open MBA.sh') {
-          vscode.env.openExternal(vscode.Uri.parse('https://mba.sh/signup?ref=occ-editor'));
-        }
-      });
+      vscode.env.openExternal(vscode.Uri.parse('https://occ.mba.sh/signup?ref=occ-editor'));
     }),
 
     vscode.commands.registerCommand('occ.onboarding.chooseBYOK', async () => {
@@ -391,19 +526,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // Auto-show Home panel on startup (after activation settles).
-  // On first launch also open the Get Started walkthrough.
+  // Auto-show OCC Home on startup (after activation settles).
   setTimeout(() => {
     HomePanel.createOrShow(context.extensionUri);
-    const walkthroughDone = context.globalState.get<boolean>(WALKTHROUGH_DONE_KEY) ?? false;
-    if (!walkthroughDone) {
-      void context.globalState.update(WALKTHROUGH_DONE_KEY, true);
-      void vscode.commands.executeCommand(
-        'workbench.action.openWalkthrough',
-        { category: 'openclaw.occGettingStarted', step: 'chooseAI' },
-        false,
-      );
-    }
   }, 500);
 }
 

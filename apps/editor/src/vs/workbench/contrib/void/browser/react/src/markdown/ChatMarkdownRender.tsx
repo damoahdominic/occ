@@ -13,6 +13,7 @@ import { URI } from '../../../../../../../base/common/uri.js'
 import { isAbsolute } from '../../../../../../../base/common/path.js'
 import { separateOutFirstLine } from '../../../../common/helpers/util.js'
 import { BlockCode } from '../util/inputs.js'
+import { QRDisplay, splitOutQRBlocks, extractURL } from '../util/QRDisplay.js'
 import { CodespanLocationLink } from '../../../../common/chatThreadServiceTypes.js'
 import { getBasename, getRelative, voidOpenFileFn } from '../sidebar-tsx/SidebarChat.js'
 
@@ -545,6 +546,37 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 
 export const ChatMarkdownRender = ({ string, inPTag = false, chatMessageLocation, ...options }: { string: string, inPTag?: boolean, codeURI?: URI, chatMessageLocation: ChatMessageLocation | undefined } & RenderTokenOptions) => {
 	string = string.replaceAll('\n•', '\n\n•')
+
+	// Pre-process: extract QR block art before marked.lexer sees it.
+	// Block chars confuse the markdown parser and are unreadable in the chat
+	// font anyway.  Replace each QR block with a <QRDisplay> button that opens
+	// a properly-rendered modal.
+	const qrSegments = splitOutQRBlocks(string)
+	const hasAnyQR = qrSegments.some(s => s.isQR)
+
+	if (hasAnyQR) {
+		return (
+			<>
+				{qrSegments.map((seg, idx) => {
+					if (seg.isQR) {
+						const url = extractURL(seg.text)
+						return <QRDisplay key={idx} qrText={seg.text} url={url} />
+					}
+					const prose = seg.text.trim()
+					if (!prose) return null
+					const tokens = marked.lexer(prose)
+					return (
+						<React.Fragment key={idx}>
+							{tokens.map((token, tIdx) => (
+								<RenderToken key={tIdx} token={token} inPTag={inPTag} chatMessageLocation={chatMessageLocation} tokenIdx={`${idx}-${tIdx}`} {...options} />
+							))}
+						</React.Fragment>
+					)
+				})}
+			</>
+		)
+	}
+
 	const tokens = marked.lexer(string); // https://marked.js.org/using_pro#renderer
 	return (
 		<>

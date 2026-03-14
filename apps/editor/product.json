@@ -32,6 +32,7 @@
 	"reportIssueUrl": "https://github.com/damoahdominic/occ/issues/new",
 	"nodejsRepository": "https://nodejs.org",
 	"urlProtocol": "occode",
+	"trustedExtensionProtocolHandlers": ["openclaw.home"],
 	"extensionsGallery": {
 		"serviceUrl": "https://marketplace.visualstudio.com/_apis/public/gallery",
 		"itemUrl": "https://marketplace.visualstudio.com/items"

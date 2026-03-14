@@ -18,6 +18,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { EndOfLinePreference } from '../../../../editor/common/model.js';
 import { ToolName } from '../common/toolsServiceTypes.js';
 import { IMCPService } from '../common/mcpService.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 
 export const EMPTY_MESSAGE = '(empty message)'
 
@@ -541,6 +542,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
 		@IVoidModelService private readonly voidModelService: IVoidModelService,
 		@IMCPService private readonly mcpService: IMCPService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super()
 	}
@@ -593,7 +595,18 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 		const mcpTools = this.mcpService.getMCPTools()
 
 		const persistentTerminalIDs = this.terminalToolService.listPersistentTerminalIds()
-		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions })
+
+		const occStatus = await this.commandService.executeCommand<{
+			installed: boolean;
+			gatewayRunning: boolean;
+			hasAgents: boolean;
+			agentNames: string[];
+			hasAiModel: boolean;
+			hasChannels: boolean;
+			channelNames: string[];
+		}>('openclaw.getSystemStatus').then(r => r ?? null, () => null)
+
+		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions, occStatus })
 		return systemMessage
 	}
 

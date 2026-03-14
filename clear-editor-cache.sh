@@ -5,7 +5,8 @@
 
 set -euo pipefail
 
-APP_NAME="OCcode"
+# Dev builds use "code-oss-dev"; production builds use "OCcode"
+APP_NAME="${OCC_APP_NAME:-code-oss-dev}"
 
 # Resolve user-data directory for each OS
 case "$(uname -s)" in
