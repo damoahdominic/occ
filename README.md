@@ -1,57 +1,149 @@
-# OCC — AI-native code editor
+<p align="center">
+  <img src="https://openclawcode.org/icon.png" width="80" alt="OpenClaw Code logo" />
+</p>
 
-OCC is a free, open-source AI code editor built for everyone — no technical setup required.
-It is based on [Void](https://github.com/voideditor/void), an open-source VS Code fork with built-in AI agent, chat, and inline edits.
+<h1 align="center">OpenClaw Code</h1>
 
-[![Build](https://github.com/ninjaa/occ/actions/workflows/build-macos.yml/badge.svg)](https://github.com/ninjaa/occ/actions/workflows/build-macos.yml)
+<p align="center">
+  <strong>AI-Powered Local Harness for OpenClaw</strong><br/>
+  Set up, manage, and troubleshoot your OpenClaw agent — no terminal needed.
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/damoahdominic/occ/releases"><img src="https://img.shields.io/github/v/release/damoahdominic/occ?style=flat-square&color=ef4444" alt="Latest Release" /></a>
+  <a href="https://github.com/damoahdominic/occ/releases"><img src="https://img.shields.io/github/downloads/damoahdominic/occ/total?style=flat-square&color=ef4444" alt="Downloads" /></a>
+  <a href="https://github.com/damoahdominic/occ/stargazers"><img src="https://img.shields.io/github/stars/damoahdominic/occ?style=flat-square&color=ef4444" alt="Stars" /></a>
+  <a href="https://github.com/damoahdominic/occ/blob/main/LICENSE"><img src="https://img.shields.io/github/license/damoahdominic/occ?style=flat-square" alt="License" /></a>
+  <a href="https://discord.gg/openclaw"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
+</p>
 
-- AI chat, inline edits, and agentic code execution built in
-- **OCC Free Tier** — $1 of free inference, no API key needed
-- **Bring Your Own Key** — connect Anthropic, OpenAI, OpenRouter, Ollama, and more
-- Ships as a native desktop app for macOS (Apple Silicon + Intel), Windows, and Linux
+<p align="center">
+  <a href="https://openclawcode.org">Website</a> •
+  <a href="https://docs.openclawcode.org">Docs</a> •
+  <a href="https://github.com/damoahdominic/occ/releases">Download</a> •
+  <a href="https://mba.sh">Community</a>
+</p>
 
-## Repository structure
+---
 
-| Path | Description |
-|------|-------------|
-| `apps/editor` | OCC editor (Void/VS Code fork — full source) |
-| `apps/web` | Marketing website (Next.js) |
-| `apps/extension` | OpenClaw VS Code extension bundled in the editor |
-| `packages/control-center` | Shared React UI components |
+<p align="center">
+  <img src="docs/screenshot-home.png" width="720" alt="OCCode Home — AI-powered harness for OpenClaw" />
+</p>
 
-## Getting started
+## What is OCCode?
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full build instructions.
+OCCode is a desktop app that puts a friendly face on [OpenClaw](https://openclaw.ai). Instead of editing config files and running terminal commands, you get a visual interface to:
 
-**Quick start — website:**
-```bash
-npm install && npm run web   # http://localhost:3000
+- **Set up OpenClaw in minutes** — connect your accounts, pick your settings, done
+- **See everything at a glance** — dashboard shows what your agent is doing and what needs attention
+- **Fix problems without asking for help** — detects common issues and suggests one-click fixes
+- **Change settings without the command line** — every OpenClaw config, made visual
+- **Works everywhere** — Windows, macOS, and Linux
+
+No technical knowledge required.
+
+## Download
+
+| Platform | Link |
+|----------|------|
+| **macOS** (Apple Silicon) | [Download .dmg](https://github.com/damoahdominic/occ/releases/latest) |
+| **macOS** (Intel) | [Download .dmg](https://github.com/damoahdominic/occ/releases/latest) |
+| **Windows** | [Download .exe](https://github.com/damoahdominic/occ/releases/latest) |
+| **Linux** | [Download .AppImage](https://github.com/damoahdominic/occ/releases/latest) |
+
+Or visit [openclawcode.org](https://openclawcode.org) for auto-detected download links.
+
+## Quick Start
+
+1. **Download** OCCode for your platform
+2. **Open** the app — it detects your OpenClaw installation automatically
+3. **Follow the setup wizard** to connect your accounts and configure your agent
+4. **You're ready** — manage everything from the dashboard
+
+## Architecture
+
+```
+apps/
+  editor/         # Desktop app (VS Code fork with OpenClaw extension)
+  extension/      # OpenClaw extension — Home screen, Setup wizard, Status panel
+  web/            # Marketing website (openclawcode.org)
+packages/
+  control-center/ # Shared UI components for the control center
+occ-backend/      # Backend API (auth, billing, inference proxy)
 ```
 
-**Quick start — editor (requires Node 20.18.2):**
+## Development
+
+### Prerequisites
+
+- Node.js 20+
+- npm 10+
+- Git
+
+### Setup
+
 ```bash
+# Clone the repo
+git clone https://github.com/damoahdominic/occ.git
+cd occ
+
+# Install dependencies
+npm install
+
+# Run the marketing site locally
+cd apps/web
+npm run dev
+```
+
+### Building the Desktop App
+
+```bash
+# Build the editor
 cd apps/editor
-npm ci --ignore-scripts
-node_modules/.bin/gulp transpile-client-esbuild
-cd extensions/openclaw && npx tsc -p ./ && cd ../..
-# Launch on macOS:
-VSCODE_SKIP_PRELAUNCH=1 NODE_ENV=development VSCODE_DEV=1 \
-  ./.build/electron/OCcode.app/Contents/MacOS/Electron .
+npm run build
+
+# Package for your platform
+npm run package
 ```
 
 ## Contributing
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+We welcome contributions! Here's how to get started:
 
-## Security
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes (`git commit -m 'Add my feature'`)
+4. Push to the branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
 
-To report a security vulnerability, see [SECURITY.md](SECURITY.md).
+Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and development process.
+
+## Community
+
+- 🌐 [Website](https://openclawcode.org)
+- 📖 [Documentation](https://docs.openclawcode.org)
+- 💬 [Community Hub](https://mba.sh)
+- 🐛 [Report a Bug](https://github.com/damoahdominic/occ/issues/new?template=bug_report.md)
+- 💡 [Request a Feature](https://github.com/damoahdominic/occ/issues/new?template=feature_request.md)
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE)
+This project is open source. See the [LICENSE](LICENSE) file for details.
 
-> The underlying VS Code and Void codebases are licensed under MIT.
-> OpenClaw's API/billing layer is a separate closed-source service.
+---
+
+<p align="center">
+  Built with ❤️ by the <a href="https://mba.sh">Making Better Agents</a> community
+</p>
+
+## Star History
+
+<p align="center">
+  <a href="https://star-history.com/#damoahdominic/occ&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=damoahdominic/occ&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=damoahdominic/occ&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=damoahdominic/occ&type=Date" width="600" />
+    </picture>
+  </a>
+</p>
