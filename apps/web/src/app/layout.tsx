@@ -17,23 +17,22 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    default: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     template: "%s | OpenClaw Code",
   },
   description:
-    "OpenClaw Code is the simplest way to get started with OpenClaw AI locally. One download, zero configuration. Works on Windows, macOS, and Linux.",
+    "OpenClaw Code is the easiest way to set up, manage, and troubleshoot your OpenClaw AI agent. One download, zero configuration. Works on Windows, macOS, and Linux.",
   keywords: [
     "OpenClaw",
     "OpenClaw Code",
-    "AI coding assistant",
-    "local AI",
-    "VS Code AI",
+    "AI agent setup",
+    "local AI agent",
+    "OpenClaw setup wizard",
     "AI setup",
-    "self-hosted AI",
-    "open source AI",
+    "self-hosted AI agent",
     "OCCode",
-    "AI developer tools",
-    "one-click AI install",
+    "AI agent manager",
+    "one-click AI setup",
   ],
   authors: [{ name: "Making Better Agents", url: "https://mba.sh" }],
   creator: "Making Better Agents",
@@ -59,24 +58,24 @@ export const metadata: Metadata = {
     locale: "en_US",
     url: SITE_URL,
     siteName: "OpenClaw Code",
-    title: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    title: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     description:
-      "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux. Free and open source.",
+      "One download, zero configuration. Set up and manage your OpenClaw AI agent in minutes on Windows, macOS, or Linux.",
     images: [
       {
         url: "/OpenClawOGImage.png",
         width: 1400,
         height: 720,
-        alt: "OpenClaw Code — AI coding workspace",
+        alt: "OpenClaw Code — set up and manage your AI agent",
         type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "OpenClaw Code — The Easiest Way to Use AI Locally",
+    title: "OpenClaw Code — AI Powered Local Harness for OpenClaw",
     description:
-      "One download, zero configuration. Get OpenClaw running locally in minutes on Windows, macOS, or Linux.",
+      "One download, zero configuration. Set up and manage your OpenClaw AI agent in minutes on Windows, macOS, or Linux.",
     images: ["/OpenClawOGImage.png"],
     creator: "@openclawai",
     site: "@openclawai",
@@ -97,8 +96,8 @@ const jsonLd = {
   name: "OpenClaw Code",
   url: SITE_URL,
   description:
-    "OpenClaw Code is the simplest way to get started with OpenClaw AI locally. One download, zero configuration. Works on Windows, macOS, and Linux.",
-  applicationCategory: "DeveloperApplication",
+    "OpenClaw Code is the easiest way to set up, manage, and troubleshoot your OpenClaw AI agent. One download, zero configuration. Works on Windows, macOS, and Linux.",
+  applicationCategory: "UtilitiesApplication",
   operatingSystem: "Windows, macOS, Linux",
   offers: {
     "@type": "Offer",
@@ -109,7 +108,6 @@ const jsonLd = {
   downloadUrl: "https://github.com/damoahdominic/occ/releases",
   releaseNotes: "https://github.com/damoahdominic/occ/releases",
   softwareVersion: "latest",
-  license: "https://github.com/damoahdominic/occ/blob/main/LICENSE",
   author: {
     "@type": "Organization",
     name: "Making Better Agents",
