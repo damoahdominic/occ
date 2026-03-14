@@ -7,7 +7,7 @@
     "@azure/cosmos": "^3",
     "@azure/identity": "^4.2.1",
     "@azure/msal-node": "^2.16.1",
-    "@azure/storage-blob": "^12.25.0",
+    "@azure/storage-blob": "^12.31.0",
     "@electron/get": "^2.0.0",
     "@types/ansi-colors": "^3.2.0",
     "@types/byline": "^4.2.32",
