@@ -18,6 +18,6 @@
   },
   "dependencies": {
     "cobe": "^0.6.5",
-    "framer-motion": "^12.34.2"
+    "framer-motion": "^12.36.0"
   }
 }
