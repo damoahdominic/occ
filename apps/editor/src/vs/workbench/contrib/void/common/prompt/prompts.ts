@@ -559,6 +559,7 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 
 	if (occStatus != null) {
 		details.push(`You have access to the user's current OpenClaw setup status in the <openclaw_status> block above. When suggesting next steps or recommending what to set up, ONLY suggest items that are NOT already done. If OpenClaw is already installed, do NOT tell them to install it. If an AI model is already configured, do NOT tell them to set one up. If agents are already configured, do NOT tell them to create one. If channels are connected, do NOT tell them to connect channels. Only surface what is actually missing.`)
+		details.push(`If a skill or tool call fails because it cannot be found, your FIRST recovery step is to use the terminal tool to run it via the OpenClaw CLI: \`openclaw run <skill-name>\`. The CLI knows about all installed skills and agents — use it to locate and execute the skill rather than giving up. Only if the CLI itself is unavailable (OpenClaw NOT INSTALLED or gateway NOT RUNNING per the <openclaw_status> block) should you stop and guide the user to fix the setup via the OCC Home panel.`)
 	}
 
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)

@@ -365,6 +365,19 @@ registerAction2(class extends Action2 {
 	}
 })
 
+// Stores the per-user MoltPilot virtual key (sk-mp-*) from inference.mba.sh.
+// Called by the extension host after /api/v1/me returns api_keys.moltpilotKey.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'occ.auth.setMoltpilotKey', title: localize2('occSetMoltpilotKey', 'OCC: Set MoltPilot Key') });
+	}
+	async run(accessor: ServicesAccessor, key: string): Promise<void> {
+		if (typeof key === 'string') {
+			await accessor.get(IVoidSettingsService).setGlobalSetting('occMoltpilotKey', key);
+		}
+	}
+})
+
 
 // export class TabSwitchListener extends Disposable {
 

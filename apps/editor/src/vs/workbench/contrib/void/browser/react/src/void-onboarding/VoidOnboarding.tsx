@@ -8,6 +8,7 @@ import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
 import { ChevronRight } from 'lucide-react';
 import { ProviderName, displayInfoOfProviderName } from '../../../../common/voidSettingsTypes.js';
 import { SettingsForProvider, OllamaSetupInstructions, ModelDump } from '../void-settings-tsx/Settings.js';
+import { providerIconAnthropicSrc, providerIconOpenAISrc, providerIconGeminiSrc } from '../util/providerIcons.js';
 import { ColorScheme } from '../../../../../../../platform/theme/common/theme.js';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { isLinux } from '../../../../../../../base/common/platform.js';
@@ -369,18 +370,9 @@ const VoidOnboardingContent = () => {
 							<div className="flex flex-col gap-1.5">
 								<div className="text-sm font-semibold text-void-fg-2">Bring Your Own Key</div>
 								<div className="flex items-center gap-1.5">
-									{/* OpenAI */}
-									<span title="OpenAI" style={{display:'flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:'#10a37f',flexShrink:0}}>
-										<svg width="11" height="11" viewBox="0 0 24 24" fill="white"><path d="M22.28 9.27a5.76 5.76 0 0 0-.49-4.73 5.83 5.83 0 0 0-6.27-2.8A5.76 5.76 0 0 0 11.17 0a5.83 5.83 0 0 0-5.56 4.04 5.76 5.76 0 0 0-3.84 2.8 5.83 5.83 0 0 0 .72 6.84 5.76 5.76 0 0 0 .49 4.73 5.83 5.83 0 0 0 6.27 2.8A5.76 5.76 0 0 0 12.83 24a5.83 5.83 0 0 0 5.57-4.04 5.76 5.76 0 0 0 3.84-2.8 5.83 5.83 0 0 0-.72-6.84l-.24-.05zm-8.45 11.85a4.33 4.33 0 0 1-2.78-1.01l.14-.08 4.62-2.67a.77.77 0 0 0 .38-.66v-6.51l1.95 1.13a.07.07 0 0 1 .04.05v5.4a4.34 4.34 0 0 1-4.35 4.35zm-9.35-3.99a4.33 4.33 0 0 1-.52-2.91l.14.08 4.62 2.67a.77.77 0 0 0 .76 0l5.64-3.26v2.26a.07.07 0 0 1-.03.06l-4.67 2.7a4.34 4.34 0 0 1-5.94-1.6zm-1.21-10.07a4.33 4.33 0 0 1 2.26-1.9v5.47a.77.77 0 0 0 .38.66l5.64 3.26-1.95 1.13a.07.07 0 0 1-.07 0L4.86 12.5a4.34 4.34 0 0 1-.59-5.44zm16.02 3.72-5.64-3.26 1.95-1.12a.07.07 0 0 1 .07 0l4.67 2.7a4.33 4.33 0 0 1-.67 7.82v-5.47a.77.77 0 0 0-.38-.67zm1.94-2.92-.14-.08-4.62-2.66a.77.77 0 0 0-.76 0L10.08 8.1V5.84a.07.07 0 0 1 .03-.06l4.67-2.7a4.34 4.34 0 0 1 6.45 4.51zM9.1 13.12l-1.95-1.12a.07.07 0 0 1-.04-.06V6.54a4.34 4.34 0 0 1 7.12-3.33l-.14.08-4.62 2.67a.77.77 0 0 0-.38.66l-.01 6.5zm1.06-2.28 2.51-1.45 2.51 1.45v2.9l-2.51 1.44-2.51-1.44v-2.9z"/></svg>
-									</span>
-									{/* Anthropic */}
-									<span title="Anthropic" style={{display:'flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:'#d97757',flexShrink:0}}>
-										<svg width="11" height="11" viewBox="0 0 24 24" fill="white"><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-3.654 0H6.57L0 20h3.603l1.358-3.408h6.828l1.358 3.408h3.603L10.173 3.52zm-3.896 10.064 2.22-5.567 2.22 5.567H6.277z"/></svg>
-									</span>
-									{/* Gemini / Google */}
-									<span title="Google Gemini" style={{display:'flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:'#4285f4',flexShrink:0}}>
-										<svg width="11" height="11" viewBox="0 0 24 24" fill="white"><path d="M12 24A14.304 14.304 0 000 12 14.304 14.304 0 0012 0a14.305 14.305 0 0012 12 14.305 14.305 0 00-12 12"/></svg>
-									</span>
+									<img src={providerIconOpenAISrc} title="OpenAI" alt="OpenAI" style={{width:20,height:20,borderRadius:'50%',objectFit:'cover',flexShrink:0}} />
+									<img src={providerIconAnthropicSrc} title="Anthropic" alt="Anthropic" style={{width:20,height:20,borderRadius:'50%',objectFit:'cover',flexShrink:0}} />
+									<img src={providerIconGeminiSrc} title="Google Gemini" alt="Gemini" style={{width:20,height:20,borderRadius:'50%',objectFit:'cover',flexShrink:0}} />
 									{/* OpenRouter */}
 									<span title="OpenRouter" style={{display:'flex',alignItems:'center',justifyContent:'center',width:20,height:20,borderRadius:'50%',background:'#7c3aed',flexShrink:0}}>
 										<svg width="11" height="11" viewBox="0 0 24 24" fill="white"><path d="M16.54 7.9l.04.08 2.88 6.48-.04-.08-2.88-6.48zm4.83 5.75L16.3 2.06A1.5 1.5 0 0014.94 1h-2.3L6.5 13.56a6.27 6.27 0 00-.38 1.15 3.83 3.83 0 003.14 4.57l.37.04H11v2.18A1.5 1.5 0 0012.5 23h5a1.5 1.5 0 001.5-1.5V19h.5a3.5 3.5 0 003.5-3.5 3.47 3.47 0 00-.63-2.01zM17.5 20h-4v-1.7h4V20zm1-3.2H9.63a1.33 1.33 0 01-.12-2.65l.12-.01h.72L14.48 4h.46l4.63 10.4a.5.5 0 01-.07.4z"/></svg>

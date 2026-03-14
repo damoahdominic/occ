@@ -18,6 +18,7 @@ import { IconLoading } from '../sidebar-tsx/SidebarChat.js'
 import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js'
 import Severity from '../../../../../../../base/common/severity.js'
 import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
+import { providerIconAnthropicSrc, providerIconClaudeSrc, providerIconGeminiSrc, providerIconOpenAISrc } from '../util/providerIcons.js';
 import { TransferEditorType, TransferFilesInfo } from '../../../extensionTransferTypes.js';
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { useMCPServiceState } from '../util/services.js';
@@ -1140,7 +1141,14 @@ export const Settings = () => {
 											}`}
 										>
 											<div className='font-semibold mb-1'>Bring Your Own Key</div>
-											<div className='text-sm text-void-fg-3'>Connect Anthropic, OpenAI, OpenRouter, Ollama, and more with your own API keys.</div>
+											<div className='text-sm text-void-fg-3 mb-3'>Connect Anthropic, OpenAI, OpenRouter, Ollama, and more with your own API keys.</div>
+											<div className='flex gap-2 items-center'>
+												<img src={providerIconAnthropicSrc} alt='Anthropic' className='w-5 h-5 rounded object-contain' />
+												<img src={providerIconClaudeSrc} alt='Claude' className='w-5 h-5 rounded object-contain' />
+												<img src={providerIconOpenAISrc} alt='OpenAI' className='w-5 h-5 rounded object-contain' />
+												<img src={providerIconGeminiSrc} alt='Gemini' className='w-5 h-5 rounded object-contain' />
+												<span className='text-xs text-void-fg-3'>+ more</span>
+											</div>
 										</button>
 									</div>
 

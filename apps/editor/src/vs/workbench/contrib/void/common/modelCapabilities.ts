@@ -158,7 +158,7 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
-	ocFreeModel: ['moltpilot'],
+	ocFreeModel: ['occ-legacy'],
 
 } as const satisfies Record<ProviderName, string[]>
 
@@ -1459,6 +1459,16 @@ const openRouterSettings: VoidStaticProviderInfo = {
 const ocFreeModelSettings: VoidStaticProviderInfo = {
 	modelOptions: {
 		'moltpilot': {
+			contextWindow: 128_000,
+			reservedOutputTokenSpace: null,
+			supportsSystemMessage: 'system-role',
+			specialToolFormat: 'openai-style',
+			supportsFIM: false,
+			reasoningCapabilities: false,
+			cost: { input: 0, output: 0 },
+			downloadable: false,
+		},
+		'occ-legacy': {
 			contextWindow: 128_000,
 			reservedOutputTokenSpace: null,
 			supportsSystemMessage: 'system-role',

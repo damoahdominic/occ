@@ -148,18 +148,18 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 
 	let newSettingsOfProvider = state.settingsOfProvider
 
-	// If user signed up via OCC Legacy, wire their JWT into the ocFreeModel provider
-	const legacyJwt = state.globalSettings.occLegacyJwt
-	if (legacyJwt && (
-		newSettingsOfProvider.ocFreeModel.apiKey !== legacyJwt ||
-		newSettingsOfProvider.ocFreeModel.endpoint !== 'https://occ.mba.sh/v1'
+	// Wire the per-user moltpilot key into ocFreeModel (inference.mba.sh/v1 + sk-mp-* key)
+	const moltpilotKey = state.globalSettings.occMoltpilotKey
+	if (moltpilotKey && (
+		newSettingsOfProvider.ocFreeModel.apiKey !== moltpilotKey ||
+		newSettingsOfProvider.ocFreeModel.endpoint !== 'https://inference.mba.sh/v1'
 	)) {
 		newSettingsOfProvider = {
 			...newSettingsOfProvider,
 			ocFreeModel: {
 				...newSettingsOfProvider.ocFreeModel,
-				endpoint: 'https://occ.mba.sh/v1',
-				apiKey: legacyJwt,
+				endpoint: 'https://inference.mba.sh/v1',
+				apiKey: moltpilotKey,
 			},
 		}
 	}
@@ -168,9 +168,9 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 	for (const providerName of providerNames) {
 		const settingsAtProvider = newSettingsOfProvider[providerName]
 
-		// ocFreeModel is pre-configured, but only considered "filled" when the user has a JWT
+		// ocFreeModel is pre-configured, but only considered "filled" when the user has a moltpilot key
 		const didFillInProviderSettings = providerName === 'ocFreeModel'
-			? !!state.globalSettings.occLegacyJwt
+			? !!(state.globalSettings.occLegacyJwt && state.globalSettings.occMoltpilotKey)
 			: Object.keys(defaultProviderSettings[providerName]).every(key => !!settingsAtProvider[key as keyof typeof settingsAtProvider])
 
 		if (didFillInProviderSettings === settingsAtProvider._didFillInProviderSettings) continue
@@ -234,7 +234,7 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 const defaultState = () => {
 	const d: VoidSettingsState = {
 		settingsOfProvider: deepClone(defaultSettingsOfProvider),
-		modelSelectionOfFeature: { 'Chat': { providerName: 'ocFreeModel', modelName: 'moltpilot' }, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null },
+		modelSelectionOfFeature: { 'Chat': { providerName: 'ocFreeModel', modelName: 'occ-legacy' }, 'Ctrl+K': null, 'Autocomplete': null, 'Apply': null, 'SCM': null },
 		globalSettings: deepClone(defaultGlobalSettings),
 		optionsOfModelSelection: { 'Chat': {}, 'Ctrl+K': {}, 'Autocomplete': {}, 'Apply': {}, 'SCM': {} },
 		overridesOfModel: deepClone(defaultOverridesOfModel),
@@ -359,16 +359,17 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 				// as the apiKey and point to the OCC inference proxy instead.
 				if (providerName === 'ocFreeModel') {
 					const legacyJwt = readS.globalSettings.occLegacyJwt
-					if (legacyJwt) {
-						readS.settingsOfProvider[providerName].endpoint = 'https://occ.mba.sh/v1'
-						readS.settingsOfProvider[providerName].apiKey = legacyJwt
+					const moltpilotKey = readS.globalSettings.occMoltpilotKey
+					if (legacyJwt && moltpilotKey) {
+						readS.settingsOfProvider[providerName].endpoint = 'https://inference.mba.sh/v1'
+						readS.settingsOfProvider[providerName].apiKey = moltpilotKey
 					} else {
-						// No JWT — clear credentials so inference is blocked
+						// No key — clear credentials so inference is blocked
 						readS.settingsOfProvider[providerName].endpoint = ''
 						readS.settingsOfProvider[providerName].apiKey = ''
 					}
-					// Only mark as configured when a JWT is present
-					readS.settingsOfProvider[providerName]._didFillInProviderSettings = !!legacyJwt
+					// Only mark as configured when both JWT and moltpilot key are present
+					readS.settingsOfProvider[providerName]._didFillInProviderSettings = !!(legacyJwt && moltpilotKey)
 					// generate a persistent device ID for per-user budget tracking
 					if (!readS.settingsOfProvider[providerName].deviceId) {
 						readS.settingsOfProvider[providerName].deviceId = generateUuid()

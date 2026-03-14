@@ -471,6 +471,7 @@ export type GlobalSettings = {
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
 	occLegacyJwt: string;
+	occMoltpilotKey: string; // sk-mp-* virtual key from inference.mba.sh
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -743,6 +744,7 @@ Non-interactive: \`openclaw uninstall --all --yes --non-interactive\`
 	disableSystemMessage: false,
 	autoAcceptLLMChanges: false,
 	occLegacyJwt: '',
+	occMoltpilotKey: '',
 }
 
 export type GlobalSettingName = keyof GlobalSettings

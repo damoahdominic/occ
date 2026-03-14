@@ -210,15 +210,19 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       }
       const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
       if (r.ok) {
-        const data = await r.json() as { balance_usd: number };
+        const data = await r.json() as { balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
         const newBalance = Number(data.balance_usd) || 0;
+        // Sync per-user moltpilot key to the renderer settings service so ocFreeModel works
+        const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
+        vscode.commands.executeCommand('occ.auth.setMoltpilotKey', moltpilotKey);
         const prev = backendBalance ?? newBalance;
         backendBalance = newBalance;
         void context.globalState.update(BACKEND_BALANCE_KEY, newBalance);
         animateTo(prev, newBalance);
       } else if (r.status === 401) {
-        // JWT expired or invalid — clear it and hide bar
+        // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
         void context.globalState.update(OCC_JWT_KEY, '');
+        vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
         backendBalance = null;
         void context.globalState.update(BACKEND_BALANCE_KEY, null);
