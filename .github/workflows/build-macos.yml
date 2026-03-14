@@ -198,7 +198,7 @@ jobs:
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64/OCcode.app" 2>&1
 
       - name: Upload signed app artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         continue-on-error: true
         with:
           name: OCcode-darwin-arm64-signed
@@ -399,7 +399,7 @@ jobs:
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/VSCode-darwin-x64/OCcode.app" 2>&1
 
       - name: Upload signed app artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         continue-on-error: true
         with:
           name: OCcode-darwin-x64-signed
@@ -582,7 +582,7 @@ jobs:
           echo "user_setup=$(ls $BUILD/user-setup/VSCodeSetup.exe)" >> $GITHUB_OUTPUT
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         continue-on-error: true
         with:
           name: OCcode-win32-x64
@@ -768,7 +768,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/OCcode-linux-x64.tar.gz" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         continue-on-error: true
         with:
           name: OCcode-linux-x64
