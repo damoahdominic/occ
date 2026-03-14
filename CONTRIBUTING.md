@@ -53,6 +53,11 @@ cp .env.example .env
 ```
 Without these, the editor works fine — users can supply their own API keys (BYOK).
 
+#### BYOK key security (local only)
+- BYOK keys are entered in the editor UI and passed to the local `openclaw` CLI for onboarding.
+- The extension does **not** log or transmit BYOK keys to OCC servers; storage is handled locally by OpenClaw/VS Code.
+- To purge keys, remove them from your local OpenClaw config and any OS keychain/VS Code SecretStorage entries.
+
 ## Pull requests
 
 1. Fork the repo and create a branch from `main`.
