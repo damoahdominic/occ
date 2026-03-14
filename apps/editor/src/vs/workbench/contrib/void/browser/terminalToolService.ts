@@ -125,7 +125,33 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	private async _createTerminal(props: { cwd: string | null, config: ICreateTerminalOptions['config'], hidden?: boolean }) {
 		const { cwd: override_cwd, config, hidden } = props;
 
-		const cwd: URI | string | undefined = (override_cwd ?? undefined) ?? this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		const workspaceFolderUri = this.workspaceContextService.getWorkspace().folders[0]?.uri;
+		// Only use the workspace folder as cwd if it actually exists on disk — avoids
+		// "Starting directory does not exist" errors when ~/.openclaw hasn't been created yet.
+		let resolvedWorkspaceCwd: URI | undefined;
+		if (workspaceFolderUri?.scheme === 'file') {
+			try {
+				const { existsSync } = await import('fs');
+				resolvedWorkspaceCwd = existsSync(workspaceFolderUri.fsPath) ? workspaceFolderUri : undefined;
+			} catch { resolvedWorkspaceCwd = undefined; }
+		} else {
+			resolvedWorkspaceCwd = workspaceFolderUri;
+		}
+
+		// If override_cwd is provided but doesn't exist on disk (e.g. ~/.openclaw was just
+		// uninstalled), fall back to the home directory so the terminal can still open.
+		let safeCwd: string | null = override_cwd;
+		if (safeCwd !== null && safeCwd !== undefined) {
+			try {
+				const { existsSync } = await import('fs');
+				if (!existsSync(safeCwd)) {
+					const { homedir } = await import('os');
+					safeCwd = homedir();
+				}
+			} catch { /* keep safeCwd as-is */ }
+		}
+
+		const cwd: URI | string | undefined = (safeCwd ?? undefined) ?? resolvedWorkspaceCwd;
 
 		const options: ICreateTerminalOptions = {
 			cwd,
