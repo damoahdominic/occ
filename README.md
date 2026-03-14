@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://openclawcode.org/icon.png" width="80" alt="OpenClaw Code logo" />
+  <img src="https://openclawcode.ai/icon.png" width="80" alt="OpenClaw Code logo" />
 </p>
 
 <h1 align="center">OpenClaw Code</h1>
@@ -18,8 +18,8 @@
 </p>
 
 <p align="center">
-  <a href="https://openclawcode.org">Website</a> •
-  <a href="https://docs.openclawcode.org">Docs</a> •
+  <a href="https://openclawcode.ai">Website</a> •
+  <a href="https://docs.openclawcode.ai">Docs</a> •
   <a href="https://github.com/damoahdominic/occ/releases">Download</a> •
   <a href="https://mba.sh">Community</a>
 </p>
@@ -51,7 +51,7 @@ No technical knowledge required.
 | **Windows** | [Download .exe](https://github.com/damoahdominic/occ/releases/latest) |
 | **Linux** | [Download .AppImage](https://github.com/damoahdominic/occ/releases/latest) |
 
-Or visit [openclawcode.org](https://openclawcode.org) for auto-detected download links.
+Or visit [openclawcode.ai](https://openclawcode.ai) for auto-detected download links.
 
 ## Quick Start
 
@@ -66,7 +66,7 @@ Or visit [openclawcode.org](https://openclawcode.org) for auto-detected download
 apps/
   editor/         # Desktop app (VS Code fork with OpenClaw extension)
   extension/      # OpenClaw extension — Home screen, Setup wizard, Status panel
-  web/            # Marketing website (openclawcode.org)
+  web/            # Marketing website (openclawcode.ai)
 packages/
   control-center/ # Shared UI components for the control center
 occ-backend/      # Backend API (auth, billing, inference proxy)
@@ -120,8 +120,8 @@ Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of
 
 ## Community
 
-- 🌐 [Website](https://openclawcode.org)
-- 📖 [Documentation](https://docs.openclawcode.org)
+- 🌐 [Website](https://openclawcode.ai)
+- 📖 [Documentation](https://docs.openclawcode.ai)
 - 💬 [Community Hub](https://mba.sh)
 - 🐛 [Report a Bug](https://github.com/damoahdominic/occ/issues/new?template=bug_report.md)
 - 💡 [Request a Feature](https://github.com/damoahdominic/occ/issues/new?template=feature_request.md)
@@ -135,6 +135,14 @@ This project is open source. See the [LICENSE](LICENSE) file for details.
 <p align="center">
   Built with ❤️ by the <a href="https://mba.sh">Making Better Agents</a> community
 </p>
+
+## Contributors
+
+<a href=https://github.com/damoahdominic/occ/graphs/contributors>
+  <img src=https://contrib.rocks/image?repo=damoahdominic/occ />
+</a>
+
+Made with [contrib.rocks](https://contrib.rocks).
 
 ## Star History
 
