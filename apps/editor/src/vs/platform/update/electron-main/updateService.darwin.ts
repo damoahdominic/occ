@@ -73,14 +73,12 @@ export class DarwinUpdateService extends AbstractUpdateService implements IRelau
 		this.setState(State.Idle(UpdateType.Archive, message));
 	}
 
-	protected buildUpdateFeedUrl(quality: string): string | undefined {
-		let assetID: string;
-		if (!this.productService.darwinUniversalAssetId) {
-			assetID = process.arch === 'x64' ? 'darwin' : 'darwin-arm64';
-		} else {
-			assetID = this.productService.darwinUniversalAssetId;
-		}
-		const url = createUpdateURL(assetID, quality, this.productService);
+	protected buildUpdateFeedUrl(_quality: string): string | undefined {
+		// Use update.electronjs.org which serves a Squirrel.Mac-compatible JSON feed
+		// from GitHub Releases. Format: {updateUrl}/{platform}/{currentVersion}
+		const arch = process.arch === 'x64' ? 'darwin' : 'darwin-arm64';
+		const version = (this.productService as any).occRelease ?? this.productService.commit ?? 'latest';
+		const url = `${this.productService.updateUrl}/${arch}/${version}`;
 		try {
 			electron.autoUpdater.setFeedURL({ url });
 		} catch (e) {
