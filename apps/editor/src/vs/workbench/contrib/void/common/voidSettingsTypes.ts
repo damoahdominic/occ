@@ -471,7 +471,7 @@ export type GlobalSettings = {
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
 	occLegacyJwt: string;
-	occMoltpilotKey: string; // sk-mp-* virtual key from inference.mba.sh
+	occMoltpilotKey: string; // sk-mp-* virtual key from occ.mba.sh (proxied through OCC backend)
 }
 
 export const defaultGlobalSettings: GlobalSettings = {

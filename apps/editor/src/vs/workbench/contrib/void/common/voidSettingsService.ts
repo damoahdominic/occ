@@ -148,17 +148,17 @@ const _validatedModelState = (state: Omit<VoidSettingsState, '_modelOptions'>): 
 
 	let newSettingsOfProvider = state.settingsOfProvider
 
-	// Wire the per-user moltpilot key into ocFreeModel (inference.mba.sh/v1 + sk-mp-* key)
+	// Wire the per-user moltpilot key into ocFreeModel (occ.mba.sh/v1 + sk-mp-* key (proxied through OCC backend))
 	const moltpilotKey = state.globalSettings.occMoltpilotKey
 	if (moltpilotKey && (
 		newSettingsOfProvider.ocFreeModel.apiKey !== moltpilotKey ||
-		newSettingsOfProvider.ocFreeModel.endpoint !== 'https://inference.mba.sh/v1'
+		newSettingsOfProvider.ocFreeModel.endpoint !== 'https://occ.mba.sh/v1'
 	)) {
 		newSettingsOfProvider = {
 			...newSettingsOfProvider,
 			ocFreeModel: {
 				...newSettingsOfProvider.ocFreeModel,
-				endpoint: 'https://inference.mba.sh/v1',
+				endpoint: 'https://occ.mba.sh/v1',
 				apiKey: moltpilotKey,
 			},
 		}
@@ -361,7 +361,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 					const legacyJwt = readS.globalSettings.occLegacyJwt
 					const moltpilotKey = readS.globalSettings.occMoltpilotKey
 					if (legacyJwt && moltpilotKey) {
-						readS.settingsOfProvider[providerName].endpoint = 'https://inference.mba.sh/v1'
+						readS.settingsOfProvider[providerName].endpoint = 'https://occ.mba.sh/v1'
 						readS.settingsOfProvider[providerName].apiKey = moltpilotKey
 					} else {
 						// No key — clear credentials so inference is blocked

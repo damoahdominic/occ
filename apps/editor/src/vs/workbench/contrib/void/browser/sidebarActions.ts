@@ -365,7 +365,7 @@ registerAction2(class extends Action2 {
 	}
 })
 
-// Stores the per-user MoltPilot virtual key (sk-mp-*) from inference.mba.sh.
+// Stores the per-user MoltPilot virtual key (sk-mp-*) from occ.mba.sh (proxied through OCC backend).
 // Called by the extension host after /api/v1/me returns api_keys.moltpilotKey.
 registerAction2(class extends Action2 {
 	constructor() {
