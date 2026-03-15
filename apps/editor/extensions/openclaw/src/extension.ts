@@ -41,8 +41,8 @@ type PinnedContainer = {
 async function hideActivityBarItems(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  // Bumped to V5 — disables git entirely so SCM button never appears.
-  const APPLIED_KEY = 'activityBarHiddenConfiguredV5';
+  // Bumped to V6 — disables git built-in extensions so activation errors never appear.
+  const APPLIED_KEY = 'activityBarHiddenConfiguredV6';
   if (context.globalState.get<boolean>(APPLIED_KEY, false)) {
     return;
   }
@@ -54,6 +54,14 @@ async function hideActivityBarItems(
     // to reappear even after hiding it via pinnedViewContainers.
     await config.update('git.enabled', false, vscode.ConfigurationTarget.Global);
     await config.update('git.decorations.enabled', false, vscode.ConfigurationTarget.Global);
+
+    // Disable the git built-in extensions so they never try to activate and
+    // throw "Cannot find module" / dependency errors in the notification area.
+    for (const ext of ['vscode.git-base', 'vscode.git', 'vscode.github']) {
+      try {
+        await vscode.commands.executeCommand('workbench.extensions.disableExtension', ext);
+      } catch { /* non-fatal */ }
+    }
 
     // Complete authoritative list of all standard VS Code activity-bar containers.
     // Only Explorer and Search stay visible; everything else is hidden.
