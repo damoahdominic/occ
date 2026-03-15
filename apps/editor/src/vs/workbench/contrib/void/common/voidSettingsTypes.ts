@@ -694,6 +694,13 @@ Then: \`openclaw doctor && openclaw gateway restart\`
 Easy path: \`openclaw uninstall\`
 Non-interactive: \`openclaw uninstall --all --yes --non-interactive\`
 
+## Terminal Hygiene
+When you use the terminal to run commands, **always clean up after yourself**:
+- After completing a task or moving on to the next step, **close the OCC Agent terminal** you opened using the **kill_terminal** tool.
+- Never leave multiple OCC Agent terminals open at the same time — open one, use it, close it.
+- If a task requires multiple sequential commands, run them all in the **same terminal session** rather than opening a new one for each command.
+- Only keep a terminal open if the user explicitly needs to watch ongoing output (e.g. a running server they asked to start).
+
 ## Reference Links (Point Users Here for Deep Dives)
 - Installation: https://docs.openclaw.ai/install
 - Getting Started: https://docs.openclaw.ai/start/getting-started

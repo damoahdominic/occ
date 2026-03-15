@@ -207,7 +207,17 @@ Set up CASS for an OpenClaw instance using the upstream repo **https://github.co
 python3 /home/<user>/.local/bin/cass-openclaw-shim.py && /home/<user>/.local/bin/cass index --full --json
 \`\`\`
 
-4) Verify with:
+4) Update \`~/.openclaw/agents/main/AGENTS.md\` (create if it doesn't exist) to include a CASS section explaining how to use \`cass search\` to recall past sessions before answering questions or starting tasks.
+
+5) Restart the OpenClaw gateway:
+
+\`\`\`
+openclaw gateway restart
+\`\`\`
+
+6) Run a smoke test: start or resume an OpenClaw session and send a short message (e.g. "What did we work on last time?"). Confirm the agent is able to retrieve context via CASS before completing setup.
+
+7) Verify the index with:
 
 \`\`\`
 cass search "<query>" --robot --agent openclaw
@@ -298,6 +308,23 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
       });
     };
 
+    // Fix ~/.openclaw ownership after any sudo-based install.
+    // Uses `sudo -n` (non-interactive) which succeeds as long as the cached sudo session
+    // from cacheSudo() is still valid (~15 min default). Safe to call even when sudo
+    // wasn't used — chown is a no-op when the directory is already user-owned.
+    const fixOpenclawPermissions = async () => {
+      if (platform === 'win32') return;
+      const openclawDir = path.join(os.homedir(), '.openclaw');
+      if (!fs.existsSync(openclawDir)) return;
+      try {
+        const username = os.userInfo().username;
+        tee('Fixing .openclaw folder ownership...\n');
+        await runCaptured('sudo', ['-n', 'chown', '-R', `${username}:${username}`, openclawDir]);
+        await runCaptured('chmod', ['700', openclawDir]);
+        tee('✅  Permissions set (700, owned by you)\n');
+      } catch { /* non-fatal */ }
+    };
+
     const fail = async () => {
       post({ type: 'installState', state: 'failed' });
       const platformDesc = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : `Linux (${arch})`;
@@ -324,6 +351,7 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
       const spawnOpts: cp.SpawnOptions = platform === 'win32' ? { shell: true, windowsHide: true } : {};
       const r1 = await runCaptured('npm', ['install', '-g', 'openclaw'], spawnOpts);
       if (r1.code === 0) {
+        await fixOpenclawPermissions();
         tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
         setTimeout(() => {
@@ -340,12 +368,13 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
         tee('Retrying with elevated permissions...\n');
         const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
         if (r2.code === 0) {
+          await fixOpenclawPermissions();
           tee('\n✅  Installed successfully!\n');
           post({ type: 'installState', state: 'done' });
           setTimeout(() => {
-          HomePanel.refresh();
-          vscode.commands.executeCommand('openclaw.openWorkspace');
-        }, 1500);
+            HomePanel.refresh();
+            vscode.commands.executeCommand('openclaw.openWorkspace');
+          }, 1500);
           return;
         }
       }
@@ -376,6 +405,7 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
       tee('Running install script...\n');
       const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
       if (r1.code === 0) {
+        await fixOpenclawPermissions();
         tee('\n✅  Installed successfully!\n');
         post({ type: 'installState', state: 'done' });
         setTimeout(() => {
@@ -384,20 +414,21 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
         }, 1500);
         return;
       }
-      // Permission error → sudo cache → retry
+      // Permission error → ask for sudo, run installer under sudo, then fix permissions
       if (isPermError(fullLog)) {
         tee('\nPermission error in installer — elevated access required.\n');
         const ok = await cacheSudo('Enter your system password to complete installation');
         if (ok) {
-          tee('Retrying with cached credentials...\n');
-          const r2 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+          tee('Retrying with elevated permissions...\n');
+          const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
           if (r2.code === 0) {
+            await fixOpenclawPermissions();
             tee('\n✅  Installed successfully!\n');
             post({ type: 'installState', state: 'done' });
             setTimeout(() => {
-          HomePanel.refresh();
-          vscode.commands.executeCommand('openclaw.openWorkspace');
-        }, 1500);
+              HomePanel.refresh();
+              vscode.commands.executeCommand('openclaw.openWorkspace');
+            }, 1500);
             return;
           }
         }
@@ -418,6 +449,19 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
   private async _update() {
     const openclawDir = path.join(os.homedir(), '.openclaw');
     const dirExists = fs.existsSync(openclawDir);
+
+    // Silently fix ownership if ~/.openclaw was created as root (e.g. after a sudo install).
+    // sudo -n is non-interactive — only succeeds if a sudo session is still cached; otherwise a no-op.
+    if (dirExists && process.platform !== 'win32') {
+      try {
+        const stat = fs.statSync(openclawDir);
+        if (stat.uid !== process.getuid!()) {
+          const username = os.userInfo().username;
+          cp.exec(`sudo -n chown -R ${username}:${username} ${openclawDir} && chmod 700 ${openclawDir}`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
     const cliCheck = await this._testOpenClawCli();
     const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     const isConfigured = fs.existsSync(configFile);

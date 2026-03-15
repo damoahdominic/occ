@@ -419,7 +419,7 @@ export class ToolsService implements IToolsService {
 				if (isFolder)
 					await fileService.createFolder(uri)
 				else {
-					await fileService.createFile(uri)
+					await fileService.createFile(uri, undefined, { overwrite: true })
 				}
 				return { result: {} }
 			},
