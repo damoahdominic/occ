@@ -95,42 +95,35 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 
 	private async _manualCheckGHTagIfDisabled(explicit: boolean): Promise<VoidCheckUpdateRespose> {
 		try {
-			const response = await fetch('https://api.github.com/repos/voideditor/binaries/releases/latest');
+			const response = await fetch('https://api.github.com/repos/damoahdominic/occ/releases/latest');
 
 			const data = await response.json();
-			const version = data.tag_name;
+			const latestVersion: string = data.tag_name ?? '';
 
-			const myVersion = this._productService.version
-			const latestVersion = version
-
-			const isUpToDate = myVersion === latestVersion // only makes sense if response.ok
+			// Compare against occRelease (e.g. "v3.1.9") rather than the internal voidVersion
+			const myVersion: string = (this._productService as any).occRelease ?? this._productService.version ?? '';
+			const isUpToDate = myVersion === latestVersion || !latestVersion;
 
 			let message: string | null
 			let action: 'reinstall' | undefined
 
-			// explicit
 			if (explicit) {
 				if (response.ok) {
 					if (!isUpToDate) {
-						message = 'A new version of Void is available! Please reinstall (auto-updates are disabled on this OS) - it only takes a second!'
+						message = `OCcode ${latestVersion} is available! Auto-updates are not supported on this OS — click to download the latest version.`
 						action = 'reinstall'
+					} else {
+						message = 'OCcode is up-to-date!'
 					}
-					else {
-						message = 'OpenClaw Code is up-to-date!'
-					}
-				}
-				else {
-					message = `An error occurred when fetching the latest GitHub release tag. Please try again in ~5 minutes, or reinstall.`
+				} else {
+					message = `Could not reach GitHub to check for updates. Please try again in a few minutes.`
 					action = 'reinstall'
 				}
-			}
-			// not explicit
-			else {
+			} else {
 				if (response.ok && !isUpToDate) {
-					message = 'A new version of Void is available! Please reinstall (auto-updates are disabled on this OS) - it only takes a second!'
+					message = `OCcode ${latestVersion} is available — click to download.`
 					action = 'reinstall'
-				}
-				else {
+				} else {
 					message = null
 				}
 			}
@@ -139,11 +132,10 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 		catch (e) {
 			if (explicit) {
 				return {
-					message: `An error occurred when fetching the latest GitHub release tag: ${e}. Please try again in ~5 minutes.`,
+					message: `Could not check for updates: ${e}. Please try again in a few minutes.`,
 					action: 'reinstall',
 				}
-			}
-			else {
+			} else {
 				return { message: null } as const
 			}
 		}
