@@ -907,6 +907,10 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		// if awaiting user approval, keep isRunning true, else end isRunning
 		this._setStreamState(threadId, { isRunning: isRunningWhenEnd })
 
+		// Refresh balance immediately after every agent loop so the status bar reflects
+		// the actual spend without waiting for the next 10s poll cycle.
+		this._commandService.executeCommand('openclaw.balance.refresh').catch(() => {})
+
 		// add checkpoint before the next user message
 		if (!isRunningWhenEnd) this._addUserCheckpoint({ threadId })
 
