@@ -104,9 +104,9 @@ export const defaultModelsOfProvider = {
 		'grok-3-mini-fast'
 	],
 	gemini: [ // https://ai.google.dev/gemini-api/docs/models/gemini
-		'gemini-3.1-pro',
 		'gemini-3.1-pro-preview',
-		'gemini-2.5-pro-exp-03-25',
+		'gemini-2.5-pro',
+		'gemini-2.5-flash',
 		'gemini-2.5-flash-preview-04-17',
 		'gemini-2.0-flash',
 		'gemini-2.0-flash-lite',
@@ -123,10 +123,10 @@ export const defaultModelsOfProvider = {
 
 	openRouter: [ // https://openrouter.ai/models
 		'anthropic/claude-opus-4-6',
-		'anthropic/claude-opus-4-1',
+		'anthropic/claude-opus-4.1',
 		'anthropic/claude-sonnet-4',
 		'openai/gpt-5.4',
-		'google/gemini-3.1-pro',
+		'google/gemini-3.1-pro-preview',
 		'qwen/qwen3-235b-a22b',
 		'anthropic/claude-3.7-sonnet',
 		'anthropic/claude-3.5-sonnet',
@@ -416,8 +416,8 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 		};
 	}
 
-	if (lower.includes('gemini') && (lower.includes('3.1') || lower.includes('3-1'))) return toFallback(geminiModelOptions, 'gemini-3.1-pro')
-	if (lower.includes('gemini') && (lower.includes('2.5') || lower.includes('2-5'))) return toFallback(geminiModelOptions, 'gemini-2.5-pro-exp-03-25')
+	if (lower.includes('gemini') && (lower.includes('3.1') || lower.includes('3-1'))) return toFallback(geminiModelOptions, 'gemini-3.1-pro-preview')
+	if (lower.includes('gemini') && (lower.includes('2.5') || lower.includes('2-5'))) return toFallback(geminiModelOptions, 'gemini-2.5-pro')
 
 	if (lower.includes('claude-3-5') || lower.includes('claude-3.5')) return toFallback(anthropicModelOptions, 'claude-3-5-sonnet-20241022')
 	if (lower.includes('claude')) return toFallback(anthropicModelOptions, 'claude-3-7-sonnet-20250219')
@@ -895,7 +895,7 @@ const xAISettings: VoidStaticProviderInfo = {
 // ---------------- GEMINI ----------------
 const geminiModelOptions = { // https://ai.google.dev/gemini-api/docs/pricing
 	// https://ai.google.dev/gemini-api/docs/thinking#set-budget
-	'gemini-3.1-pro': {
+	'gemini-2.5-pro': {
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: 65_536,
 		cost: { input: 1.25, output: 5.00 },
@@ -1394,7 +1394,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: { supportsReasoning: true, canTurnOffReasoning: true, canIOReasoning: true, reasoningSlider: { type: 'budget_slider', min: 1024, max: 128_000, default: 8192 } },
 	},
-	'anthropic/claude-opus-4-1': {
+	'anthropic/claude-opus-4.1': {
 		contextWindow: 200_000,
 		reservedOutputTokenSpace: null,
 		cost: { input: 15.00, output: 30.00 },
@@ -1412,7 +1412,7 @@ const openRouterModelOptions_assumingOpenAICompat = {
 		supportsSystemMessage: 'system-role',
 		reasoningCapabilities: false,
 	},
-	'google/gemini-3.1-pro': {
+	'google/gemini-3.1-pro-preview': {
 		contextWindow: 1_048_576,
 		reservedOutputTokenSpace: null,
 		cost: { input: 1.25, output: 5.00 },
