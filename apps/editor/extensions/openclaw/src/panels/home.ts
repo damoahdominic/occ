@@ -174,24 +174,14 @@ export class HomePanel {
         }
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command === 'openclaw.uninstall') {
-        // Clean up the workspace folder and file so Explorer doesn't show a missing folder
-        try {
-          const home = os.homedir();
-          const openclawUri = vscode.Uri.file(path.join(home, '.openclaw'));
-          const folders = vscode.workspace.workspaceFolders ?? [];
-          const idx = folders.findIndex(f => f.uri.fsPath === openclawUri.fsPath);
-          if (idx !== -1) { vscode.workspace.updateWorkspaceFolders(idx, 1); }
-          const wsFile = path.join(home, '.occ', 'My OpenClaw Workspace.code-workspace');
-          if (fs.existsSync(wsFile)) { fs.unlinkSync(wsFile); }
-        } catch { /* non-fatal */ }
-        // Hand off to MoltPilot — it will ask for sudo in the terminal as needed
-        vscode.commands.executeCommand(
-          'void.openChatWithMessage',
-          'Please uninstall OpenClaw from this machine. Remove the CLI, stop and remove the gateway, and clean up any config files in ~/.openclaw. Let me know when it\'s done.',
-          'agent',
-        );
-        // Refresh the panel after a delay so it detects the uninstalled state
-        setTimeout(() => HomePanel.refresh(), 8000);
+        const password = (msg as any).password as string | undefined;
+        if (password) {
+          void this._runUninstall(password);
+        } else {
+          // No password provided — prompt via modal
+          // (This shouldn't normally happen since the webview already prompts)
+          vscode.window.showErrorMessage('Uninstall requires your system password.');
+        }
       } else if (msg.command === 'openclaw.setupBetterMemory') {
         vscode.commands.executeCommand(
           'void.openChatWithMessage',
@@ -885,6 +875,13 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
       openai:      ['--auth-choice', 'openai-api-key',     '--openai-api-key',      data.apiKey],
       openrouter:  ['--auth-choice', 'openrouter-api-key', '--openrouter-api-key', data.apiKey],
       gemini:      ['--auth-choice', 'gemini-api-key',     '--gemini-api-key',      data.apiKey],
+      ollama: [
+        '--auth-choice', 'custom-api-key',
+        '--custom-base-url', data.apiKey || 'http://localhost:11434',
+        '--custom-api-key', 'ollama',
+        '--custom-model-id', 'llama3',
+        '--custom-compatibility', 'openai',
+      ],
     };
     const flags = providerFlags[data.provider];
     if (!flags) {
