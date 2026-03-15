@@ -3507,8 +3507,22 @@ Never run bare \`cass\` (it opens a TUI).
         const res = document.getElementById('version-result');
         if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
         if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+      } else if (e.data.type === 'wizardLog') {
+        var cassOverlay = document.getElementById('cass-progress-overlay');
+        if (cassOverlay && cassOverlay.style.display === 'none') cassOverlay.style.display = 'flex';
+        var cassLog = document.getElementById('cass-log');
+        var cassStatus = document.getElementById('cass-status-line');
+        if (cassLog && e.data.text) { cassLog.textContent += e.data.text; cassLog.scrollTop = cassLog.scrollHeight; }
+        if (e.data.done) {
+          var spinner = document.getElementById('cass-spinner');
+          if (spinner) spinner.style.animation = 'none';
+          if (cassStatus) { cassStatus.textContent = e.data.ok ? 'Done!' : 'Finished with errors'; cassStatus.style.color = e.data.ok ? '#4ade80' : '#f87171'; }
+          if (e.data.ok) { setTimeout(function() { if (cassOverlay) cassOverlay.style.display = 'none'; }, 3000); }
+        } else if (cassStatus && e.data.text) {
+          var lines = (e.data.text || '').split('\\n').filter(Boolean);
+          if (lines.length) cassStatus.textContent = lines[lines.length - 1].trim();
+        }
       }
-      } else if (e.data.type === 'wizardLog') {        var cassOverlay = document.getElementById('cass-progress-overlay');        if (cassOverlay && cassOverlay.style.display === 'none') cassOverlay.style.display = 'flex';        var cassLog = document.getElementById('cass-log');        var cassStatus = document.getElementById('cass-status-line');        if (cassLog && e.data.text) { cassLog.textContent += e.data.text; cassLog.scrollTop = cassLog.scrollHeight; }        if (e.data.done) {          var spinner = document.getElementById('cass-spinner');          if (spinner) spinner.style.animation = 'none';          if (cassStatus) { cassStatus.textContent = e.data.ok ? 'Done!' : 'Finished with errors'; cassStatus.style.color = e.data.ok ? '#4ade80' : '#f87171'; }          if (e.data.ok) { setTimeout(function() { if (cassOverlay) cassOverlay.style.display = 'none'; }, 3000); }        } else if (cassStatus && e.data.text) {          var lines = (e.data.text || '').split('\n').filter(Boolean);          if (lines.length) cassStatus.textContent = lines[lines.length - 1].trim();        }
     });
   </script>
 </body>
