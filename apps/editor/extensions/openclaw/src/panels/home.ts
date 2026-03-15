@@ -3085,6 +3085,7 @@ Never run bare \`cass\` (it opens a TUI).
   </div>
 
   <!-- Uninstall full-panel state -->
+  <div id="cass-progress-overlay" style="display:none;position:fixed;inset:0;background:#0e0e0e;z-index:1100;flex-direction:column;align-items:center;justify-content:center;gap:0;">    <div style="display:flex;flex-direction:column;align-items:center;gap:20px;width:min(420px,92vw);">      <div style="position:relative;width:56px;height:56px;">        <div id="cass-spinner" style="position:absolute;inset:-8px;border:2px solid rgba(100,100,255,0.15);border-top-color:rgba(100,100,255,0.7);border-radius:50%;animation:spin 1.1s linear infinite;"></div>        <img src="${iconUri}" style="width:56px;height:56px;border-radius:12px;display:block;" />      </div>      <div style="text-align:center;">        <div style="font-size:16px;font-weight:600;color:#fff;margin-bottom:4px;">Setting up Better Memory</div>        <div id="cass-status-line" style="font-size:12px;color:#666;">Starting…</div>      </div>      <pre id="cass-log" style="width:100%;background:#111;border:1px solid #1e1e1e;border-radius:8px;padding:12px 14px;font-size:11px;color:#888;line-height:1.6;min-height:100px;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace;"></pre>    </div>  </div>
   <div id="uninstall-progress-overlay" style="display:none;position:fixed;inset:0;background:#0e0e0e;z-index:1100;flex-direction:column;align-items:center;justify-content:center;gap:0;">
     <div style="display:flex;flex-direction:column;align-items:center;gap:20px;width:min(420px,92vw);">
       <!-- Icon + spinner row -->
@@ -3165,6 +3166,7 @@ Never run bare \`cass\` (it opens a TUI).
   <script>
     const vscode = acquireVsCodeApi();
     function cmd(c) {
+      if (c === 'openclaw.setupBetterMemory') { var o = document.getElementById('cass-progress-overlay'); if (o) o.style.display = 'flex'; }
       if (c === 'openclaw.install') {
         const btn = document.getElementById('btn-primary');
         if (btn && !btn.disabled) {
@@ -3506,6 +3508,7 @@ Never run bare \`cass\` (it opens a TUI).
         if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
         if (res) { res.style.display = 'none'; res.innerHTML = ''; }
       }
+      } else if (e.data.type === 'wizardLog') {        var cassOverlay = document.getElementById('cass-progress-overlay');        if (cassOverlay && cassOverlay.style.display === 'none') cassOverlay.style.display = 'flex';        var cassLog = document.getElementById('cass-log');        var cassStatus = document.getElementById('cass-status-line');        if (cassLog && e.data.text) { cassLog.textContent += e.data.text; cassLog.scrollTop = cassLog.scrollHeight; }        if (e.data.done) {          var spinner = document.getElementById('cass-spinner');          if (spinner) spinner.style.animation = 'none';          if (cassStatus) { cassStatus.textContent = e.data.ok ? 'Done!' : 'Finished with errors'; cassStatus.style.color = e.data.ok ? '#4ade80' : '#f87171'; }          if (e.data.ok) { setTimeout(function() { if (cassOverlay) cassOverlay.style.display = 'none'; }, 3000); }        } else if (cassStatus && e.data.text) {          var lines = (e.data.text || '').split('\n').filter(Boolean);          if (lines.length) cassStatus.textContent = lines[lines.length - 1].trim();        }
     });
   </script>
 </body>
