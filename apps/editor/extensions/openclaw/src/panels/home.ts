@@ -183,39 +183,7 @@ export class HomePanel {
           vscode.window.showErrorMessage('Uninstall requires your system password.');
         }
       } else if (msg.command === 'openclaw.setupBetterMemory') {
-        vscode.commands.executeCommand(
-          'void.openChatWithMessage',
-          `# OpenClaw CASS Setup
-
-Set up CASS for an OpenClaw instance using the upstream repo **https://github.com/Dicklesworthstone/coding_agent_session_search**.
-
-1) Install the CASS CLI from that repo (per its README) into \`/home/<user>/.local/bin/cass\`.
-2) Create a shim script \`~/.local/bin/cass-openclaw-shim.py\` that converts **OpenClaw** session JSONL (\`~/.openclaw/agents/main/sessions/*.jsonl\`, nested \`type:"message"\` events) into flat JSONL \`{role, content, timestamp}\` in \`~/.openclaw/sessions/\`.
-3) Add cron \`/etc/cron.d/cass-openclaw-sync\` to run every 15 minutes:
-
-\`\`\`
-python3 /home/<user>/.local/bin/cass-openclaw-shim.py && /home/<user>/.local/bin/cass index --full --json
-\`\`\`
-
-4) Update \`~/.openclaw/agents/main/AGENTS.md\` (create if it doesn't exist) to include a CASS section explaining how to use \`cass search\` to recall past sessions before answering questions or starting tasks.
-
-5) Restart the OpenClaw gateway:
-
-\`\`\`
-openclaw gateway restart
-\`\`\`
-
-6) Run a smoke test: start or resume an OpenClaw session and send a short message (e.g. "What did we work on last time?"). Confirm the agent is able to retrieve context via CASS before completing setup.
-
-7) Verify the index with:
-
-\`\`\`
-cass search "<query>" --robot --agent openclaw
-\`\`\`
-
-Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
-          'agent',
-        );
+        void this._runCassSetup();
       } else if (msg.command === 'void.openChatWithMessage') {
         const args = msg.args as string[];
         if (args && args.length > 0) {
@@ -1038,6 +1006,214 @@ Never run bare \`cass\` (it opens a TUI). Provide paths + confirmation.`,
     } catch { /* non-fatal */ }
 
     // Reload the panel after a short delay
+    setTimeout(() => HomePanel.refresh(), 1500);
+  }
+
+  private async _runCassSetup(): Promise<void> {
+    const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
+    const home = os.homedir();
+    const env = this._buildExecEnv();
+    const isWin = process.platform === 'win32';
+
+    const runCmd = (cmd: string, args: string[], opts: cp.SpawnOptions = {}): Promise<{ code: number; output: string }> =>
+      new Promise(resolve => {
+        const child = cp.spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+        let out = '';
+        child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); out += s; post({ type: 'wizardLog', text: s, done: false, ok: false }); });
+        child.stderr?.on('data', (d: Buffer) => { const s = d.toString(); out += s; post({ type: 'wizardLog', text: s, done: false, ok: false }); });
+        child.on('close', code => resolve({ code: code ?? 1, output: out }));
+        child.on('error', err => resolve({ code: 1, output: err.message }));
+      });
+
+    post({ type: 'wizardLog', text: 'Setting up CASS (Coding Agent Session Search)...\n\n', done: false, ok: false });
+
+    // ── Step 1: Check Python ──────────────────────────────────────────────────
+    post({ type: 'wizardLog', text: '① Checking Python...\n', done: false, ok: false });
+    const pythonCmd = isWin ? 'py' : 'python3';
+    const pyCheck = await runCmd(pythonCmd, ['--version'], isWin ? { shell: true } : {});
+    if (pyCheck.code !== 0) {
+      post({ type: 'wizardLog', text: '\n❌ Python 3 not found. Please install Python 3.9+ first.\n', done: true, ok: false });
+      return;
+    }
+
+    // ── Step 2: Download CASS via HTTPS (no git needed) ───────────────────────
+    post({ type: 'wizardLog', text: '\n② Downloading CASS...\n', done: false, ok: false });
+    const cassDir = path.join(home, '.occ', 'cass-src');
+    const zipPath = path.join(home, '.occ', 'cass-download.zip');
+
+    // Clean previous download
+    try { fs.rmSync(cassDir, { recursive: true, force: true }); } catch {}
+    try { fs.unlinkSync(zipPath); } catch {}
+    if (!fs.existsSync(path.join(home, '.occ'))) {
+      fs.mkdirSync(path.join(home, '.occ'), { recursive: true });
+    }
+
+    // Download zip using Node https (no curl dependency)
+    const zipUrl = 'https://github.com/Dicklesworthstone/coding_agent_session_search/archive/refs/heads/main.zip';
+    const downloadOk = await new Promise<boolean>(resolve => {
+      const file = fs.createWriteStream(zipPath);
+      const download = (url: string) => {
+        const mod = url.startsWith('https') ? require('https') : require('http');
+        mod.get(url, (res: any) => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            download(res.headers.location);
+            return;
+          }
+          if (res.statusCode !== 200) { resolve(false); return; }
+          res.pipe(file);
+          file.on('finish', () => { file.close(); resolve(true); });
+        }).on('error', () => resolve(false));
+      };
+      download(zipUrl);
+    });
+
+    if (!downloadOk) {
+      post({ type: 'wizardLog', text: '\n❌ Failed to download CASS. Check your internet connection.\n', done: true, ok: false });
+      return;
+    }
+    post({ type: 'wizardLog', text: '   Downloaded.\n', done: false, ok: false });
+
+    // Extract zip
+    post({ type: 'wizardLog', text: '   Extracting...\n', done: false, ok: false });
+    if (isWin) {
+      await runCmd('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${zipPath}' -DestinationPath '${path.join(home, '.occ')}' -Force`], { shell: true });
+    } else {
+      await runCmd('unzip', ['-o', '-q', zipPath, '-d', path.join(home, '.occ')]);
+    }
+    // GitHub zips extract to <repo>-<branch>/ folder
+    const extractedDir = path.join(home, '.occ', 'coding_agent_session_search-main');
+    if (fs.existsSync(extractedDir)) {
+      fs.renameSync(extractedDir, cassDir);
+    }
+    try { fs.unlinkSync(zipPath); } catch {}
+
+    if (!fs.existsSync(cassDir)) {
+      post({ type: 'wizardLog', text: '\n❌ Failed to extract CASS archive.\n', done: true, ok: false });
+      return;
+    }
+    post({ type: 'wizardLog', text: '   Extracted to ~/.occ/cass-src/\n', done: false, ok: false });
+
+    // ── Step 3: Install CASS with pip ─────────────────────────────────────────
+    post({ type: 'wizardLog', text: '\n③ Installing CASS (pip install)...\n', done: false, ok: false });
+    const pipArgs = ['-m', 'pip', 'install', '--user', '-e', cassDir];
+    const pipResult = await runCmd(pythonCmd, pipArgs, isWin ? { shell: true } : {});
+    if (pipResult.code !== 0) {
+      post({ type: 'wizardLog', text: '\n❌ pip install failed. See output above.\n', done: true, ok: false });
+      return;
+    }
+    post({ type: 'wizardLog', text: '   ✅ CASS installed.\n', done: false, ok: false });
+
+    // ── Step 4: Write OpenClaw session shim ───────────────────────────────────
+    post({ type: 'wizardLog', text: '\n④ Writing session converter shim...\n', done: false, ok: false });
+    const shimDir = isWin ? path.join(home, 'AppData', 'Local', 'bin') : path.join(home, '.local', 'bin');
+    if (!fs.existsSync(shimDir)) fs.mkdirSync(shimDir, { recursive: true });
+    const shimPath = path.join(shimDir, 'cass-openclaw-shim.py');
+    const shimContent = `#!/usr/bin/env python3
+"""Convert OpenClaw session JSONL to flat CASS-compatible JSONL."""
+import json, os, glob, sys
+
+SRC = os.path.expanduser("~/.openclaw/agents/main/sessions")
+DST = os.path.expanduser("~/.openclaw/sessions")
+os.makedirs(DST, exist_ok=True)
+
+for src_path in glob.glob(os.path.join(SRC, "*.jsonl")):
+    dst_path = os.path.join(DST, os.path.basename(src_path))
+    # Skip if destination is newer
+    if os.path.exists(dst_path) and os.path.getmtime(dst_path) >= os.path.getmtime(src_path):
+        continue
+    entries = []
+    with open(src_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if evt.get("type") != "message":
+                continue
+            msg = evt.get("message", evt)
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+                )
+            if not content or not role:
+                continue
+            entries.append(json.dumps({
+                "role": role,
+                "content": content,
+                "timestamp": evt.get("timestamp", ""),
+            }))
+    if entries:
+        with open(dst_path, "w") as f:
+            f.write("\\n".join(entries) + "\\n")
+
+print(f"Converted {len(glob.glob(os.path.join(SRC, '*.jsonl')))} sessions")
+`;
+    fs.writeFileSync(shimPath, shimContent, { mode: 0o755 });
+    post({ type: 'wizardLog', text: `   Written to ${shimPath}\n`, done: false, ok: false });
+
+    // ── Step 5: Update AGENTS.md (idempotent) ─────────────────────────────────
+    post({ type: 'wizardLog', text: '\n⑤ Updating AGENTS.md...\n', done: false, ok: false });
+    const openclawDir = path.join(home, '.openclaw');
+    const agentsDir = path.join(openclawDir, 'agents', 'main');
+    if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+    const agentsMdPath = path.join(agentsDir, 'AGENTS.md');
+    let agentsMd = '';
+    try { agentsMd = fs.readFileSync(agentsMdPath, 'utf-8'); } catch {}
+
+    if (!agentsMd.includes('## CASS')) {
+      const cassSection = `
+## CASS (Coding Agent Session Search)
+
+Before answering questions or starting tasks, search prior sessions for context:
+
+\`\`\`bash
+cass search "<topic>" --robot --limit 5 --fields minimal
+cass search "<topic>" --robot --days 7
+\`\`\`
+
+Key flags: \`--robot\` (machine output, mandatory), \`--limit N\`, \`--agent NAME\`, \`--days N\`.
+Never run bare \`cass\` (it opens a TUI).
+`;
+      fs.appendFileSync(agentsMdPath, cassSection);
+      post({ type: 'wizardLog', text: '   ✅ CASS section added to AGENTS.md\n', done: false, ok: false });
+    } else {
+      post({ type: 'wizardLog', text: '   CASS section already present — skipped.\n', done: false, ok: false });
+    }
+
+    // ── Step 6: Restart gateway ───────────────────────────────────────────────
+    post({ type: 'wizardLog', text: '\n⑥ Restarting OpenClaw gateway...\n', done: false, ok: false });
+    const cliPath = await this._findOpenClawPath() ?? 'openclaw';
+    await runCmd(cliPath, ['gateway', 'restart'], isWin ? { shell: true } : {});
+    post({ type: 'wizardLog', text: '   Gateway restarted.\n', done: false, ok: false });
+
+    // ── Step 7: Run shim + index + smoke test ─────────────────────────────────
+    post({ type: 'wizardLog', text: '\n⑦ Running initial sync & smoke test...\n', done: false, ok: false });
+    await runCmd(pythonCmd, [shimPath]);
+
+    // Find cass binary
+    const cassPath = isWin
+      ? path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Scripts', 'cass')
+      : path.join(home, '.local', 'bin', 'cass');
+    const cassCmd = fs.existsSync(cassPath) ? cassPath : 'cass';
+
+    const indexResult = await runCmd(cassCmd, ['index', '--full', '--json']);
+    if (indexResult.code !== 0) {
+      post({ type: 'wizardLog', text: '\n⚠️  Index build had issues but may still work. Continuing...\n', done: false, ok: false });
+    }
+
+    const searchResult = await runCmd(cassCmd, ['search', 'test', '--robot', '--limit', '1']);
+    if (searchResult.code === 0) {
+      post({ type: 'wizardLog', text: '\n✅ CASS setup complete! Session search is ready.\n', done: true, ok: true });
+    } else {
+      post({ type: 'wizardLog', text: '\n⚠️  Setup finished but smoke test returned non-zero. CASS may need a few sessions before search works.\n', done: true, ok: true });
+    }
+
+    // Refresh panel
     setTimeout(() => HomePanel.refresh(), 1500);
   }
 
