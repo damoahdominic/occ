@@ -96,6 +96,10 @@
 			{
 				"command": "openclaw.status",
 				"title": "OpenClaw: Status"
+			},
+			{
+				"command": "openclaw.smokeTest",
+				"title": "OCC: Smoke Test (Credits & Keys)"
 			}
 		]
 	},

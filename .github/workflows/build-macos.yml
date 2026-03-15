@@ -26,6 +26,19 @@ jobs:
         with:
           node-version: '20.18.2'
 
+      - name: Stamp release version in product.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: apps/editor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
+            p.occRelease = process.env.GITHUB_REF_NAME;
+            p.commit = process.env.GITHUB_REF_NAME;
+            fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
+            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+          "
+
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci --ignore-scripts
@@ -231,6 +244,19 @@ jobs:
         with:
           node-version: '20.18.2'
 
+      - name: Stamp release version in product.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: apps/editor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
+            p.occRelease = process.env.GITHUB_REF_NAME;
+            p.commit = process.env.GITHUB_REF_NAME;
+            fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
+            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+          "
+
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci --ignore-scripts
@@ -435,6 +461,19 @@ jobs:
         with:
           node-version: '20.18.2'
 
+      - name: Stamp release version in product.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: apps/editor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
+            p.occRelease = process.env.GITHUB_REF_NAME;
+            p.commit = process.env.GITHUB_REF_NAME;
+            fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
+            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+          "
+
       - name: Install editor dependencies
         working-directory: apps/editor
         run: npm ci --ignore-scripts
@@ -638,6 +677,19 @@ jobs:
             libsecret-1-dev \
             libx11-dev \
             libxkbfile-dev
+
+      - name: Stamp release version in product.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: apps/editor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
+            p.occRelease = process.env.GITHUB_REF_NAME;
+            p.commit = process.env.GITHUB_REF_NAME;
+            fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
+            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+          "
 
       - name: Install editor dependencies
         working-directory: apps/editor

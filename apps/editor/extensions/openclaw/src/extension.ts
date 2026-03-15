@@ -152,16 +152,22 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
   // Restore cached backend balance so status bar shows the correct value immediately on startup
   const cachedBackendBalance = context.globalState.get<number | null>(BACKEND_BALANCE_KEY, null);
   let backendBalance: number | null = cachedBackendBalance;
+  let displayedBalance: number | null = cachedBackendBalance; // tracks what's visually shown
   let animTimer: ReturnType<typeof setInterval> | undefined;
   let backendPollTimer: ReturnType<typeof setInterval> | undefined;
+  let countdownTimer: ReturnType<typeof setInterval> | undefined;
+
+  // Burn rate tracking — keep last 3 readings to compute $/ms spend rate
+  const readings: Array<{ balance: number; time: number }> = [];
+  let burnRatePerMs = 0;
 
   const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 16);
   bar.command = 'openclaw.balance.details';
   bar.name = 'OCC Credits';
   context.subscriptions.push(bar);
 
-  function renderBalance(value: number): void {
-    bar.text = `$(credit-card) $${value.toFixed(4)}`;
+  function renderBalance(value: number, counting = false): void {
+    bar.text = `$(credit-card) $${value.toFixed(4)}${counting && burnRatePerMs > 0 ? ' ▼' : ''}`;
     const tip = new vscode.MarkdownString(undefined, true);
     tip.isTrusted = true;
     tip.appendMarkdown(`**OCC Credits**\n\n**$${value.toFixed(4)}** remaining\n\n_[Get More Credits](https://occ.mba.sh/credits)_`);
@@ -175,7 +181,22 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     bar.show();
   }
 
+  function stopCountdown(): void {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = undefined; }
+  }
+
+  function startCountdown(): void {
+    stopCountdown();
+    if (burnRatePerMs <= 0 || displayedBalance === null) return;
+    countdownTimer = setInterval(() => {
+      if (displayedBalance === null) return;
+      displayedBalance = Math.max(0, displayedBalance - burnRatePerMs * 250);
+      renderBalance(displayedBalance, true);
+    }, 250);
+  }
+
   function animateTo(from: number, to: number): void {
+    stopCountdown(); // pause countdown while animating to real value
     if (animTimer !== undefined) { clearInterval(animTimer); }
     const DURATION = 380;
     const STEP = 1000 / 60;
@@ -185,55 +206,100 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       const t = Math.min(elapsed / DURATION, 1);
       const eased = 1 - Math.pow(1 - t, 3);
       const current = from + (to - from) * eased;
+      displayedBalance = current;
       renderBalance(current);
       if (t >= 1) {
         clearInterval(animTimer!);
         animTimer = undefined;
+        displayedBalance = to;
         renderBalance(to);
+        // Resume countdown after animation settles
+        startCountdown();
       }
     }, STEP);
   }
 
+  function updateBurnRate(newBalance: number): void {
+    const now = Date.now();
+    readings.push({ balance: newBalance, time: now });
+    if (readings.length > 3) readings.shift();
+    if (readings.length >= 2) {
+      const oldest = readings[0];
+      const newest = readings[readings.length - 1];
+      const delta = oldest.balance - newest.balance; // positive = spending
+      const elapsed = newest.time - oldest.time;
+      burnRatePerMs = elapsed > 0 && delta > 0 ? delta / elapsed : 0;
+    }
+  }
+
   async function fetchAndUpdateBackendBalance(): Promise<void> {
     try {
-      // Read JWT from extension's own globalState — no renderer IPC, no timing issues.
-      // The JWT is stored here by the URI handler and by openclaw.jwt.set (called from renderer).
-      const jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      // Read JWT from extension's own globalState first.
+      // FALLBACK: if extension globalState has no JWT (e.g. user signed in before this session
+      // synced, or the extension was reloaded), read from occLegacyJwt in VS Code settings and
+      // backfill extension globalState so future reads work without IPC.
+      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
       if (!jwt) {
-        // Not signed in — hide bar entirely and clear any cached balance
+        try {
+          const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
+          if (legacyJwt) {
+            jwt = legacyJwt;
+            await context.globalState.update(OCC_JWT_KEY, jwt);
+          }
+        } catch { /* renderer not ready yet — will retry on next poll */ }
+      }
+
+      if (!jwt) {
+        // Truly not signed in — hide bar entirely and clear any cached balance
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
         if (animTimer !== undefined) { clearInterval(animTimer); animTimer = undefined; }
+        stopCountdown();
         backendBalance = null;
+        displayedBalance = null;
+        readings.length = 0;
+        burnRatePerMs = 0;
         void context.globalState.update(BACKEND_BALANCE_KEY, null);
         bar.hide();
         return;
       }
+
       const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
       if (r.ok) {
         const data = await r.json() as { balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
         const newBalance = Number(data.balance_usd) || 0;
         // Sync per-user moltpilot key to the renderer settings service so ocFreeModel works
         const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
+        // Sync JWT to renderer settings so the condition (occLegacyJwt && occMoltpilotKey) passes
+        // in voidSettingsService.ts — without this, ocFreeModel clears endpoint/apiKey
+        vscode.commands.executeCommand('occ.auth.setLegacyJwt', jwt);
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', moltpilotKey);
-        const prev = backendBalance ?? newBalance;
+        updateBurnRate(newBalance);
+        const prev = displayedBalance ?? newBalance;
         backendBalance = newBalance;
         void context.globalState.update(BACKEND_BALANCE_KEY, newBalance);
         animateTo(prev, newBalance);
+        // Self-healing: restart the poll timer after every successful fetch so the
+        // interval resets cleanly and polling survives network blips or missed starts.
+        startBackendPolling();
       } else if (r.status === 401) {
         // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
         void context.globalState.update(OCC_JWT_KEY, '');
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
+        stopCountdown();
         backendBalance = null;
+        displayedBalance = null;
+        readings.length = 0;
+        burnRatePerMs = 0;
         void context.globalState.update(BACKEND_BALANCE_KEY, null);
         bar.hide();
       }
-    } catch { /* network error — keep current display */ }
+    } catch { /* network error — keep current display, next poll will retry */ }
   }
 
   function startBackendPolling(): void {
     if (backendPollTimer) clearInterval(backendPollTimer);
-    backendPollTimer = setInterval(() => void fetchAndUpdateBackendBalance(), 60_000);
+    backendPollTimer = setInterval(() => void fetchAndUpdateBackendBalance(), 5_000);
   }
 
   // Show immediately if we have a cached balance (signed-in returning user)
@@ -241,10 +307,10 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     renderBalance(backendBalance);
   }
 
-  // Fetch immediately on startup — JWT is in extension globalState, no renderer timing issues
-  void fetchAndUpdateBackendBalance().then(() => {
-    if (backendBalance !== null) { startBackendPolling(); }
-  });
+  // Fetch immediately on startup — also attempt JWT fallback from renderer settings.
+  // Small delay so the renderer (IVoidSettingsService) finishes loading before we call
+  // occ.auth.getLegacyJwt, which reads from it.
+  setTimeout(() => void fetchAndUpdateBackendBalance(), 2000);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.balance.spend', (_amount?: number) => {
@@ -265,19 +331,111 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     // Called whenever JWT changes (sign-in or sign-out) — refreshes display immediately.
     // Also used by openclaw.jwt.set as the trigger after updating extension storage.
     vscode.commands.registerCommand('openclaw.balance.refresh', () => {
-      void fetchAndUpdateBackendBalance().then(() => {
-        if (backendBalance !== null) startBackendPolling();
-      });
+      void fetchAndUpdateBackendBalance();
     }),
     // Called from the renderer (sidebarActions.ts occ.auth.setLegacyJwt) to sync the JWT
     // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
     vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
       await context.globalState.update(OCC_JWT_KEY, token ?? '');
-      void fetchAndUpdateBackendBalance().then(() => {
-        if (backendBalance !== null) startBackendPolling();
-      });
+      void fetchAndUpdateBackendBalance();
     }),
-    { dispose: () => { if (backendPollTimer) clearInterval(backendPollTimer); } },
+
+    // Smoke test: verifies JWT, moltpilot key, OCC key, balance, and inference tracking.
+    // Results open in a new editor tab (Output panel removed from this fork).
+    vscode.commands.registerCommand('openclaw.smokeTest', async () => {
+      const lines: string[] = [];
+      const log = (msg: string) => lines.push(msg);
+
+      log('=== OCC Smoke Test ===');
+      log(`Time: ${new Date().toISOString()}`);
+      log('');
+
+      // 1. JWT
+      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      log(`[1] JWT in extension globalState (occJwtV1): ${jwt ? 'OK present (' + jwt.substring(0, 20) + '...)' : 'MISSING'}`);
+      // Check what the renderer has for occLegacyJwt — this is what voidSettingsService reads
+      try {
+        const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
+        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present (' + legacyJwt.substring(0, 20) + '...)' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
+        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.globalState.update(OCC_JWT_KEY, jwt); }
+      } catch { log('    occLegacyJwt check: renderer not ready'); }
+
+      if (!jwt) { lines.push('\nNot signed in — cannot proceed.'); }
+      else {
+        // 2. /api/v1/me — balance + keys (before)
+        log('\n[2] Calling occ.mba.sh/api/v1/me (before)...');
+        let balanceBefore = 0;
+        let moltpilotKey = '';
+        let occKey = '';
+        try {
+          const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
+          if (r.ok) {
+            const d = await r.json() as { balance_usd: number; email?: string; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
+            balanceBefore = Number(d.balance_usd) || 0;
+            moltpilotKey = d.api_keys?.moltpilotKey ?? '';
+            occKey = d.api_keys?.occKey ?? '';
+            log(`    Status: 200 OK`);
+            log(`    Email:        ${d.email ?? '(not returned)'}`);
+            log(`    Balance:      $${balanceBefore.toFixed(6)}`);
+            log(`    MoltpilotKey: ${moltpilotKey ? 'OK ' + moltpilotKey.substring(0, 12) + '...' : 'MISSING'}`);
+            log(`    OccKey:       ${occKey ? 'OK ' + occKey.substring(0, 12) + '...' : 'MISSING'}`);
+          } else {
+            log(`    HTTP ${r.status} -- JWT may be expired`);
+          }
+        } catch (e) { log(`    Network error: ${e}`); }
+
+        const inferenceTest = async (label: string, key: string): Promise<void> => {
+          log(`\n[${label}] Inference test with ${label} (model: occ-legacy)...`);
+          try {
+            const resp = await fetch('https://inference.mba.sh/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+              body: JSON.stringify({ model: 'occ-legacy', stream: false, messages: [{ role: 'user', content: 'Say: SMOKE_OK' }], max_tokens: 20 }),
+            });
+            const rawText = await resp.text();
+            log(`    HTTP ${resp.status}`);
+            log(`    Raw (first 500): ${rawText.substring(0, 500)}`);
+            if (resp.ok) {
+              try {
+                const d = JSON.parse(rawText) as { choices?: Array<{ message?: { content?: string }; text?: string }> };
+                log(`    Reply: ${(d.choices?.[0]?.message?.content ?? d.choices?.[0]?.text ?? '(no content)').trim()}`);
+              } catch { log(`    (response is not JSON — likely SSE stream)`); }
+            }
+          } catch (e) { log(`    Network error: ${e}`); }
+        };
+
+        // 3. MoltPilot key
+        if (moltpilotKey) { await inferenceTest('MoltPilot key', moltpilotKey); }
+        else { log('\n[3] SKIP -- no MoltpilotKey'); }
+
+        // 4. OCC key
+        if (occKey) { await inferenceTest('OCC key', occKey); }
+        else { log('\n[4] SKIP -- no occKey returned by API'); }
+
+        // 5. Re-check balance after inference calls
+        log('\n[5] Re-checking balance (after 10s to allow backend to settle)...');
+        await new Promise(res => setTimeout(res, 10_000));
+        try {
+          const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
+          if (r.ok) {
+            const d = await r.json() as { balance_usd: number };
+            const balanceAfter = Number(d.balance_usd) || 0;
+            const delta = balanceBefore - balanceAfter;
+            log(`    Balance before: $${balanceBefore.toFixed(6)}`);
+            log(`    Balance after:  $${balanceAfter.toFixed(6)}`);
+            log(`    Delta: ${delta > 0 ? '-$' + delta.toFixed(6) + ' -- usage IS tracked' : delta === 0 ? '$0 -- no change yet (check again in 30s)' : '+$' + Math.abs(delta).toFixed(6) + ' -- balance went up?'}`);
+          }
+        } catch (e) { log(`    Network error: ${e}`); }
+      }
+
+      log('\n=== Done ===');
+
+      // Open results in a new editor tab
+      const doc = await vscode.workspace.openTextDocument({ content: lines.join('\n'), language: 'plaintext' });
+      await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
+    }),
+
+    { dispose: () => { if (backendPollTimer) clearInterval(backendPollTimer); stopCountdown(); } },
   );
 
   return () => {}; // spend is a no-op — kept so call sites don't break
