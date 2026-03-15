@@ -40,6 +40,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IMCPService } from '../common/mcpService.js';
 import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { ITerminalToolService } from './terminalToolService.js';
 
 
 // related to retrying when LLM message has error
@@ -329,6 +330,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		@IFileService private readonly _fileService: IFileService,
 		@IMCPService private readonly _mcpService: IMCPService,
 		@ICommandService private readonly _commandService: ICommandService,
+		@ITerminalToolService private readonly _terminalToolService: ITerminalToolService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
@@ -910,6 +912,17 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		// Refresh balance immediately after every agent loop so the status bar reflects
 		// the actual spend without waiting for the next 10s poll cycle.
 		this._commandService.executeCommand('openclaw.balance.refresh').catch(() => {})
+
+		// Auto-close persistent terminals opened during this agent loop to avoid UI clutter.
+		// Only close when the loop is truly done (not awaiting user approval).
+		if (!isRunningWhenEnd) {
+			try {
+				const terminalIds = this._terminalToolService.listPersistentTerminalIds();
+				for (const tid of terminalIds) {
+					this._terminalToolService.killPersistentTerminal(tid).catch(() => {});
+				}
+			} catch { /* non-fatal */ }
+		}
 
 		// add checkpoint before the next user message
 		if (!isRunningWhenEnd) this._addUserCheckpoint({ threadId })
