@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Send a report to **security@openclaw.ai** with:
+Send a report to **[team@mba.sh](mailto:team@mba.sh)** with:
 - A description of the vulnerability
 - Steps to reproduce
 - Potential impact
