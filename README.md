@@ -159,7 +159,7 @@ Made with [contrib.rocks](https://contrib.rocks).
 
 OpenClaw Code is made possible by the generous support of our sponsors.
 
-### 💎 Diamond Sponsor
+<h3 align="center">💎 Diamond Sponsor</h3>
 
 <p align="center">
   <a href="https://moltpod.com">
