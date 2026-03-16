@@ -41,8 +41,8 @@ type PinnedContainer = {
 async function hideActivityBarItems(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  // Bumped to V6 — disables git built-in extensions so activation errors never appear.
-  const APPLIED_KEY = 'activityBarHiddenConfiguredV6';
+  // Bumped to V7 — also disables typescript-language-features and emmet.
+  const APPLIED_KEY = 'activityBarHiddenConfiguredV7';
   if (context.globalState.get<boolean>(APPLIED_KEY, false)) {
     return;
   }
@@ -55,9 +55,12 @@ async function hideActivityBarItems(
     await config.update('git.enabled', false, vscode.ConfigurationTarget.Global);
     await config.update('git.decorations.enabled', false, vscode.ConfigurationTarget.Global);
 
-    // Disable the git built-in extensions so they never try to activate and
-    // throw "Cannot find module" / dependency errors in the notification area.
-    for (const ext of ['vscode.git-base', 'vscode.git', 'vscode.github']) {
+    // Disable built-in extensions that are missing compiled output in this fork
+    // and throw "Cannot find module" activation errors in the notification area.
+    for (const ext of [
+      'vscode.git-base', 'vscode.git', 'vscode.github',
+      'vscode.typescript-language-features', 'vscode.emmet',
+    ]) {
       try {
         await vscode.commands.executeCommand('workbench.extensions.disableExtension', ext);
       } catch { /* non-fatal */ }

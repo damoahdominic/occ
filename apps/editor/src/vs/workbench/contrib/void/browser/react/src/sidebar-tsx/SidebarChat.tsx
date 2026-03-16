@@ -460,10 +460,25 @@ const scrollToBottom = (divRef: { current: HTMLElement | null }) => {
 
 const ScrollToBottomContainer = ({ children, className, style, scrollContainerRef }: { children: React.ReactNode, className?: string, style?: React.CSSProperties, scrollContainerRef: React.MutableRefObject<HTMLDivElement | null> }) => {
 	const divRef = scrollContainerRef
+	const userScrolledUpRef = useRef(false)
 
-	// Always scroll to bottom whenever content changes
+	// Track whether the user has manually scrolled up
 	useEffect(() => {
-		scrollToBottom(divRef);
+		const el = divRef.current
+		if (!el) return
+		const onScroll = () => {
+			const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+			userScrolledUpRef.current = distFromBottom > 80
+		}
+		el.addEventListener('scroll', onScroll, { passive: true })
+		return () => el.removeEventListener('scroll', onScroll)
+	}, [divRef])
+
+	// Only auto-scroll to bottom if user hasn't scrolled up
+	useEffect(() => {
+		if (!userScrolledUpRef.current) {
+			scrollToBottom(divRef);
+		}
 	}, [children]);
 
 	return (
@@ -3160,6 +3175,17 @@ export const SidebarChat = () => {
 		ref={sidebarRef}
 		className='w-full h-full flex flex-col overflow-hidden'
 	>
+		{/* New thread button + past threads toggle */}
+		<div className='flex items-center justify-between px-3 py-1 border-b border-void-border-1 shrink-0'>
+			<PastThreadsList className='flex-1 min-w-0 max-h-[180px] overflow-y-auto' />
+			<button
+				className='ml-2 shrink-0 flex items-center gap-1 text-xs text-void-fg-3 opacity-60 hover:opacity-100 px-2 py-1 rounded hover:bg-zinc-700/10 dark:hover:bg-zinc-300/10'
+				onClick={() => chatThreadsService.openNewThread()}
+				title='New thread'
+			>
+				<CirclePlus size={14} />
+			</button>
+		</div>
 
 		<ErrorBoundary>
 			{messagesHTML}
