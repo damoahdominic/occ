@@ -647,6 +647,60 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
           </div>
         </section>
 
+
+        {/* Sponsors */}
+        <section className="px-6 py-24 max-w-6xl mx-auto">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)] text-center mb-4">Our Sponsors</p>
+          <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
+            Backed by the best
+          </h2>
+          <p className="text-[var(--text-muted)] text-center mb-16 max-w-xl mx-auto">
+            OpenClaw Code is made possible by the generous support of our sponsors.
+          </p>
+
+          {/* Diamond Sponsor */}
+          <div className="mb-16">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-center text-[var(--text-muted)] mb-8">
+              💎 Diamond Sponsor
+            </p>
+            <div className="flex justify-center">
+              <a
+                href="https://moltpod.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group relative rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-8 sm:p-12 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] transition-all duration-300"
+              >
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[var(--accent)]/[0.04] to-transparent pointer-events-none" />
+                <Image
+                  src="/sponsors/moltpod.png"
+                  alt="MoltPod — Diamond Sponsor"
+                  width={280}
+                  height={80}
+                  className="relative opacity-90 group-hover:opacity-100 transition-opacity duration-300"
+                  unoptimized
+                />
+              </a>
+            </div>
+          </div>
+
+          {/* Become a Sponsor CTA */}
+          <div className="text-center">
+            <p className="text-[var(--text-muted)] text-sm mb-4">
+              Want to sponsor OpenClaw Code and support open-source AI?
+            </p>
+            <a
+              href="mailto:team@mba.sh"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M22 7l-10 7L2 7" />
+              </svg>
+              Become a sponsor — team@mba.sh
+            </a>
+          </div>
+        </section>
+
         {/* CTA */}
         <section id="download" className="px-6 py-24">
           <div className="max-w-4xl mx-auto">
