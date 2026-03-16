@@ -163,7 +163,7 @@ OpenClaw Code is made possible by the generous support of our sponsors.
 
 <p align="center">
   <a href="https://moltpod.com">
-    <img src="https://openclawcode.ai/sponsors/moltpod.png" width="280" alt="MoltPod — Diamond Sponsor" />
+    <img src="https://openclawcode.ai/sponsors/moltpod.png" width="140" alt="MoltPod — Diamond Sponsor" />
   </a>
 </p>
 
