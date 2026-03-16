@@ -3526,7 +3526,7 @@ Never run bare \`cass\` (it opens a TUI).
             var fullLog = cassLog ? cassLog.textContent : '';
             setTimeout(function() {
               if (cassOverlay) cassOverlay.style.display = 'none';
-              vscode.postMessage({ command: 'void.openChatWithMessage', args: ['Better Memory (CASS) setup failed. Here is the full log:\n\n' + fullLog.trim() + '\n\nPlease diagnose what went wrong, fix it, and complete the setup.'] });
+              vscode.postMessage({ command: 'void.openChatWithMessage', args: ['Better Memory (CASS) setup failed. Here is the full log:\\n\\n' + fullLog.trim() + '\\n\\nPlease diagnose what went wrong, fix it, and complete the setup.'] });
             }, 1500);
           }
         } else if (cassStatus && e.data.text) {
