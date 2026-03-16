@@ -41,8 +41,8 @@ type PinnedContainer = {
 async function hideActivityBarItems(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  // Bumped to V7 — also disables typescript-language-features and emmet.
-  const APPLIED_KEY = 'activityBarHiddenConfiguredV7';
+  // Bumped to V8 — also disables debug-auto-launch and merge-conflict.
+  const APPLIED_KEY = 'activityBarHiddenConfiguredV8';
   if (context.globalState.get<boolean>(APPLIED_KEY, false)) {
     return;
   }
@@ -60,6 +60,7 @@ async function hideActivityBarItems(
     for (const ext of [
       'vscode.git-base', 'vscode.git', 'vscode.github',
       'vscode.typescript-language-features', 'vscode.emmet',
+      'vscode.debug-auto-launch', 'vscode.merge-conflict',
     ]) {
       try {
         await vscode.commands.executeCommand('workbench.extensions.disableExtension', ext);
@@ -128,7 +129,18 @@ async function openOpenClawFolder(): Promise<void> {
 
   // Workspace file lives in ~/.occ, points at ~/.openclaw as the folder.
   const workspaceFilePath = path.join(occPath, WORKSPACE_FILENAME);
-  if (!fs.existsSync(workspaceFilePath)) {
+  let needsWrite = !fs.existsSync(workspaceFilePath);
+  if (!needsWrite) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(workspaceFilePath, 'utf-8'));
+      if (!Array.isArray(parsed?.folders) || parsed.folders.length === 0) {
+        needsWrite = true;
+      }
+    } catch {
+      needsWrite = true;
+    }
+  }
+  if (needsWrite) {
     fs.writeFileSync(
       workspaceFilePath,
       JSON.stringify(
@@ -136,6 +148,7 @@ async function openOpenClawFolder(): Promise<void> {
           folders: [{ path: openclawPath }],
           settings: {
             'files.exclude': { '*.code-workspace': true },
+            'workbench.sideBar.visible': false,
           },
         },
         null,
@@ -462,6 +475,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Open ~/.openclaw as "My OpenClaw Workspace" (may reload the window once).
   await openOpenClawFolder();
 
+  // Close the Explorer sidebar on startup — the user opens it explicitly when needed.
+  // Use a short delay so the workbench has finished restoring its layout first.
+  setTimeout(() => {
+    vscode.commands.executeCommand('workbench.action.closeSidebar');
+  }, 500);
+
   // Deep-link URI handler: occode://openclaw.home/auth?token=<jwt>
   // Scheme "occode" is set in product.json "urlProtocol": "occode".
   // OCC.MBA.SH fires this redirect after the user signs up / logs in.
@@ -550,6 +569,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } else {
         terminal.sendText('openclaw configure', true);
       }
+    }),
+  );
+
+  // ── openclaw.runWithSudo — secure sudo tool for MoltPilot ──────────────────
+  // Shows a native password dialog (no terminal prompt), pipes to sudo -S.
+  // Called by the run_with_sudo builtin tool in toolsService.ts.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openclaw.runWithSudo', async (command: string, reason: string): Promise<{ result: string; exitCode: number }> => {
+      const password = await vscode.window.showInputBox({
+        password: true,
+        prompt: `MoltPilot needs elevated access — ${reason}`,
+        placeHolder: 'Enter your system password',
+        ignoreFocusOut: true,
+      });
+      if (!password) return { result: 'User cancelled the password prompt.', exitCode: 1 };
+
+      return new Promise(resolve => {
+        const child = require('child_process').spawn('sudo', ['-S', 'bash', '-c', command], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        child.stdin?.write(password + '\n');
+        child.stdin?.end();
+        let out = '';
+        child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+        child.stderr?.on('data', (d: Buffer) => { out += d.toString(); });
+        child.on('close', (code: number) => resolve({ result: out.trim() || '(no output)', exitCode: code ?? 1 }));
+        child.on('error', (err: Error) => resolve({ result: err.message, exitCode: 1 }));
+      });
     }),
   );
 

@@ -127,12 +127,15 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 		const workspaceFolderUri = this.workspaceContextService.getWorkspace().folders[0]?.uri;
 		// Only use the workspace folder as cwd if it actually exists on disk — avoids
-		// "Starting directory does not exist" errors when ~/.openclaw hasn't been created yet.
-		let resolvedWorkspaceCwd: URI | undefined;
+		// "Starting directory does not exist" errors when ~/.openclaw hasn't been created yet
+		// or has just been deleted during uninstall. Fall back to homedir() so the terminal
+		// can always open.
+		let resolvedWorkspaceCwd: URI | string | undefined;
 		if (workspaceFolderUri?.scheme === 'file') {
 			try {
 				const { existsSync } = await import('fs');
-				resolvedWorkspaceCwd = existsSync(workspaceFolderUri.fsPath) ? workspaceFolderUri : undefined;
+				const { homedir } = await import('os');
+				resolvedWorkspaceCwd = existsSync(workspaceFolderUri.fsPath) ? workspaceFolderUri : homedir();
 			} catch { resolvedWorkspaceCwd = undefined; }
 		} else {
 			resolvedWorkspaceCwd = workspaceFolderUri;

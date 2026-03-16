@@ -18,6 +18,7 @@ import { timeout } from '../../../../base/common/async.js'
 import { RawToolParamsObj } from '../common/sendLLMMessageTypes.js'
 import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js'
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
+import { ICommandService } from '../../../../platform/commands/common/commands.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 
 
@@ -157,6 +158,7 @@ export class ToolsService implements IToolsService {
 		@IDirectoryStrService private readonly directoryStrService: IDirectoryStrService,
 		@IMarkerService private readonly markerService: IMarkerService,
 		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 
@@ -479,6 +481,16 @@ export class ToolsService implements IToolsService {
 				// Close the background terminal by sending exit
 				await this.terminalToolService.killPersistentTerminal(persistentTerminalId)
 				return { result: {} }
+			},
+
+			run_with_sudo: async ({ command, reason }) => {
+				// Delegate to the extension-host command which has access to:
+				// - vscode.window.showInputBox (secure password dialog)
+				// - child_process.spawn (to run sudo -S)
+				const result = await this.commandService.executeCommand<{ result: string; exitCode: number }>(
+					'openclaw.runWithSudo', command, reason
+				)
+				return { result: result ?? { result: 'Extension host unavailable.', exitCode: 1 } }
 			},
 
 			// ---

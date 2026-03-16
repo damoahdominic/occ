@@ -100,6 +100,10 @@
 			{
 				"command": "openclaw.smokeTest",
 				"title": "OCC: Smoke Test (Credits & Keys)"
+			},
+			{
+				"command": "openclaw.runWithSudo",
+				"title": "OCC: Run Command with Sudo"
 			}
 		]
 	},

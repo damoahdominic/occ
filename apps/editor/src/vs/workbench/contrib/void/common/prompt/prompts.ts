@@ -305,10 +305,19 @@ export const builtinTools: {
 	},
 	run_command: {
 		name: 'run_command',
-		description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper}`,
+		description: `Runs a terminal command and waits for the result (times out after ${MAX_TERMINAL_INACTIVE_TIME}s of inactivity). ${terminalDescHelper} IMPORTANT: Never use sudo in run_command — use run_with_sudo instead.`,
 		params: {
-			command: { description: 'The terminal command to run.' },
+			command: { description: 'The terminal command to run. Must NOT start with sudo.' },
 			cwd: { description: cwdHelper },
+		},
+	},
+
+	run_with_sudo: {
+		name: 'run_with_sudo',
+		description: `Runs a single shell command that requires elevated (sudo) privileges. The user will be prompted for their password via a secure in-editor dialog — no terminal sudo prompt will appear. Use this ONLY when a command truly requires root/admin access (e.g. removing system-level npm packages, writing to /usr/local). Do NOT use for user-owned files — use run_command instead.`,
+		params: {
+			command: { description: 'The shell command to run with sudo. Do NOT include "sudo" in the command string — it will be prepended automatically.' },
+			reason: { description: 'A short human-readable explanation of why sudo is needed (shown to the user in the password prompt).' },
 		},
 	},
 
@@ -535,6 +544,7 @@ ${lines.join('\n')}
 		details.push(`You will OFTEN need to gather context before making a change. Do not immediately make a change unless you have ALL relevant context.`)
 		details.push(`ALWAYS have maximal certainty in a change BEFORE you make it. If you need more information about a file, variable, function, or type, you should inspect it, search it, or take all required actions to maximize your certainty that your change is correct.`)
 		details.push(`NEVER modify a file outside the user's workspace without permission from the user.`)
+		details.push(`CRITICAL — terminal cwd safety: NEVER assume the current working directory (cwd) is valid or exists. Always use ABSOLUTE PATHS in every shell command (e.g. rm -rf /Users/... not rm -rf ~/.openclaw). Never use relative paths or rely on cwd. If you must change directory, use cd $HOME first. This is especially important when deleting directories — if the terminal cwd is inside a directory that gets deleted, all subsequent terminal commands will fail with "Starting directory does not exist" and hang. Use absolute paths everywhere to prevent this.`)
 	}
 
 	if (mode === 'gather') {
@@ -560,6 +570,7 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	if (occStatus != null) {
 		details.push(`You have access to the user's current OpenClaw setup status in the <openclaw_status> block above. When suggesting next steps or recommending what to set up, ONLY suggest items that are NOT already done. If OpenClaw is already installed, do NOT tell them to install it. If an AI model is already configured, do NOT tell them to set one up. If agents are already configured, do NOT tell them to create one. If channels are connected, do NOT tell them to connect channels. Only surface what is actually missing.`)
 		details.push(`If a skill or tool call fails because it cannot be found, your FIRST recovery step is to use the terminal tool to run it via the OpenClaw CLI: \`openclaw run <skill-name>\`. The CLI knows about all installed skills and agents — use it to locate and execute the skill rather than giving up. Only if the CLI itself is unavailable (OpenClaw NOT INSTALLED or gateway NOT RUNNING per the <openclaw_status> block) should you stop and guide the user to fix the setup via the OCC Home panel.`)
+		details.push(`CRITICAL — OpenClaw CLI commands are ALWAYS non-interactive. NEVER run \`openclaw doctor\` or any other openclaw command that prompts for user input — these are interactive and will hang indefinitely in a non-TTY context. For status/diagnostics use only: \`openclaw --version\`, \`openclaw status\`, or direct file reads (e.g. ~/.openclaw/openclaw.json). If you need to check the gateway, use an HTTP request instead.`)
 	}
 
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)

@@ -5,7 +5,7 @@
 <h1 align="center">OpenClaw Code</h1>
 
 <p align="center">
-  <strong>AI-Powered Local Harness for OpenClaw</strong><br/>
+  <strong>AI-Powered Harness for OpenClaw</strong><br/>
   Set up, manage, and troubleshoot your OpenClaw agent — no terminal needed.
 </p>
 

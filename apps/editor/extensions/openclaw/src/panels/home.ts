@@ -50,6 +50,7 @@ export class HomePanel {
   private _pollTick = 0;
   private _lastJwt = '';
   private _lastInstalledVersion: string | null = null;
+  private _autoUpdateTriggered = false; // fire at most once per panel session
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
@@ -174,14 +175,7 @@ export class HomePanel {
         }
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } else if (msg.command === 'openclaw.uninstall') {
-        const password = (msg as any).password as string | undefined;
-        if (password) {
-          void this._runUninstall(password);
-        } else {
-          // No password provided — prompt via modal
-          // (This shouldn't normally happen since the webview already prompts)
-          vscode.window.showErrorMessage('Uninstall requires your system password.');
-        }
+        void this._runUninstall();
       } else if (msg.command === 'openclaw.setupBetterMemory') {
         void this._runCassSetup();
       } else if (msg.command === 'void.openChatWithMessage') {
@@ -202,7 +196,10 @@ export class HomePanel {
     }
     const panel = vscode.window.createWebviewPanel(
       'openclawHome', 'OCC Home', vscode.ViewColumn.One,
-      { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] }
+      { enableScripts: true, localResourceRoots: [
+        vscode.Uri.joinPath(extensionUri, 'media'),
+        vscode.Uri.joinPath(extensionUri, '..', '..', 'void_icons', 'emojis'),
+      ] }
     );
     HomePanel.currentPanel = new HomePanel(panel, extensionUri);
   }
@@ -298,6 +295,15 @@ export class HomePanel {
       void vscode.commands.executeCommand('openclaw.balance.spend');
     };
 
+    const succeed = async () => {
+      tee('\n✅  Installed successfully!\n');
+      post({ type: 'installState', state: 'done' });
+      setTimeout(() => {
+        HomePanel.refresh();
+        vscode.commands.executeCommand('openclaw.openWorkspace');
+      }, 1500);
+    };
+
     // ── Step 1: try npm install -g openclaw ───────────────────────────────────
     tee('Checking for npm...\n');
     const npmOk = await new Promise<boolean>(resolve =>
@@ -310,13 +316,7 @@ export class HomePanel {
       const r1 = await runCaptured('npm', ['install', '-g', 'openclaw'], spawnOpts);
       if (r1.code === 0) {
         await fixOpenclawPermissions();
-        tee('\n✅  Installed successfully!\n');
-        post({ type: 'installState', state: 'done' });
-        setTimeout(() => {
-          HomePanel.refresh();
-          vscode.commands.executeCommand('openclaw.openWorkspace');
-        }, 1500);
-        return;
+        await succeed(); return;
       }
       // Permission error on Unix → ask for sudo, then retry
       if (platform !== 'win32' && isPermError(fullLog)) {
@@ -327,13 +327,7 @@ export class HomePanel {
         const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
         if (r2.code === 0) {
           await fixOpenclawPermissions();
-          tee('\n✅  Installed successfully!\n');
-          post({ type: 'installState', state: 'done' });
-          setTimeout(() => {
-            HomePanel.refresh();
-            vscode.commands.executeCommand('openclaw.openWorkspace');
-          }, 1500);
-          return;
+          await succeed(); return;
         }
       }
       tee('\nnpm install did not succeed — trying full installer script...\n');
@@ -350,27 +344,13 @@ export class HomePanel {
         `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
       ];
       const r = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
-      if (r.code === 0) {
-        tee('\n✅  Installed successfully!\n');
-        post({ type: 'installState', state: 'done' });
-        setTimeout(() => {
-          HomePanel.refresh();
-          vscode.commands.executeCommand('openclaw.openWorkspace');
-        }, 1500);
-        return;
-      }
+      if (r.code === 0) { await succeed(); return; }
     } else {
       tee('Running install script...\n');
       const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
       if (r1.code === 0) {
         await fixOpenclawPermissions();
-        tee('\n✅  Installed successfully!\n');
-        post({ type: 'installState', state: 'done' });
-        setTimeout(() => {
-          HomePanel.refresh();
-          vscode.commands.executeCommand('openclaw.openWorkspace');
-        }, 1500);
-        return;
+        await succeed(); return;
       }
       // Permission error → ask for sudo, run installer under sudo, then fix permissions
       if (isPermError(fullLog)) {
@@ -381,13 +361,7 @@ export class HomePanel {
           const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
           if (r2.code === 0) {
             await fixOpenclawPermissions();
-            tee('\n✅  Installed successfully!\n');
-            post({ type: 'installState', state: 'done' });
-            setTimeout(() => {
-              HomePanel.refresh();
-              vscode.commands.executeCommand('openclaw.openWorkspace');
-            }, 1500);
-            return;
+            await succeed(); return;
           }
         }
       }
@@ -423,7 +397,7 @@ export class HomePanel {
     const cliCheck = await this._testOpenClawCli();
     const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     const isConfigured = fs.existsSync(configFile);
-    const isInstalled = cliCheck.ok || isConfigured;
+    const isInstalled = isConfigured; // config file is the sole source of truth — a leftover binary without config is not "installed"
     this._lastInstalledState = isInstalled;
     this._lastInstalledVersion = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
     const iconUri = this._panel.webview.asWebviewUri(
@@ -446,8 +420,18 @@ export class HomePanel {
     // Show unified setup view when OpenClaw is not fully configured yet.
     if (!isConfigured) {
       this._panel.webview.html = this._getSetupHtml(isInstalled, iconUri.toString(), occUser);
+      this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser);
+      const emojiBaseUri = this._panel.webview.asWebviewUri(
+        vscode.Uri.joinPath(this._extensionUri, '..', '..', 'void_icons', 'emojis')
+      ).toString();
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri);
+      // One-shot version check: fires the first time the user lands on the full dashboard.
+      // If the installed version is outdated, MoltPilot auto-starts the update.
+      if (!this._autoUpdateTriggered) {
+        this._autoUpdateTriggered = true;
+        setTimeout(() => void this._autoUpdateIfOutdated(), 3000);
+      }
     }
     // Kick off gateway status polling now that the webview is ready.
     this._startPolling();
@@ -509,18 +493,9 @@ export class HomePanel {
    * definitive signal that OpenClaw is installed and initialised.
    */
   private _quickInstallCheck(): boolean {
-    // True if openclaw.json exists, OR if the binary is on PATH (npm install done).
-    if (fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'))) return true;
-    // Fast synchronous binary check — look for openclaw in npm global bin.
-    try {
-      const npmGlobalBin = require('child_process')
-        .execSync('npm bin -g 2>/dev/null || npm prefix -g', { timeout: 2000, windowsHide: true })
-        .toString().trim().split('\n')[0].trim();
-      const binName = process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw';
-      return fs.existsSync(require('path').join(npmGlobalBin, binName));
-    } catch {
-      return false;
-    }
+    // Config file is the sole source of truth — no config means not installed,
+    // even if the binary is still on PATH.
+    return fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
   }
 
   private _startPolling(): void {
@@ -530,10 +505,10 @@ export class HomePanel {
       if (!HomePanel.currentPanel) return;
       this._pollTick++;
 
-      // Every 5 ticks (~10s): quick existsSync check on known binary paths.
+      // Every 2 ticks (~4s): quick existsSync check on known binary paths.
       // No process spawn — just cheap stat calls. If the result differs from
       // the last known state, do a full _update() to confirm and re-render.
-      if (this._pollTick % 5 === 0) {
+      if (this._pollTick % 2 === 0) {
         const nowInstalled = this._quickInstallCheck();
         if (nowInstalled !== this._lastInstalledState) {
           void this._update();
@@ -724,6 +699,27 @@ export class HomePanel {
     }
   }
 
+  private async _autoUpdateIfOutdated(): Promise<void> {
+    try {
+      const [cliCheck, latest] = await Promise.all([
+        this._testOpenClawCli(),
+        this._fetchLatestVersion(),
+      ]);
+      if (!cliCheck.ok || !latest) return;
+      const norm = (v: string) => { const m = v.match(/\d+\.\d+(?:\.\d+)*/); return m ? m[0] : v.replace(/^v/i, '').split(/[-+(]/)[0].trim(); };
+      const installed = (cliCheck.output ?? '').trim();
+      if (norm(installed) === norm(latest)) return; // already up to date
+      void vscode.commands.executeCommand(
+        'void.openChatWithMessage',
+        `OpenClaw is installed but version ${installed} is not the latest (${latest}). Please update it now.\n\n` +
+        `Run: openclaw update --yes --non-interactive\n\n` +
+        `If that command is not available, use: npm install -g openclaw@latest\n\n` +
+        `After updating, verify with: openclaw --version`,
+        'agent',
+      );
+    } catch { /* best-effort */ }
+  }
+
   private _getLoadingHtml(iconUri: string): string {
     return `<!DOCTYPE html>
 <html>
@@ -811,8 +807,8 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
-  <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI Powered Local Harness for OpenClaw</p>
+  <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
+  <p class="tagline">AI Powered Harness for OpenClaw</p>
   <div class="spinner-wrap">
     <div class="spinner"></div>
     <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
@@ -912,101 +908,94 @@ export class HomePanel {
   }
 
   // ── Uninstall ──────────────────────────────────────────────────────────────
+  // AI-only: hand everything to MoltPilot immediately.
+  // MoltPilot is instructed to stop all running OpenClaw processes first
+  // (to release lock files), then perform full uninstall using run_with_sudo
+  // where elevation is required.
 
-  private async _runUninstall(password: string): Promise<void> {
+  private async _runUninstall(): Promise<void> {
     const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
     const home = os.homedir();
-    const env = this._buildExecEnv();
 
-    const runSudo = (args: string[]): Promise<{ code: number; output: string }> =>
-      new Promise(resolve => {
-        const child = cp.spawn('sudo', ['-S', ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-        child.stdin?.write(password + '\n');
-        child.stdin?.end();
-        let out = '';
-        child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-        child.stderr?.on('data', (d: Buffer) => { out += d.toString(); });
-        child.on('close', code => resolve({ code: code ?? 1, output: out }));
-        child.on('error', err => resolve({ code: 1, output: err.message }));
-      });
+    post({ type: 'uninstallLog', text: 'Handing off to AI for uninstall…\n', done: true, ok: true });
 
-    // 1. Verify sudo password first
-    post({ type: 'uninstallLog', text: 'Verifying credentials…\n' });
-    const verify = await runSudo(['-v']);
-    if (verify.code !== 0) {
-      post({ type: 'uninstallLog', text: 'Incorrect password.\n', done: true, ok: false });
-      return;
-    }
-
-    // 2. Stop the gateway (best-effort)
-    post({ type: 'uninstallLog', text: 'Stopping OpenClaw gateway…\n' });
-    await runSudo(['openclaw', 'stop']).catch(() => null);
-
-    // 3. Remove the global npm package
-    post({ type: 'uninstallLog', text: 'Removing OpenClaw CLI…\n' });
-    const npmResult = await runSudo(['npm', 'uninstall', '-g', 'openclaw']);
-    if (npmResult.code !== 0) {
-      // Fallback: remove known symlink locations
-      await runSudo(['rm', '-f', '/usr/local/bin/openclaw', '/opt/homebrew/bin/openclaw']).catch(() => null);
-    }
-
-    // 4. Remove config directory (no sudo needed — it's in home)
-    post({ type: 'uninstallLog', text: 'Cleaning up config files…\n' });
-    try {
-      const { rmSync } = await import('fs');
-      rmSync(path.join(home, '.openclaw'), { recursive: true, force: true });
-    } catch { /* ignore */ }
-
-    // 5. Remove shell completion lines from shell rc files
-    post({ type: 'uninstallLog', text: 'Removing shell completions…\n' });
-    const shellRcFiles = [
-      path.join(home, '.zshrc'),
-      path.join(home, '.bashrc'),
-      path.join(home, '.bash_profile'),
-    ];
-    const completionPattern = /^\s*source\s+.*\.openclaw\/completions\/openclaw\.[a-z]+\s*$/m;
-    for (const rcFile of shellRcFiles) {
-      try {
-        if (fs.existsSync(rcFile)) {
-          const content = fs.readFileSync(rcFile, 'utf-8');
-          if (completionPattern.test(content)) {
-            const cleaned = content.replace(completionPattern, '').replace(/\n{3,}/g, '\n\n');
-            fs.writeFileSync(rcFile, cleaned, 'utf-8');
-          }
-        }
-      } catch { /* non-fatal */ }
-    }
-
-    post({ type: 'uninstallLog', text: '\n✅  Uninstall complete.\n', done: true, ok: true });
-
-    // Hide the overlay, then let MoltPilot do a final verification pass in background
+    // IMPORTANT: workspace file deletion must happen AFTER MoltPilot is activated —
+    // deleting the open .code-workspace file can trigger a VS Code window reload
+    // which would cancel any pending setTimeout callbacks.
     setTimeout(() => {
       post({ type: 'uninstallDone' });
       vscode.commands.executeCommand(
         'void.openChatWithMessage',
-        'OpenClaw was just uninstalled by the system. The following privileged steps are already done — do NOT re-run them or use sudo: the CLI binary was removed from PATH, the gateway process was stopped, and ~/.openclaw was deleted. Your job is only to verify these are clean and fix any remaining user-owned leftovers (e.g. stale shell rc lines, leftover dotfiles outside ~/.openclaw) without using sudo. Let me know when everything is verified and clean.',
+        'Please fully uninstall OpenClaw from this machine.\n\n' +
+        'IMPORTANT — the OCC Home panel considers OpenClaw "installed" if EITHER of these is true:\n' +
+        '  (A) the openclaw CLI binary is in PATH  →  `which openclaw` returns a path\n' +
+        '  (B) the file ~/.openclaw/openclaw.json exists on disk\n' +
+        'You MUST eliminate BOTH conditions for the panel to show "not installed". Do not stop until both are gone.\n\n' +
+        '── STEP 1: Stop all running OpenClaw processes ─────────────────────────────\n' +
+        'Check: pgrep -af openclaw\n' +
+        'Kill all matches: pkill -9 -f openclaw\n' +
+        'This releases any lock files so nothing blocks the cleanup.\n\n' +
+        '── STEP 2: Run the built-in uninstaller if the CLI is still available ──────\n' +
+        'Check first: which openclaw\n' +
+        'If found, run (non-interactive, no prompts): openclaw uninstall --all --yes --non-interactive\n' +
+        'This handles gateway service removal (launchd/systemd/schtasks), state dir, and config in one shot.\n' +
+        'If the CLI is NOT found, skip to Step 3.\n\n' +
+        '── STEP 3: Manual service removal (only needed if CLI was not available) ───\n' +
+        'On macOS — remove the launchd agent:\n' +
+        '  launchctl bootout gui/$UID/ai.openclaw.gateway\n' +
+        '  rm -f ~/Library/LaunchAgents/ai.openclaw.gateway.plist\n' +
+        '  Also remove any legacy plist: rm -f ~/Library/LaunchAgents/com.openclaw.gateway.plist\n' +
+        'On Linux — remove the systemd user unit:\n' +
+        '  systemctl --user disable --now openclaw-gateway.service\n' +
+        '  rm -f ~/.config/systemd/user/openclaw-gateway.service\n' +
+        '  systemctl --user daemon-reload\n\n' +
+        '── STEP 4: Remove state and config directory ───────────────────────────────\n' +
+        'rm -rf ~/.openclaw\n' +
+        'This clears condition (B). If OPENCLAW_STATE_DIR or OPENCLAW_CONFIG_PATH are set to custom paths, remove those too.\n\n' +
+        '── STEP 5: Remove the CLI binary and npm package ───────────────────────────\n' +
+        'Do NOT use "npm uninstall -g" — it is extremely slow. Instead, delete directly:\n' +
+        '  a. BIN=$(which openclaw 2>/dev/null)  — capture binary path\n' +
+        '  b. PKG=$(npm root -g)/openclaw        — capture package path\n' +
+        '  c. rm -f "$BIN"   (use run_with_sudo if permission denied)\n' +
+        '  d. rm -rf "$PKG"  (use run_with_sudo if permission denied)\n' +
+        'This clears condition (A).\n' +
+        'Also remove the macOS app if present: rm -rf /Applications/OpenClaw.app\n\n' +
+        '── STEP 6: Clean shell RC files ────────────────────────────────────────────\n' +
+        'Strip any line containing "openclaw" (case-insensitive) from:\n' +
+        '~/.zshrc, ~/.bashrc, ~/.bash_profile, ~/.profile\n' +
+        'Collapse any resulting triple blank lines.\n\n' +
+        '── STEP 7: Verify both conditions are cleared ──────────────────────────────\n' +
+        '  - which openclaw              →  must return nothing (condition A cleared)\n' +
+        '  - ls ~/.openclaw/openclaw.json →  must return "No such file or directory" (condition B cleared)\n\n' +
+        'Use run_with_sudo whenever a step requires elevated privileges. When both conditions are verified clear, confirm to the user that OpenClaw has been fully removed.',
         'agent',
       );
+
+      // Remove ~/.openclaw from the VS Code workspace Explorer sidebar.
+      // Done here (after MoltPilot fires) so workspace changes don't trigger
+      // a window reload that would cancel this callback before it executes.
+      try {
+        const openclawUri = vscode.Uri.file(path.join(home, '.openclaw'));
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        const idx = folders.findIndex(f => f.uri.fsPath === openclawUri.fsPath);
+        if (idx !== -1) {
+          vscode.workspace.updateWorkspaceFolders(idx, 1);
+        }
+      } catch { /* non-fatal */ }
+
+      // Delete the .code-workspace file so the folder doesn't come back on next launch.
+      // Use a small extra delay so VS Code settles after the updateWorkspaceFolders call
+      // before we remove the workspace file (avoids "workspace file missing" prompts).
+      setTimeout(() => {
+        try {
+          const wsFile = path.join(home, '.occ', 'My OpenClaw Workspace.code-workspace');
+          if (fs.existsSync(wsFile)) { fs.unlinkSync(wsFile); }
+        } catch { /* non-fatal */ }
+      }, 800);
+
+      // Reload the panel so it shows the "not installed" state
+      setTimeout(() => HomePanel.refresh(), 1200);
     }, 1200);
-
-    // Remove ~/.openclaw from the VS Code workspace Explorer
-    try {
-      const openclawUri = vscode.Uri.file(path.join(home, '.openclaw'));
-      const folders = vscode.workspace.workspaceFolders ?? [];
-      const idx = folders.findIndex(f => f.uri.fsPath === openclawUri.fsPath);
-      if (idx !== -1) {
-        vscode.workspace.updateWorkspaceFolders(idx, 1);
-      }
-    } catch { /* non-fatal */ }
-
-    // Delete the .code-workspace file so the folder doesn't come back on next launch
-    try {
-      const wsFile = path.join(home, '.occ', 'My OpenClaw Workspace.code-workspace');
-      if (fs.existsSync(wsFile)) { fs.unlinkSync(wsFile); }
-    } catch { /* non-fatal */ }
-
-    // Reload the panel after a short delay
-    setTimeout(() => HomePanel.refresh(), 1500);
   }
 
   private async _runCassSetup(): Promise<void> {
@@ -1371,7 +1360,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       color: #e0e0e0; font-size: 13px; padding: 9px 12px; outline: none;
       margin-bottom: 6px; box-sizing: border-box; font-family: monospace;
     }
-    .key-input:focus { border-color: #dc2828; }
+    .key-input:focus { outline: none; border-color: #dc2828; }
     .key-hint { font-size: 11px; color: #555; margin-bottom: 16px; text-align: left; }
     .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
     .port-label { font-size: 12px; color: #888; white-space: nowrap; }
@@ -1379,7 +1368,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       width: 90px; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
       color: #e0e0e0; font-size: 13px; padding: 7px 10px; outline: none; box-sizing: border-box;
     }
-    .port-input:focus { border-color: #dc2828; }
+    .port-input:focus { outline: none; border-color: #dc2828; }
     .btn-row { display: flex; gap: 10px; justify-content: flex-end; }
 
     /* ── Log panel ── */
@@ -1435,7 +1424,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       color: #e0e0e0; font-size: 14px; padding: 10px 14px; outline: none;
       box-sizing: border-box; margin-bottom: 16px; letter-spacing: 0.1em;
     }
-    .modal-input:focus { border-color: #dc2828; }
+    .modal-input:focus { outline: none; border-color: #dc2828; }
     .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
     .modal-cancel {
       background: transparent; border: 1px solid #333; color: #888;
@@ -1467,15 +1456,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     </div>
     <div class="step-item ${isInstalled ? 'active' : 'pending'}" id="step-configure">
       <div class="step-dot">2</div>
-      <div class="step-label-text">Configure<br>AI Model
-        <span id="byok-icons" style="display:none;justify-content:center;gap:4px;margin-top:4px;">
-          <svg width="11" height="11" viewBox="0 0 41 41" fill="currentColor" style="opacity:0.7"><path d="M37.532 16.87a22.7 22.7 0 0 0-.222-1.962c-.317-1.756-1.003-3.415-2.01-4.856a12.6 12.6 0 0 0-3.84-3.508c-1.63-.972-3.453-1.528-5.333-1.621a12.25 12.25 0 0 0-2.825.232 11.2 11.2 0 0 0-1.352-1.645C20.71 1.568 18.695.682 16.544.37A12.05 12.05 0 0 0 9.37 1.897C7.612 2.96 6.16 4.46 5.159 6.24a12.2 12.2 0 0 0-1.61 4.921 12.3 12.3 0 0 0 .154 3.07 22 22 0 0 0-.875 1.831 12.3 12.3 0 0 0-.743 4.508c.032 1.926.49 3.82 1.34 5.546a12.6 12.6 0 0 0 3.51 4.34c1.56 1.17 3.36 1.966 5.263 2.335.61.12 1.228.19 1.848.213a11.2 11.2 0 0 0 1.352 1.644c1.441 1.443 3.456 2.329 5.607 2.641a12.05 12.05 0 0 0 7.174-1.527c1.758-1.063 3.21-2.563 4.211-4.343a12.2 12.2 0 0 0 1.61-4.921 12.3 12.3 0 0 0-.154-3.07 22 22 0 0 0 .875-1.831 12.3 12.3 0 0 0 .743-4.508zm-8.56 14.023c-1.297.744-2.794 1.084-4.288.975a9.12 9.12 0 0 1-2.543-.593l.328-.19 7.127-4.116a.77.77 0 0 0 .39-.676v-10.05l3.013 1.74a.07.07 0 0 1 .038.052v8.32c-.001 2.117-1.133 4.073-3.065 5.138zm-17.468-4.722a9.1 9.1 0 0 1-1.102-3.107 9 9 0 0 1 .148-3.248l.328.19 7.127 4.116a.77.77 0 0 0 .78 0l8.702-5.023v3.48a.07.07 0 0 1-.028.06L20.187 32.3c-1.832 1.058-4.098 1.284-6.13.567a9.1 9.1 0 0 1-2.553-1.696zm-2.15-14.956a9.07 9.07 0 0 1 4.749-3.989l-.001.38v8.233a.77.77 0 0 0 .39.676l8.702 5.023-3.013 1.74a.07.07 0 0 1-.067.006L12.34 18.91c-1.832-1.058-3.083-2.978-3.337-5.096a9.1 9.1 0 0 1 .351-3.197zm24.803 7.847-8.702-5.023 3.013-1.74a.07.07 0 0 1 .067-.006l7.774 4.487c1.306.754 2.293 1.88 2.822 3.218a9.1 9.1 0 0 1 .498 4.243 9.07 9.07 0 0 1-3.646 5.806v-.38l-.001-8.233a.77.77 0 0 0-.39-.676zm2.995-3.268-.328-.19-7.127-4.116a.77.77 0 0 0-.78 0l-8.702 5.024v-3.48a.07.07 0 0 1 .028-.06l7.774-4.486a9.1 9.1 0 0 1 4.823-1.116 9.07 9.07 0 0 1 4.56 1.683 9.1 9.1 0 0 1 2.907 3.413 9 9 0 0 1-.155 3.332zm-17.3 5.705-3.013-1.74a.07.07 0 0 1-.038-.052v-8.32c.001-2.117 1.133-4.073 3.065-5.138a9.1 9.1 0 0 1 4.288-.975c.863.062 1.711.257 2.511.578l-.328.19-7.127 4.116a.77.77 0 0 0-.39.676zm1.636-3.528 3.876-2.237 3.876 2.235v4.47l-3.876 2.237-3.876-2.235z"/></svg>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.7"><path d="M17.304 1.274a.85.85 0 0 0-1.479-.015L5.847 19.377a.85.85 0 0 0 .74 1.265h4.068a.85.85 0 0 0 .74-.434l1.887-3.494 2.948 3.72a.85.85 0 0 0 .665.32h3.238a.85.85 0 0 0 .686-1.355l-4.466-5.636 3.152-6.047a.85.85 0 0 0-.01-.815zm-9.418 0a.85.85 0 0 1 1.479-.015L11.27 5.8 9.064 9.944 6.426 5.108zm-3.219 8.26 1.48 2.712-1.48 2.753H2.07a.85.85 0 0 1-.74-1.265z"/></svg>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-          <svg width="11" height="11" viewBox="0 0 512 512" fill="currentColor" style="opacity:0.7"><path d="M371.9 142.3c6.4-1.1 12.8-1.7 19.3-1.7 37.9 0 73.4 17.8 97 48.3 37.6 48.4 29 118.1-19.5 155.8l-56.5 43.9c-7.3 5.7-10.9 9.5-13.3 14.4-2.8 5.9-3.7 12.8-2.5 19.4l1.5 8.2c4.5 24.3-4.1 49.3-22.6 65.5-12.2 10.7-27.5 16.6-43.5 16.6-3.8 0-7.7-.3-11.5-1L71.6 460.4C32.9 453.6 7.6 416.6 14.4 378l1.5-8.2c1.2-6.6.7-13.6-1.5-19.8-2-5.5-5.5-10.4-10.5-14.8l-0.3-.3C-7.7 321.5-1.2 292.6 11.9 271c6.3-10.4 15.4-18.8 27.2-24.7l68.7-34.1c6.9-3.4 12.6-8.2 16.6-14.1 3.8-5.6 5.9-12.1 6.2-18.7.3-6.5-1.4-13.3-4.9-19.5L112.9 143c-12.5-22.6-7.4-50.6 12.3-67.4 12.3-10.5 28-15.6 43.7-14.2 3.1.3 6.1.7 9.1 1.4zM256 72c13.3 0 24 10.7 24 24s-10.7 24-24 24-24-10.7-24-24 10.7-24 24-24z"/></svg>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="opacity:0.7"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        </span>
-      </div>
+      <div class="step-label-text">Configure<br>AI Model</div>
     </div>
     <div class="step-item pending" id="step-ready">
       <div class="step-dot">3</div>
@@ -1585,16 +1566,13 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     // ── Configure: choose mode ─────────────────────────────────────
     function chooseFree() {
       document.getElementById('panel-cfg-b0').style.display = 'none';
-      showLog('Installing Inference for MoltPilot...\nInstalling Inference for your new OpenClaw...');
+      showLog('Installing Inference for MoltPilot...\\nInstalling Inference for your new OpenClaw...');
       vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: (_occUser && _occUser.api_keys && _occUser.api_keys.occKey) || '', port: '18789' });
     }
 
     function chooseBYOK() {
       document.getElementById('panel-cfg-b0').style.display = 'none';
       document.getElementById('panel-cfg-b1').style.display = 'block';
-      // Show provider icons in the stepper step 2 label
-      var icons = document.getElementById('byok-icons');
-      if (icons) icons.style.display = 'flex';
     }
 
     function showB0() {
@@ -1922,7 +1900,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       color: #e0e0e0; font-size: 13px; padding: 9px 12px; outline: none;
       margin-bottom: 6px; box-sizing: border-box; font-family: monospace;
     }
-    .key-input:focus { border-color: #dc2828; }
+    .key-input:focus { outline: none; border-color: #dc2828; }
     .key-hint { font-size: 11px; color: #555; margin-bottom: 20px; }
     .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
     .port-label { font-size: 12px; color: #888; white-space: nowrap; }
@@ -1930,7 +1908,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       width: 90px; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
       color: #e0e0e0; font-size: 13px; padding: 7px 10px; outline: none; box-sizing: border-box;
     }
-    .port-input:focus { border-color: #dc2828; }
+    .port-input:focus { outline: none; border-color: #dc2828; }
     .btn-row { display: flex; gap: 10px; justify-content: flex-end; }
     .btn-back {
       background: transparent; border: 1px solid #333; color: #888;
@@ -2106,7 +2084,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     cliCheck: { ok: boolean; output?: string; error?: string; command: string },
     iconUri: string,
     occJwt: string = '',
-    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null
+    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
+    emojiBaseUri: string = ''
   ): string {
     // Render user area statically (avoids JS innerHTML escaping / runtime errors)
     let userAreaHtml: string;
@@ -2659,7 +2638,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       transition: border-color 0.15s;
     }
     .more-menu-search::placeholder { color: #555; }
-    .more-menu-search:focus { border-color: rgba(255,255,255,0.25); }
+    .more-menu-search:focus { outline: none; border-color: #dc2626; }
     .more-menu-search-icon {
       position: absolute;
       left: 20px;
@@ -2876,7 +2855,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       letter-spacing: 0.1em;
       box-sizing: border-box;
     }
-    .pwd-input:focus { border-color: #dc2828; }
+    .pwd-input:focus { outline: none; border-color: #dc2828; }
     .pwd-actions {
       display: flex;
       gap: 10px;
@@ -2966,18 +2945,18 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         <div class="apps-panel-title">OCC Apps</div>
         <div class="apps-grid">
           ${[
-            { label: 'Chat',     icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' },
-            { label: 'Channels', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.26h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.83a16 16 0 0 0 6 6l.83-.83a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>' },
-            { label: 'Agents',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>' },
-            { label: 'Models',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4.03 3-9 3S3 13.66 3 12"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/></svg>' },
-            { label: 'Skills',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>' },
-            { label: 'Security', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
-            { label: 'Memory',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' },
-            { label: 'Empire',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20M4 20V10l8-7 8 7v10"/><path d="M10 20v-5h4v5"/></svg>' },
-            { label: 'Social',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>' },
+            { label: 'Chat',     icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',     emoji: 'speech-balloon_1f4ac.png' },
+            { label: 'Channels', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.26h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.83a16 16 0 0 0 6 6l.83-.83a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>', emoji: 'satellite-antenna_1f4e1.png' },
+            { label: 'Agents',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>',   emoji: 'briefcase_1f4bc.png' },
+            { label: 'Models',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4.03 3-9 3S3 13.66 3 12"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/></svg>',   emoji: 'alembic_2697-fe0f.png' },
+            { label: 'Skills',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',   emoji: 'high-voltage_26a1.png' },
+            { label: 'Security', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>', emoji: 'shield_1f6e1-fe0f.png' },
+            { label: 'Memory',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',   emoji: 'floppy-disk_1f4be.png' },
+            { label: 'Empire',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20M4 20V10l8-7 8 7v10"/><path d="M10 20v-5h4v5"/></svg>',   emoji: 'crown_1f451.png' },
+            { label: 'Social',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',   emoji: 'handshake_1f91d.png' },
           ].map(app => `
-          <div class="app-tile" onclick="showWipModal('${app.label}')">
-            <div class="app-tile-icon">${app.icon}</div>
+          <div class="app-tile" onclick="showWipModal('${app.label}', '${emojiBaseUri}/${app.emoji}')">
+            <div class="app-tile-icon"><img src="${emojiBaseUri}/${app.emoji}" alt="${app.label}" style="width:22px;height:22px;object-fit:contain;filter:grayscale(100%) brightness(0.75);pointer-events:none;" /></div>
             <span class="app-tile-label">${app.label}</span>
           </div>`).join('')}
         </div>
@@ -2991,9 +2970,9 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   <!-- App WIP modal -->
   <div id="app-wip-overlay" class="app-wip-overlay">
     <div class="app-wip-card">
-      <div class="app-wip-emoji">🚧</div>
+      <img id="app-wip-icon" src="" alt="" style="width:64px;height:64px;object-fit:contain;margin-bottom:4px;" />
       <h3 id="app-wip-title">Under Development</h3>
-      <p>This app isn't ready yet — but you can help build it.<br>Copy the message below and post it in the OCC community.</p>
+      <p>This app isn't ready yet — but you can help build it.<br>Copy the message below and post it in the MBA community.</p>
       <div class="app-wip-copy-wrap">
         <span class="app-wip-copy-text" id="app-wip-copy-text">I want to contribute to [App]</span>
         <button class="app-wip-copy-btn" onclick="copyWipMessage()">Copy</button>
@@ -3054,8 +3033,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   </div>
   ${isInstalled ? `
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
-  <h1>Welcome to <span class="accent">OpenClaw</span> Code</h1>
-  <p class="tagline">AI Powered Local Harness for OpenClaw</p>
+  <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
   <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row ${dirClass === 'ok' ? 'check-row-clickable' : ''}" ${dirClass === 'ok' ? 'onclick="cmd(\'openConfigFile\')" title="Open openclaw.json"' : ''}>
@@ -3171,10 +3149,12 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const input = document.getElementById('more-menu-search-input');
       if (input) { input.value = ''; filterMoreMenu(''); }
     }
-    function showWipModal(appName) {
+    function showWipModal(appName, emojiSrc) {
       const msg = 'I want to contribute to the ' + appName + ' app on OCC.';
       document.getElementById('app-wip-title').textContent = appName + ' — Coming Soon';
       document.getElementById('app-wip-copy-text').textContent = msg;
+      const icon = document.getElementById('app-wip-icon');
+      if (icon) { icon.src = emojiSrc; icon.alt = appName; }
       document.getElementById('app-wip-overlay').classList.add('visible');
       closeAppsPanel();
     }
