@@ -514,7 +514,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               titleComponent={
                 <div className="flex flex-col items-center">
                   <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-6">
-                    Open<span className="text-[var(--accent)]">Claw</span> Code
+                    OpenClaw <span className="text-[var(--accent)]">Code</span>
                   </h1>
                   <p className="text-lg sm:text-xl text-[var(--text-muted)] max-w-2xl mb-10 leading-relaxed">
                     The simplest way to get started with OpenClaw locally.
