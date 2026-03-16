@@ -458,28 +458,38 @@ const scrollToBottom = (divRef: { current: HTMLElement | null }) => {
 
 
 
-const ScrollToBottomContainer = ({ children, className, style, scrollContainerRef }: { children: React.ReactNode, className?: string, style?: React.CSSProperties, scrollContainerRef: React.MutableRefObject<HTMLDivElement | null> }) => {
+const ScrollToBottomContainer = ({ children, className, style, scrollContainerRef, isRunning }: { children: React.ReactNode, className?: string, style?: React.CSSProperties, scrollContainerRef: React.MutableRefObject<HTMLDivElement | null>, isRunning: boolean | string | undefined }) => {
 	const divRef = scrollContainerRef
 	const userScrolledUpRef = useRef(false)
+	const prevIsRunningRef = useRef<typeof isRunning>(isRunning)
 
-	// Track whether the user has manually scrolled up
+	// When AI transitions from idle → running (new message sent), re-enable auto-scroll.
+	useEffect(() => {
+		if (!prevIsRunningRef.current && isRunning) {
+			userScrolledUpRef.current = false
+		}
+		prevIsRunningRef.current = isRunning
+	}, [isRunning])
+
+	// Scroll event: re-enable auto-scroll only when user scrolls back to the bottom.
 	useEffect(() => {
 		const el = divRef.current
 		if (!el) return
 		const onScroll = () => {
 			const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-			userScrolledUpRef.current = distFromBottom > 80
+			if (distFromBottom <= 50) userScrolledUpRef.current = false
 		}
 		el.addEventListener('scroll', onScroll, { passive: true })
 		return () => el.removeEventListener('scroll', onScroll)
 	}, [divRef])
 
-	// Only auto-scroll to bottom if user hasn't scrolled up
+	// Auto-scroll only while AI is actively running and user hasn't scrolled up.
+	// When isRunning is falsy the user is free to scroll the history freely.
 	useEffect(() => {
-		if (!userScrolledUpRef.current) {
+		if (isRunning && !userScrolledUpRef.current) {
 			scrollToBottom(divRef);
 		}
-	}, [children]);
+	}, [children, isRunning]);
 
 	return (
 		<div
@@ -3022,6 +3032,7 @@ export const SidebarChat = () => {
 	const messagesHTML = <ScrollToBottomContainer
 		key={'messages' + chatThreadsState.currentThreadId} // force rerender on all children if id changes
 		scrollContainerRef={scrollContainerRef}
+		isRunning={isRunning}
 		className={`
 			flex flex-col
 			px-4 py-4 space-y-4

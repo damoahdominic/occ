@@ -287,29 +287,34 @@ export function stopConfigProxy(): void {
 }
 
 // ── Dashboard URL ──────────────────────────────────────────────────────────────
-// Runs `openclaw dashboard --no-open` to get the tokenized URL, e.g.:
-//   http://127.0.0.1:18789/#token=clawx-xxxx
+// Reads port and auth token directly from ~/.openclaw/openclaw.json.
+// Avoids shelling out to `openclaw dashboard --no-open` which requires the
+// binary to be on PATH (unreliable inside a VS Code extension host process).
 
-function getDashboardUrl(): Promise<{ url: string; port: number } | undefined> {
-  return new Promise(resolve => {
-    const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
-    const cmd = require('fs').existsSync(nvmSh)
-      ? `bash -c '. "${nvmSh}" 2>/dev/null && openclaw dashboard --no-open 2>&1'`
-      : 'openclaw dashboard --no-open 2>&1';
-    cp.exec(cmd, { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-      const output = (stdout || '').toString();
-      // Parse "Dashboard URL: http://..." from output
-      const match = output.match(/https?:\/\/[^\s]+/);
-      if (!match) { resolve(undefined); return; }
-      const raw = match[0];
-      try {
-        const parsed = new URL(raw);
-        resolve({ url: raw, port: Number(parsed.port) || DEFAULT_GATEWAY_PORT });
-      } catch {
-        resolve(undefined);
-      }
-    });
-  });
+function getDashboardUrl(): { url: string; port: number } | undefined {
+  try {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const raw = require('fs').readFileSync(configPath, 'utf-8') as string;
+    const config = JSON.parse(raw) as Record<string, unknown>;
+
+    // Port: prefer gateway.port, fall back to top-level legacy fields
+    const gateway = config['gateway'] as Record<string, unknown> | undefined;
+    const portRaw = gateway?.['port'] ?? config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
+    const portN = typeof portRaw === 'number' ? portRaw : typeof portRaw === 'string' ? parseInt(portRaw, 10) : NaN;
+    const port = Number.isFinite(portN) && portN > 0 && portN < 65536 ? portN : DEFAULT_GATEWAY_PORT;
+
+    // Token: gateway.auth.token (only when auth mode is "token")
+    const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
+    const token = auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string' ? auth['token'] as string : '';
+
+    const url = token
+      ? `http://127.0.0.1:${port}/#token=${token}`
+      : `http://127.0.0.1:${port}/`;
+
+    return { url, port };
+  } catch {
+    return undefined;
+  }
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
@@ -372,7 +377,7 @@ export class ConfigPanel {
 
   private async _load(): Promise<void> {
     try {
-      const dashInfo = await getDashboardUrl();
+      const dashInfo = getDashboardUrl();
       const targetPort = dashInfo?.port ?? DEFAULT_GATEWAY_PORT;
       const proxyPort = await getOrStartConfigProxy(targetPort);
 

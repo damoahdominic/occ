@@ -58,6 +58,9 @@ import './voidOnboardingService.js'
 // register misc service
 import './miscWokrbenchContrib.js'
 
+// register OCC authentication provider (accounts button profile picture)
+import './occAuthProvider.js'
+
 // register file service (for explorer context menu)
 import './fileService.js'
 

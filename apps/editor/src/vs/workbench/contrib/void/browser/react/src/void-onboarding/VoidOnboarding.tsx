@@ -305,6 +305,7 @@ const VoidOnboardingContent = () => {
 
 	const [pageIndex, setPageIndex] = useState(0)
 	const [aiChoice, setAiChoice] = useState<'occlegacy' | 'byok' | null>(null)
+	const [occLegacyHover, setOccLegacyHover] = useState(false)
 	const byokProviders: ProviderName[] = ['anthropic', 'openAI', 'openRouter', 'gemini', 'ollama']
 	const [selectedProvider, setSelectedProvider] = useState<ProviderName>('anthropic')
 
@@ -369,9 +370,9 @@ const VoidOnboardingContent = () => {
 			content={
 				<div className='flex flex-col items-center gap-6 w-full'>
 					<div className="text-5xl font-light text-center">Choose your AI</div>
-					<p className="text-void-fg-3 text-sm text-center">How do you want to power your AI assistant?</p>
+					<p className="text-void-fg-3 text-sm text-center">How do you want to power MoltPilot your AI Assistant for this Editor?</p>
 
-					<div className="flex flex-col gap-3 w-full max-w-2xl mt-2">
+					<div className="flex flex-col gap-3 w-full max-w-xl mt-2">
 						{/* OCC Legacy — big hero card */}
 						<button
 							onClick={() => {
@@ -379,13 +380,17 @@ const VoidOnboardingContent = () => {
 								commandService.executeCommand('occ.onboarding.openSignupUrl')
 								setPageIndex(2)
 							}}
+							onMouseEnter={() => setOccLegacyHover(true)}
+							onMouseLeave={() => setOccLegacyHover(false)}
 							style={{
 								background: 'linear-gradient(135deg, #1a0505 0%, #1f0808 50%, #2a0a0a 100%)',
-								border: aiChoice === 'occlegacy' ? '1px solid rgba(220,40,40,0.6)' : '1px solid rgba(220,40,40,0.25)',
+								border: occLegacyHover || aiChoice === 'occlegacy'
+									? '1px solid rgba(220,40,40,0.5)'
+									: '1px solid rgba(220,40,40,0.25)',
 								position: 'relative',
 								overflow: 'hidden',
 							}}
-							className="flex flex-col px-6 py-5 rounded-2xl text-left transition-all duration-200 hover:border-[rgba(220,40,40,0.5)]"
+							className="flex flex-col px-6 py-5 rounded-2xl text-left transition-all duration-200"
 						>
 							{/* Red radial glow top-right */}
 							<div style={{
@@ -403,6 +408,7 @@ const VoidOnboardingContent = () => {
 									width: '200px', opacity: 0.18,
 									pointerEvents: 'none', userSelect: 'none',
 									filter: 'brightness(0) invert(1)',
+									transform: 'rotate(-20deg)',
 								}}
 							/>
 
@@ -433,14 +439,7 @@ const VoidOnboardingContent = () => {
 								setAiChoice('byok')
 								setPageIndex(3)
 							}}
-							style={{
-								border: aiChoice === 'byok' ? '1px solid rgba(220,40,40,0.5)' : undefined,
-							}}
-							className={`flex items-center justify-between px-5 py-4 rounded-xl text-left transition-all duration-200
-								${aiChoice === 'byok'
-									? 'bg-[#dc2828]/10'
-									: 'border border-void-border-2 bg-void-bg-2 hover:border-void-border-1'
-								}`}
+							className="flex items-center justify-between px-5 py-4 rounded-xl text-left transition-all duration-200 border border-void-border-2 bg-void-bg-2 hover:border-void-border-1"
 						>
 							<div className="flex items-center gap-3">
 								<div className="flex items-center gap-2">
@@ -476,17 +475,17 @@ const VoidOnboardingContent = () => {
 						<div className="flex flex-col items-center gap-6">
 							{/* Animated spinner ring */}
 							<div className="relative w-16 h-16">
-								<div className="w-16 h-16 rounded-full border-4 border-emerald-500/20 absolute inset-0" />
-								<div className="w-16 h-16 rounded-full border-4 border-transparent border-t-emerald-400 absolute inset-0 animate-spin" />
+								<div className="w-16 h-16 rounded-full border-4 border-[rgba(220,40,40,0.2)] absolute inset-0" />
+								<div className="w-16 h-16 rounded-full border-4 border-transparent border-t-[rgba(220,40,40,0.9)] absolute inset-0 animate-spin" />
 							</div>
 
 							<div className="flex flex-col gap-2">
-								<div className="text-lg font-medium">Waiting for sign-up…</div>
+								<div className="text-lg font-medium text-[rgba(220,40,40,0.9)]">Waiting for sign-up…</div>
 								<div className="text-sm text-void-fg-3 leading-relaxed max-w-xs">
 									We opened{' '}
 									<button
 										onClick={() => commandService.executeCommand('occ.onboarding.openSignupUrl')}
-										className="text-emerald-400 font-medium underline hover:text-emerald-300 transition-colors"
+										className="text-[rgba(220,40,40,0.9)] font-medium underline hover:text-[rgba(220,40,40,1)] transition-colors"
 									>
 										occ.mba.sh/signup
 									</button>

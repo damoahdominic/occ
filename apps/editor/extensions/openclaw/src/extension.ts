@@ -8,12 +8,28 @@ import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
 import { ConfigPanel, stopConfigProxy } from './panels/config';
 
-const CONFIG_URL = 'http://localhost:18789/';
+const DEFAULT_GATEWAY_PORT = 18789;
+
+function getConfiguredGatewayPort(): number {
+  try {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    const gateway = config['gateway'] as Record<string, unknown> | undefined;
+    const p = gateway?.['port'] ?? config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
+    const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
+    return Number.isFinite(n) && n > 0 && n < 65536 ? n : DEFAULT_GATEWAY_PORT;
+  } catch {
+    return DEFAULT_GATEWAY_PORT;
+  }
+}
 
 /** Returns true if the OpenClaw web server is reachable. */
 function isWebServerReachable(): Promise<boolean> {
+  const port = getConfiguredGatewayPort();
+  const url = `http://localhost:${port}/`;
   return new Promise(resolve => {
-    const req = http.get(CONFIG_URL, { timeout: 3000 }, res => {
+    const req = http.get(url, { timeout: 3000 }, res => {
       res.resume();
       resolve(res.statusCode !== undefined && res.statusCode < 500);
     });
@@ -203,6 +219,8 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       : new vscode.ThemeColor('statusBarItem.errorBackground');
     bar.tooltip = tip;
     bar.show();
+    // Keep popover in sync with the footer at the same cadence (250ms countdown + animation ticks)
+    try { HomePanel.currentPanel?.postBalanceUpdate(value); } catch { /* non-fatal */ }
   }
 
   function stopCountdown(): void {
@@ -289,14 +307,18 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
 
       const r = await fetch('https://occ.mba.sh/api/v1/me', { headers: { Authorization: `Bearer ${jwt}` } });
       if (r.ok) {
-        const data = await r.json() as { balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
+        const data = await r.json() as { balance_usd: number; email?: string; picture?: string | null; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
         const newBalance = Number(data.balance_usd) || 0;
-        // Sync per-user moltpilot key to the renderer settings service so ocFreeModel works
         const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
-        // Sync JWT to renderer settings so the condition (occLegacyJwt && occMoltpilotKey) passes
-        // in voidSettingsService.ts — without this, ocFreeModel clears endpoint/apiKey
+        // Guard: only sync back if the JWT wasn't cleared while the fetch was in-flight.
+        // Without this check, an in-flight poll completing after sign-out would re-log the user in.
+        const currentJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+        if (currentJwt !== jwt) { return; }
+        // Sync JWT + keys to renderer settings so ocFreeModel works
         vscode.commands.executeCommand('occ.auth.setLegacyJwt', jwt);
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', moltpilotKey);
+        // Cache user profile for the accounts button avatar
+        vscode.commands.executeCommand('occ.auth.setUserInfo', data.email ?? '', data.picture ?? '');
         updateBurnRate(newBalance);
         const prev = displayedBalance ?? newBalance;
         backendBalance = newBalance;
@@ -361,6 +383,11 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
     vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
       await context.globalState.update(OCC_JWT_KEY, token ?? '');
+      // Stop polling immediately on sign-out so no more in-flight fetches can re-set the JWT
+      if (!token && backendPollTimer) {
+        clearInterval(backendPollTimer);
+        backendPollTimer = undefined;
+      }
       void fetchAndUpdateBackendBalance();
     }),
 
@@ -411,7 +438,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         const inferenceTest = async (label: string, key: string): Promise<void> => {
           log(`\n[${label}] Inference test with ${label} (model: occ-legacy)...`);
           try {
-            const resp = await fetch('https://inference.mba.sh/v1/chat/completions', {
+            const resp = await fetch('https://occ.mba.sh/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
               body: JSON.stringify({ model: 'occ-legacy', stream: false, messages: [{ role: 'user', content: 'Say: SMOKE_OK' }], max_tokens: 20 }),
@@ -512,11 +539,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await ConfigPanel.createOrShow();
       } else {
         // Web server not running — ask the AI to start it
+        const port = getConfiguredGatewayPort();
+        const configUrl = `http://localhost:${port}/`;
         const message =
-          `The OpenClaw web configuration server is not running at ${CONFIG_URL}.\n\n` +
+          `The OpenClaw web configuration server is not running at ${configUrl}.\n\n` +
           `Please start it now by running the OpenClaw gateway in the terminal:\n` +
           `\`\`\`\nopenclaw gateway start\n\`\`\`\n\n` +
-          `Once it is running, I will be able to open the configuration UI at ${CONFIG_URL} inside the editor.`;
+          `Once it is running, I will be able to open the configuration UI at ${configUrl} inside the editor.`;
         await vscode.commands.executeCommand('void.openChatWithMessage', message);
         spendBalance();
       }

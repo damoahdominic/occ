@@ -44,6 +44,9 @@ import { KeyCode } from '../../../base/common/keyCodes.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND } from '../../common/theme.js';
 import { IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
+import { IVoidSettingsService } from '../../contrib/void/common/voidSettingsService.js';
+import { IOpenerService } from '../../../platform/opener/common/opener.js';
+import { URI } from '../../../base/common/uri.js';
 
 export class GlobalCompositeBar extends Disposable {
 
@@ -265,6 +268,8 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 	private initialized = false;
 	private sessionFromEmbedder = new Lazy<Promise<AuthenticationSessionInfo | undefined>>(() => getCurrentAuthenticationSessionInfo(this.secretStorageService, this.productService));
 
+	private _occAvatarEl: HTMLImageElement | undefined;
+
 	constructor(
 		contextMenuActionsProvider: () => IAction[],
 		options: ICompositeBarActionViewItemOptions,
@@ -285,7 +290,9 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		@ILogService private readonly logService: ILogService,
 		@IActivityService activityService: IActivityService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService private readonly commandService: ICommandService,
+		@IVoidSettingsService private readonly voidSettingsService: IVoidSettingsService,
+		@IOpenerService private readonly openerService: IOpenerService,
 	) {
 		const action = instantiationService.createInstance(CompositeBarAction, {
 			id: ACCOUNTS_ACTIVITY_ID,
@@ -296,6 +303,42 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 		this._register(action);
 		this.registerListeners();
 		this.initialize();
+
+		// Update avatar whenever OCC user info changes
+		this._register(this.voidSettingsService.onDidChangeState(() => this._updateOccAvatar()));
+	}
+
+	override render(container: HTMLElement): void {
+		super.render(container);
+
+		// Inject a circular avatar <img> that overlays the codicon when the user is logged in
+		const img = document.createElement('img');
+		img.className = 'occ-profile-avatar';
+		img.style.cssText = [
+			'position:absolute',
+			'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+			'width:28px', 'height:28px',
+			'border-radius:50%', 'object-fit:cover', 'pointer-events:none',
+			'border:1.5px solid rgba(220,40,40,0.85)',
+			'display:none',
+		].join(';');
+		img.setAttribute('referrerpolicy', 'no-referrer');
+		this.label.style.position = 'relative';
+		this.label.appendChild(img);
+		this._occAvatarEl = img;
+		this._updateOccAvatar();
+	}
+
+	private _updateOccAvatar(): void {
+		if (!this._occAvatarEl) { return; }
+		const { occUserPicture, occLegacyJwt } = this.voidSettingsService.state.globalSettings;
+		if (occLegacyJwt && occUserPicture) {
+			this._occAvatarEl.src = occUserPicture;
+			this._occAvatarEl.style.display = 'block';
+		} else {
+			this._occAvatarEl.style.display = 'none';
+			this._occAvatarEl.src = '';
+		}
 	}
 
 	private registerListeners(): void {
@@ -385,14 +428,24 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 			}
 
 			for (const account of accounts) {
-				const manageExtensionsAction = toAction({
-					id: `configureSessions${account.label}`,
-					label: localize('manageTrustedExtensions', "Manage Trusted Extensions"),
-					enabled: true,
-					run: () => this.commandService.executeCommand('_manageTrustedExtensionsForAccount', { providerId, accountLabel: account.label })
-				});
+				const providerSubMenuActions: IAction[] = [];
 
-				const providerSubMenuActions: IAction[] = [manageExtensionsAction];
+				if (providerId === 'occ-legacy') {
+					// OCC provider: open dashboard instead of "Manage Trusted Extensions"
+					providerSubMenuActions.push(toAction({
+						id: 'occOpenDashboard',
+						label: 'Open OCC Dashboard →',
+						enabled: true,
+						run: () => this.openerService.open(URI.parse('https://occ.mba.sh/dashboard'))
+					}));
+				} else {
+					providerSubMenuActions.push(toAction({
+						id: `configureSessions${account.label}`,
+						label: localize('manageTrustedExtensions', "Manage Trusted Extensions"),
+						enabled: true,
+						run: () => this.commandService.executeCommand('_manageTrustedExtensionsForAccount', { providerId, accountLabel: account.label })
+					}));
+				}
 
 				if (account.canSignOut) {
 					providerSubMenuActions.push(toAction({

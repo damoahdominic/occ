@@ -365,6 +365,19 @@ registerAction2(class extends Action2 {
 	}
 })
 
+// Stores the user's email and picture URL from /api/v1/me.
+// Called by the extension host after each successful /api/v1/me fetch.
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: 'occ.auth.setUserInfo', title: localize2('occSetUserInfo', 'OCC: Set User Info') });
+	}
+	async run(accessor: ServicesAccessor, email: string, picture: string): Promise<void> {
+		const settingsService = accessor.get(IVoidSettingsService);
+		if (typeof email === 'string') { await settingsService.setGlobalSetting('occUserEmail', email); }
+		if (typeof picture === 'string') { await settingsService.setGlobalSetting('occUserPicture', picture); }
+	}
+})
+
 // Stores the per-user MoltPilot virtual key (sk-mp-*) from occ.mba.sh (proxied through OCC backend).
 // Called by the extension host after /api/v1/me returns api_keys.moltpilotKey.
 registerAction2(class extends Action2 {

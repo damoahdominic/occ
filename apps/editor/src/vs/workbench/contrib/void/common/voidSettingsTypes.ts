@@ -472,6 +472,8 @@ export type GlobalSettings = {
 	autoAcceptLLMChanges: boolean;
 	occLegacyJwt: string;
 	occMoltpilotKey: string; // sk-mp-* virtual key from occ.mba.sh (proxied through OCC backend)
+	occUserEmail: string;   // cached from /api/v1/me
+	occUserPicture: string; // cached from /api/v1/me (profile photo URL)
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -735,6 +737,8 @@ When you use the terminal to run commands, **always clean up after yourself**:
 	autoAcceptLLMChanges: false,
 	occLegacyJwt: '',
 	occMoltpilotKey: '',
+	occUserEmail: '',
+	occUserPicture: '',
 }
 
 export type GlobalSettingName = keyof GlobalSettings

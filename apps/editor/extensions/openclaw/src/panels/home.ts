@@ -51,6 +51,8 @@ export class HomePanel {
   private _lastJwt = '';
   private _lastInstalledVersion: string | null = null;
   private _autoUpdateTriggered = false; // fire at most once per panel session
+  private _uninstallCloseSidebarTimer: ReturnType<typeof setTimeout> | undefined;
+  private _uninstallCloseWatcher: ReturnType<typeof setInterval> | undefined;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
@@ -95,6 +97,16 @@ export class HomePanel {
         );
       } else if (msg.command === 'runSetup') {
         void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
+      } else if (msg.command === 'autoSetupSkipped') {
+        setTimeout(() => {
+          HomePanel.refresh();
+          void vscode.commands.executeCommand('openclaw.openWorkspace');
+          setTimeout(() => {
+            vscode.commands.executeCommand('void.openChatWithMessage',
+              'Run `openclaw gateway start` to start the OpenClaw gateway.',
+              'agent');
+          }, 1000);
+        }, 500);
       } else if (msg.command === 'sudoPassword') {
         // Password modal submitted or cancelled from the webview.
         HomePanel._pendingPasswordResolve?.(msg.password as string | undefined);
@@ -204,6 +216,11 @@ export class HomePanel {
     HomePanel.currentPanel = new HomePanel(panel, extensionUri);
   }
 
+  /** Push a live balance update to the webview popover — called from extension.ts balance poller. */
+  public postBalanceUpdate(amount: number): void {
+    try { this._panel.webview.postMessage({ type: 'balanceUpdate', amount }); } catch { /* non-fatal */ }
+  }
+
   /** Re-run CLI detection and redraw — called after install completes. */
   public static refresh(): void {
     if (HomePanel.currentPanel) {
@@ -280,6 +297,10 @@ export class HomePanel {
       } catch { /* non-fatal */ }
     };
 
+    const failCancelled = () => {
+      post({ type: 'installState', state: 'cancelled' });
+    };
+
     const fail = async () => {
       post({ type: 'installState', state: 'failed' });
       const platformDesc = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : `Linux (${arch})`;
@@ -298,10 +319,7 @@ export class HomePanel {
     const succeed = async () => {
       tee('\n✅  Installed successfully!\n');
       post({ type: 'installState', state: 'done' });
-      setTimeout(() => {
-        HomePanel.refresh();
-        vscode.commands.executeCommand('openclaw.openWorkspace');
-      }, 1500);
+      // Webview drives the post-install navigation via autoSetupSkipped or wizardLog done
     };
 
     // ── Step 1: try npm install -g openclaw ───────────────────────────────────
@@ -322,7 +340,7 @@ export class HomePanel {
       if (platform !== 'win32' && isPermError(fullLog)) {
         tee('\nPermission error — elevated access required.\n');
         const ok = await cacheSudo('Enter your system password to install OpenClaw');
-        if (!ok) { tee('Incorrect password or cancelled.\n'); await fail(); return; }
+        if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
         tee('Retrying with elevated permissions...\n');
         const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
         if (r2.code === 0) {
@@ -356,13 +374,12 @@ export class HomePanel {
       if (isPermError(fullLog)) {
         tee('\nPermission error in installer — elevated access required.\n');
         const ok = await cacheSudo('Enter your system password to complete installation');
-        if (ok) {
-          tee('Retrying with elevated permissions...\n');
-          const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
-          if (r2.code === 0) {
-            await fixOpenclawPermissions();
-            await succeed(); return;
-          }
+        if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
+        tee('Retrying with elevated permissions...\n');
+        const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+        if (r2.code === 0) {
+          await fixOpenclawPermissions();
+          await succeed(); return;
         }
       }
     }
@@ -373,6 +390,14 @@ export class HomePanel {
   public dispose() {
     HomePanel.currentPanel = undefined;
     this._stopPolling();
+    if (this._uninstallCloseWatcher !== undefined) {
+      clearInterval(this._uninstallCloseWatcher);
+      this._uninstallCloseWatcher = undefined;
+    }
+    if (this._uninstallCloseSidebarTimer !== undefined) {
+      clearTimeout(this._uninstallCloseSidebarTimer);
+      this._uninstallCloseSidebarTimer = undefined;
+    }
     this._outputChannel.dispose();
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
@@ -425,7 +450,26 @@ export class HomePanel {
       const emojiBaseUri = this._panel.webview.asWebviewUri(
         vscode.Uri.joinPath(this._extensionUri, '..', '..', 'void_icons', 'emojis')
       ).toString();
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri);
+      // Read AI model info from openclaw.json
+      let aiModelName = '';
+      try {
+        const raw = fs.readFileSync(configFile, 'utf-8');
+        const cfg = JSON.parse(raw) as Record<string, unknown>;
+        const primaryModel = (cfg as Record<string, Record<string, Record<string, Record<string, string>>>>)
+          ?.agents?.defaults?.model?.primary ?? '';
+        if (primaryModel) {
+          const slashIdx = primaryModel.indexOf('/');
+          const providerId = slashIdx >= 0 ? primaryModel.slice(0, slashIdx) : '';
+          const modelId    = slashIdx >= 0 ? primaryModel.slice(slashIdx + 1) : primaryModel;
+          const providers = (cfg as Record<string, Record<string, Record<string, Record<string, { id: string; name?: string; input?: string[] }[]>>>>)
+            ?.models?.providers ?? {};
+          const providerModels = providers[providerId]?.models ?? [];
+          const modelDef = providerModels.find((m: { id: string; name?: string; input?: string[] }) => m.id === modelId);
+          aiModelName = modelDef?.name ?? primaryModel;
+        }
+      } catch { /* openclaw.json unreadable or missing fields */ }
+
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
       // One-shot version check: fires the first time the user lands on the full dashboard.
       // If the installed version is outdated, MoltPilot auto-starts the update.
       if (!this._autoUpdateTriggered) {
@@ -456,7 +500,8 @@ export class HomePanel {
       const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
       const raw = fs.readFileSync(configPath, 'utf-8');
       const config = JSON.parse(raw) as Record<string, unknown>;
-      const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
+      const gateway = config['gateway'] as Record<string, unknown> | undefined;
+      const p = gateway?.['port'] ?? config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
       const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
       return Number.isFinite(n) && n > 0 && n < 65536 ? n : 18789;
     } catch {
@@ -830,7 +875,7 @@ export class HomePanel {
     const providerFlags: Record<string, string[]> = {
       free: [
         '--auth-choice', 'custom-api-key',
-        '--custom-base-url', 'https://inference.mba.sh/v1',
+        '--custom-base-url', 'https://occ.mba.sh/v1',
         '--custom-api-key', data.apiKey,
         '--custom-model-id', 'occ-legacy',
         '--custom-compatibility', 'openai',
@@ -891,11 +936,14 @@ export class HomePanel {
           setTimeout(() => {
             HomePanel.refresh();
             if (isFree) {
-              // Open chat immediately — moltpilot is already configured in OCcode.
-              vscode.commands.executeCommand('void.sidebar.open');
-            } else {
               vscode.commands.executeCommand('openclaw.openWorkspace');
             }
+            // Give the dashboard time to render, then open a new chat asking AI to start the gateway
+            setTimeout(() => {
+              vscode.commands.executeCommand('void.openChatWithMessage',
+                'Run `openclaw gateway start` to start the OpenClaw gateway.',
+                'agent');
+            }, 1000);
           }, 1500);
         }
         resolve();
@@ -908,6 +956,37 @@ export class HomePanel {
   }
 
   // ── Uninstall ──────────────────────────────────────────────────────────────
+  private _schedulePostUninstallClose(): void {
+    if (this._uninstallCloseWatcher !== undefined) return;
+
+    const maxWaitMs = 90_000;
+    const pollMs = 2_000;
+    const closeDelayMs = 3_000;
+    const started = Date.now();
+    let wasRunning = false;
+
+    this._uninstallCloseWatcher = setInterval(async () => {
+      if (Date.now() - started > maxWaitMs) {
+        clearInterval(this._uninstallCloseWatcher);
+        this._uninstallCloseWatcher = undefined;
+        return;
+      }
+
+      const isRunning = await vscode.commands.executeCommand<boolean>('void.getIsRunning')
+        .then(v => !!v, () => false);
+
+      if (isRunning) { wasRunning = true; return; }
+      if (!wasRunning) return;
+
+      clearInterval(this._uninstallCloseWatcher);
+      this._uninstallCloseWatcher = undefined;
+      this._uninstallCloseSidebarTimer = setTimeout(() => {
+        this._uninstallCloseSidebarTimer = undefined;
+        vscode.commands.executeCommand('void.sidebar.close');
+      }, closeDelayMs);
+    }, pollMs);
+  }
+
   // AI-only: hand everything to MoltPilot immediately.
   // MoltPilot is instructed to stop all running OpenClaw processes first
   // (to release lock files), then perform full uninstall using run_with_sudo
@@ -926,50 +1005,10 @@ export class HomePanel {
       post({ type: 'uninstallDone' });
       vscode.commands.executeCommand(
         'void.openChatWithMessage',
-        'Please fully uninstall OpenClaw from this machine.\n\n' +
-        'IMPORTANT — the OCC Home panel considers OpenClaw "installed" if EITHER of these is true:\n' +
-        '  (A) the openclaw CLI binary is in PATH  →  `which openclaw` returns a path\n' +
-        '  (B) the file ~/.openclaw/openclaw.json exists on disk\n' +
-        'You MUST eliminate BOTH conditions for the panel to show "not installed". Do not stop until both are gone.\n\n' +
-        '── STEP 1: Stop all running OpenClaw processes ─────────────────────────────\n' +
-        'Check: pgrep -af openclaw\n' +
-        'Kill all matches: pkill -9 -f openclaw\n' +
-        'This releases any lock files so nothing blocks the cleanup.\n\n' +
-        '── STEP 2: Run the built-in uninstaller if the CLI is still available ──────\n' +
-        'Check first: which openclaw\n' +
-        'If found, run (non-interactive, no prompts): openclaw uninstall --all --yes --non-interactive\n' +
-        'This handles gateway service removal (launchd/systemd/schtasks), state dir, and config in one shot.\n' +
-        'If the CLI is NOT found, skip to Step 3.\n\n' +
-        '── STEP 3: Manual service removal (only needed if CLI was not available) ───\n' +
-        'On macOS — remove the launchd agent:\n' +
-        '  launchctl bootout gui/$UID/ai.openclaw.gateway\n' +
-        '  rm -f ~/Library/LaunchAgents/ai.openclaw.gateway.plist\n' +
-        '  Also remove any legacy plist: rm -f ~/Library/LaunchAgents/com.openclaw.gateway.plist\n' +
-        'On Linux — remove the systemd user unit:\n' +
-        '  systemctl --user disable --now openclaw-gateway.service\n' +
-        '  rm -f ~/.config/systemd/user/openclaw-gateway.service\n' +
-        '  systemctl --user daemon-reload\n\n' +
-        '── STEP 4: Remove state and config directory ───────────────────────────────\n' +
-        'rm -rf ~/.openclaw\n' +
-        'This clears condition (B). If OPENCLAW_STATE_DIR or OPENCLAW_CONFIG_PATH are set to custom paths, remove those too.\n\n' +
-        '── STEP 5: Remove the CLI binary and npm package ───────────────────────────\n' +
-        'Do NOT use "npm uninstall -g" — it is extremely slow. Instead, delete directly:\n' +
-        '  a. BIN=$(which openclaw 2>/dev/null)  — capture binary path\n' +
-        '  b. PKG=$(npm root -g)/openclaw        — capture package path\n' +
-        '  c. rm -f "$BIN"   (use run_with_sudo if permission denied)\n' +
-        '  d. rm -rf "$PKG"  (use run_with_sudo if permission denied)\n' +
-        'This clears condition (A).\n' +
-        'Also remove the macOS app if present: rm -rf /Applications/OpenClaw.app\n\n' +
-        '── STEP 6: Clean shell RC files ────────────────────────────────────────────\n' +
-        'Strip any line containing "openclaw" (case-insensitive) from:\n' +
-        '~/.zshrc, ~/.bashrc, ~/.bash_profile, ~/.profile\n' +
-        'Collapse any resulting triple blank lines.\n\n' +
-        '── STEP 7: Verify both conditions are cleared ──────────────────────────────\n' +
-        '  - which openclaw              →  must return nothing (condition A cleared)\n' +
-        '  - ls ~/.openclaw/openclaw.json →  must return "No such file or directory" (condition B cleared)\n\n' +
-        'Use run_with_sudo whenever a step requires elevated privileges. When both conditions are verified clear, confirm to the user that OpenClaw has been fully removed.',
+        'Uninstall OpenClaw. No sudo.\n1. cd $HOME\n2. pkill -9 -f openclaw\n3. openclaw uninstall --all --yes --non-interactive\nConfirm each step ran OK, then tell the user it\'s done.',
         'agent',
       );
+      this._schedulePostUninstallClose();
 
       // Remove ~/.openclaw from the VS Code workspace Explorer sidebar.
       // Done here (after MoltPilot fires) so workspace changes don't trigger
@@ -1474,8 +1513,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     </button>
   </div>
 
-  <!-- Panel B: Configure — Step B0: choose free or BYOK -->
-  <div class="panel" id="panel-cfg-b0" style="display:${isInstalled ? 'flex' : 'none'};flex-direction:column;align-items:center;gap:12px;">
+  <!-- Panel B: Configure — Step B0: no longer shown (auto-configured on install) -->
+  <div class="panel" id="panel-cfg-b0" style="display:none;flex-direction:column;align-items:center;gap:12px;">
     <div class="panel-title">Configure AI Model</div>
     <div class="panel-desc">Choose how you want to power the AI gateway.</div>
     <button class="btn-primary" id="btn-start-free" onclick="chooseFree()">
@@ -1521,6 +1560,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
       Ask MoltPilot to fix this
     </button>
+    <button class="molt-help" id="retry-install" onclick="retryInstall()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.36"/></svg>
+      Try Again
+    </button>
   </div>
 
   <!-- Password modal -->
@@ -1555,6 +1598,26 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       if (pop) pop.classList.remove('open');
     }
     document.addEventListener('click', function() { closeUserPopover(); });
+
+    // ── Auto-configure on pre-installed load ───────────────────────
+    // When openclaw is already installed but not yet configured,
+    // skip panel-cfg-b0 and auto-run setup immediately.
+    ${isInstalled ? `
+    (function() {
+      var occKey = _occUser && _occUser.api_keys && _occUser.api_keys.occKey;
+      setTimeout(function() {
+        if (occKey) {
+          showLog('Setting up with OCC Legacy inference...\\n');
+          setLogStatus('Configuring', 'dots');
+          vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: occKey, port: '18789' });
+        } else {
+          showLog('Skipping AI configuration — not logged in.\\n');
+          setLogStatus('Skipping', 'done');
+          setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
+        }
+      }, 600);
+    })();
+    ` : ''}
 
     // ── Install ────────────────────────────────────────────────────
     function startInstall() {
@@ -1655,6 +1718,20 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       document.getElementById('molt-help').classList.add('visible');
     }
 
+    function showRetryButton() {
+      document.getElementById('retry-install').classList.add('visible');
+    }
+
+    function retryInstall() {
+      // Reset log and status, hide both action buttons, restart install
+      document.getElementById('log-box').innerHTML = '';
+      fullLog = '';
+      setLogStatus('Installing', 'dots');
+      document.getElementById('molt-help').classList.remove('visible');
+      document.getElementById('retry-install').classList.remove('visible');
+      vscode.postMessage({ command: 'openclaw.install' });
+    }
+
     // ── Password modal ─────────────────────────────────────────────
     var _pwdModalMode = 'install'; // 'install' | 'uninstall'
     function confirmPwd() {
@@ -1689,18 +1766,32 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       if (d.type === 'installState') {
         if (d.state === 'running') {
           setLogStatus('Installing', 'dots');
+          document.getElementById('molt-help').classList.remove('visible');
+          document.getElementById('retry-install').classList.remove('visible');
+        } else if (d.state === 'cancelled') {
+          setLogStatus('Wrong password or cancelled', 'failed');
+          showRetryButton();
         } else if (d.state === 'done') {
           setLogStatus('✅ Installed successfully!', 'done');
           // Advance timeline: mark install done, configure active
           document.getElementById('step-install').className = 'step-item done';
           document.getElementById('step-configure').className = 'step-item active';
-          // Show configure panel after short delay
+          // Auto-configure after short delay — skip interactive panel
           setTimeout(function() {
             document.getElementById('log-wrap').classList.remove('visible');
             document.getElementById('log-box').innerHTML = '';
             fullLog = '';
             setLogStatus('', '');
-            document.getElementById('panel-cfg-b0').style.display = 'flex';
+            var occKey = _occUser && _occUser.api_keys && _occUser.api_keys.occKey;
+            if (occKey) {
+              showLog('Setting up with OCC Legacy inference...\\n');
+              setLogStatus('Configuring', 'dots');
+              vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: occKey, port: '18789' });
+            } else {
+              showLog('Skipping AI configuration — not logged in.\\n');
+              setLogStatus('Skipping', 'done');
+              setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
+            }
           }, 1200);
         } else if (d.state === 'failed') {
           setLogStatus('Installation failed', 'failed');
@@ -2085,7 +2176,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     iconUri: string,
     occJwt: string = '',
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
-    emojiBaseUri: string = ''
+    emojiBaseUri: string = '',
+    aiModelName = ''
   ): string {
     // Render user area statically (avoids JS innerHTML escaping / runtime errors)
     let userAreaHtml: string;
@@ -2118,7 +2210,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
             <div class="user-popover-header">
               <div class="user-popover-avatar">${popoverAvatar}</div>
               <div class="user-popover-email">${safeEmail}</div>
-              <div class="user-popover-balance">${balance} credits</div>
+              <div class="user-popover-balance" id="user-popover-balance">${balance} credits</div>
             </div>
             <div class="user-popover-actions">
               <a class="user-popover-action" href="#" onclick="openDashboard();return false;">
@@ -2154,6 +2246,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     const icTerminal = ic('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>');
     const icServer   = ic('<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>');
     const icBot      = ic('<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>');
+    const icChip     = ic('<path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><path d="M7 7h.01"/>', 13);
     // Button icons — slightly larger, full opacity
     const icSettings = ic('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>', 15, '0.9');
     const icDownload = ic('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>', 15, '0.9');
@@ -3055,6 +3148,12 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         <button id="gw-btn" class="gw-btn" disabled></button>
       </span>
     </div>
+    ${aiModelName ? `
+    <div class="check-row">
+      <span class="row-icon">${icChip}</span>
+      <span class="label">AI Model</span>
+      <span class="value" style="font-size:11px;">${aiModelName}</span>
+    </div>` : ''}
     <div class="check-row">
       <span class="row-icon">${icBot}</span>
       <span class="label">MoltPilot</span>
@@ -3435,6 +3534,9 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         const res = document.getElementById('version-result');
         if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
         if (res) { res.style.display = 'none'; res.innerHTML = ''; }
+      } else if (e.data.type === 'balanceUpdate') {
+        var balEl = document.getElementById('user-popover-balance');
+        if (balEl) balEl.textContent = (typeof e.data.amount === 'number' ? e.data.amount.toFixed(2) : e.data.amount) + ' credits';
       } else if (e.data.type === 'wizardLog') {
         var cassOverlay = document.getElementById('cass-progress-overlay');
         if (cassOverlay && cassOverlay.style.display === 'none') cassOverlay.style.display = 'flex';
