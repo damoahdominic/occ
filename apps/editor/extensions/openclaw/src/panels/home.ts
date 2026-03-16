@@ -3085,7 +3085,9 @@ Never run bare \`cass\` (it opens a TUI).
   </div>
 
   <!-- Uninstall full-panel state -->
-  <div id="cass-progress-overlay" style="display:none;position:fixed;inset:0;background:#0e0e0e;z-index:1100;flex-direction:column;align-items:center;justify-content:center;gap:0;">    <div style="display:flex;flex-direction:column;align-items:center;gap:20px;width:min(420px,92vw);">      <div style="position:relative;width:56px;height:56px;">        <div id="cass-spinner" style="position:absolute;inset:-8px;border:2px solid rgba(100,100,255,0.15);border-top-color:rgba(100,100,255,0.7);border-radius:50%;animation:spin 1.1s linear infinite;"></div>        <img src="${iconUri}" style="width:56px;height:56px;border-radius:12px;display:block;" />      </div>      <div style="text-align:center;">        <div style="font-size:16px;font-weight:600;color:#fff;margin-bottom:4px;">Setting up Better Memory</div>        <div id="cass-status-line" style="font-size:12px;color:#666;">Starting…</div>      </div>      <pre id="cass-log" style="width:100%;background:#111;border:1px solid #1e1e1e;border-radius:8px;padding:12px 14px;font-size:11px;color:#888;line-height:1.6;min-height:100px;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace;"></pre>    </div>  </div>
+  <div id="cass-progress-overlay" style="display:none;position:fixed;inset:0;background:#0e0e0e;z-index:1100;flex-direction:column;align-items:center;justify-content:center;gap:0;">
+    <button onclick="document.getElementById('cass-progress-overlay').style.display='none';" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#555;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px;" title="Close">&times;</button>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:20px;width:min(420px,92vw);">      <div style="position:relative;width:56px;height:56px;">        <div id="cass-spinner" style="position:absolute;inset:-8px;border:2px solid rgba(100,100,255,0.15);border-top-color:rgba(100,100,255,0.7);border-radius:50%;animation:spin 1.1s linear infinite;"></div>        <img src="${iconUri}" style="width:56px;height:56px;border-radius:12px;display:block;" />      </div>      <div style="text-align:center;">        <div style="font-size:16px;font-weight:600;color:#fff;margin-bottom:4px;">Setting up Better Memory</div>        <div id="cass-status-line" style="font-size:12px;color:#666;">Starting…</div>      </div>      <pre id="cass-log" style="width:100%;background:#111;border:1px solid #1e1e1e;border-radius:8px;padding:12px 14px;font-size:11px;color:#888;line-height:1.6;min-height:100px;max-height:260px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace;"></pre>    </div>  </div>
   <div id="uninstall-progress-overlay" style="display:none;position:fixed;inset:0;background:#0e0e0e;z-index:1100;flex-direction:column;align-items:center;justify-content:center;gap:0;">
     <div style="display:flex;flex-direction:column;align-items:center;gap:20px;width:min(420px,92vw);">
       <!-- Icon + spinner row -->
@@ -3516,8 +3518,17 @@ Never run bare \`cass\` (it opens a TUI).
         if (e.data.done) {
           var spinner = document.getElementById('cass-spinner');
           if (spinner) spinner.style.animation = 'none';
-          if (cassStatus) { cassStatus.textContent = e.data.ok ? 'Done!' : 'Finished with errors'; cassStatus.style.color = e.data.ok ? '#4ade80' : '#f87171'; }
-          if (e.data.ok) { setTimeout(function() { if (cassOverlay) cassOverlay.style.display = 'none'; }, 3000); }
+          if (e.data.ok) {
+            if (cassStatus) { cassStatus.textContent = 'Done!'; cassStatus.style.color = '#4ade80'; }
+            setTimeout(function() { if (cassOverlay) cassOverlay.style.display = 'none'; }, 2000);
+          } else {
+            if (cassStatus) { cassStatus.textContent = 'Handing off to AI…'; cassStatus.style.color = '#facc15'; }
+            var fullLog = cassLog ? cassLog.textContent : '';
+            setTimeout(function() {
+              if (cassOverlay) cassOverlay.style.display = 'none';
+              vscode.postMessage({ command: 'void.openChatWithMessage', args: ['Better Memory (CASS) setup failed. Here is the full log:\n\n' + fullLog.trim() + '\n\nPlease diagnose what went wrong, fix it, and complete the setup.'] });
+            }, 1500);
+          }
         } else if (cassStatus && e.data.text) {
           var lines = (e.data.text || '').split('\\n').filter(Boolean);
           if (lines.length) cassStatus.textContent = lines[lines.length - 1].trim();
