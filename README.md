@@ -14,7 +14,7 @@
   <a href="https://github.com/damoahdominic/occ/releases"><img src="https://img.shields.io/github/downloads/damoahdominic/occ/total?style=flat-square&color=ef4444" alt="Downloads" /></a>
   <a href="https://github.com/damoahdominic/occ/stargazers"><img src="https://img.shields.io/github/stars/damoahdominic/occ?style=flat-square&color=ef4444" alt="Stars" /></a>
   <a href="https://github.com/damoahdominic/occ/blob/main/LICENSE"><img src="https://img.shields.io/github/license/damoahdominic/occ?style=flat-square" alt="License" /></a>
-  <a href="https://discord.gg/openclaw"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/Ybn2hW8yrt"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
 <p align="center">
