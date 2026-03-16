@@ -1027,31 +1027,39 @@ export class HomePanel {
 
     post({ type: 'wizardLog', text: 'Setting up CASS (Coding Agent Session Search)...\n\n', done: false, ok: false });
 
-    // ── Step 1: Check Python ──────────────────────────────────────────────────
-    post({ type: 'wizardLog', text: '① Checking Python...\n', done: false, ok: false });
-    const pythonCmd = isWin ? 'py' : 'python3';
-    const pyCheck = await runCmd(pythonCmd, ['--version'], isWin ? { shell: true } : {});
-    if (pyCheck.code !== 0) {
-      post({ type: 'wizardLog', text: '\n❌ Python 3 not found. Please install Python 3.9+ first.\n', done: true, ok: false });
-      return;
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 1 — Deterministic: detect platform, download & stage the binary
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // ── Step 1: Detect platform ───────────────────────────────────────────────
+    post({ type: 'wizardLog', text: '① Detecting platform...\n', done: false, ok: false });
+    const isMac = process.platform === 'darwin';
+    const isArm = process.arch === 'arm64';
+
+    let assetName: string;
+    if (isWin) {
+      assetName = 'cass-windows-amd64.zip';
+    } else if (isMac) {
+      assetName = 'cass-darwin-arm64.tar.gz';
+    } else {
+      assetName = isArm ? 'cass-linux-arm64.tar.gz' : 'cass-linux-amd64.tar.gz';
     }
+    post({ type: 'wizardLog', text: `   Platform: ${process.platform}/${process.arch} → ${assetName}\n`, done: false, ok: false });
 
-    // ── Step 2: Download CASS via HTTPS (no git needed) ───────────────────────
-    post({ type: 'wizardLog', text: '\n② Downloading CASS...\n', done: false, ok: false });
-    const cassDir = path.join(home, '.occ', 'cass-src');
-    const zipPath = path.join(home, '.occ', 'cass-download.zip');
+    // ── Step 2: Download the binary ───────────────────────────────────────────
+    post({ type: 'wizardLog', text: '\n② Downloading CASS v0.2.2 binary...\n', done: false, ok: false });
+    const occDir = path.join(home, '.occ');
+    const stagingDir = path.join(occDir, 'cass-staging');
+    if (!fs.existsSync(occDir)) fs.mkdirSync(occDir, { recursive: true });
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+    fs.mkdirSync(stagingDir, { recursive: true });
 
-    // Clean previous download
-    try { fs.rmSync(cassDir, { recursive: true, force: true }); } catch {}
-    try { fs.unlinkSync(zipPath); } catch {}
-    if (!fs.existsSync(path.join(home, '.occ'))) {
-      fs.mkdirSync(path.join(home, '.occ'), { recursive: true });
-    }
+    const downloadPath = path.join(occDir, assetName);
+    try { fs.unlinkSync(downloadPath); } catch {}
 
-    // Download zip using Node https (no curl dependency)
-    const zipUrl = 'https://github.com/Dicklesworthstone/coding_agent_session_search/archive/refs/heads/main.zip';
+    const downloadUrl = `https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.2.2/${assetName}`;
     const downloadOk = await new Promise<boolean>(resolve => {
-      const file = fs.createWriteStream(zipPath);
+      const file = fs.createWriteStream(downloadPath);
       const download = (url: string) => {
         const mod = url.startsWith('https') ? require('https') : require('http');
         mod.get(url, (res: any) => {
@@ -1064,158 +1072,96 @@ export class HomePanel {
           file.on('finish', () => { file.close(); resolve(true); });
         }).on('error', () => resolve(false));
       };
-      download(zipUrl);
+      download(downloadUrl);
     });
 
     if (!downloadOk) {
-      post({ type: 'wizardLog', text: '\n❌ Failed to download CASS. Check your internet connection.\n', done: true, ok: false });
+      post({ type: 'wizardLog', text: '\n❌ Failed to download CASS binary. Check your internet connection.\n', done: true, ok: false });
       return;
     }
     post({ type: 'wizardLog', text: '   Downloaded.\n', done: false, ok: false });
 
-    // Extract zip
-    post({ type: 'wizardLog', text: '   Extracting...\n', done: false, ok: false });
+    // ── Step 3: Extract to staging dir ────────────────────────────────────────
+    post({ type: 'wizardLog', text: '\n③ Extracting to staging directory...\n', done: false, ok: false });
+
     if (isWin) {
-      await runCmd('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${zipPath}' -DestinationPath '${path.join(home, '.occ')}' -Force`], { shell: true });
+      await runCmd('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${downloadPath}' -DestinationPath '${stagingDir}' -Force`], { shell: true });
     } else {
-      await runCmd('unzip', ['-o', '-q', zipPath, '-d', path.join(home, '.occ')]);
-    }
-    // GitHub zips extract to <repo>-<branch>/ folder
-    const extractedDir = path.join(home, '.occ', 'coding_agent_session_search-main');
-    if (fs.existsSync(extractedDir)) {
-      fs.renameSync(extractedDir, cassDir);
-    }
-    try { fs.unlinkSync(zipPath); } catch {}
-
-    if (!fs.existsSync(cassDir)) {
-      post({ type: 'wizardLog', text: '\n❌ Failed to extract CASS archive.\n', done: true, ok: false });
-      return;
-    }
-    post({ type: 'wizardLog', text: '   Extracted to ~/.occ/cass-src/\n', done: false, ok: false });
-
-    // ── Step 3: Install CASS with pip ─────────────────────────────────────────
-    post({ type: 'wizardLog', text: '\n③ Installing CASS (pip install)...\n', done: false, ok: false });
-    const pipArgs = ['-m', 'pip', 'install', '--user', '-e', cassDir];
-    const pipResult = await runCmd(pythonCmd, pipArgs, isWin ? { shell: true } : {});
-    if (pipResult.code !== 0) {
-      post({ type: 'wizardLog', text: '\n❌ pip install failed. See output above.\n', done: true, ok: false });
-      return;
-    }
-    post({ type: 'wizardLog', text: '   ✅ CASS installed.\n', done: false, ok: false });
-
-    // ── Step 4: Write OpenClaw session shim ───────────────────────────────────
-    post({ type: 'wizardLog', text: '\n④ Writing session converter shim...\n', done: false, ok: false });
-    const shimDir = isWin ? path.join(home, 'AppData', 'Local', 'bin') : path.join(home, '.local', 'bin');
-    if (!fs.existsSync(shimDir)) fs.mkdirSync(shimDir, { recursive: true });
-    const shimPath = path.join(shimDir, 'cass-openclaw-shim.py');
-    const shimContent = `#!/usr/bin/env python3
-"""Convert OpenClaw session JSONL to flat CASS-compatible JSONL."""
-import json, os, glob, sys
-
-SRC = os.path.expanduser("~/.openclaw/agents/main/sessions")
-DST = os.path.expanduser("~/.openclaw/sessions")
-os.makedirs(DST, exist_ok=True)
-
-for src_path in glob.glob(os.path.join(SRC, "*.jsonl")):
-    dst_path = os.path.join(DST, os.path.basename(src_path))
-    # Skip if destination is newer
-    if os.path.exists(dst_path) and os.path.getmtime(dst_path) >= os.path.getmtime(src_path):
-        continue
-    entries = []
-    with open(src_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                evt = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if evt.get("type") != "message":
-                continue
-            msg = evt.get("message", evt)
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(
-                    p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
-                )
-            if not content or not role:
-                continue
-            entries.append(json.dumps({
-                "role": role,
-                "content": content,
-                "timestamp": evt.get("timestamp", ""),
-            }))
-    if entries:
-        with open(dst_path, "w") as f:
-            f.write("\\n".join(entries) + "\\n")
-
-print(f"Converted {len(glob.glob(os.path.join(SRC, '*.jsonl')))} sessions")
-`;
-    fs.writeFileSync(shimPath, shimContent, { mode: 0o755 });
-    post({ type: 'wizardLog', text: `   Written to ${shimPath}\n`, done: false, ok: false });
-
-    // ── Step 5: Update AGENTS.md (idempotent) ─────────────────────────────────
-    post({ type: 'wizardLog', text: '\n⑤ Updating AGENTS.md...\n', done: false, ok: false });
-    const openclawDir = path.join(home, '.openclaw');
-    const agentsDir = path.join(openclawDir, 'agents', 'main');
-    if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
-    const agentsMdPath = path.join(agentsDir, 'AGENTS.md');
-    let agentsMd = '';
-    try { agentsMd = fs.readFileSync(agentsMdPath, 'utf-8'); } catch {}
-
-    if (!agentsMd.includes('## CASS')) {
-      const cassSection = `
-## CASS (Coding Agent Session Search)
-
-Before answering questions or starting tasks, search prior sessions for context:
-
-\`\`\`bash
-cass search "<topic>" --robot --limit 5 --fields minimal
-cass search "<topic>" --robot --days 7
-\`\`\`
-
-Key flags: \`--robot\` (machine output, mandatory), \`--limit N\`, \`--agent NAME\`, \`--days N\`.
-Never run bare \`cass\` (it opens a TUI).
-`;
-      fs.appendFileSync(agentsMdPath, cassSection);
-      post({ type: 'wizardLog', text: '   ✅ CASS section added to AGENTS.md\n', done: false, ok: false });
-    } else {
-      post({ type: 'wizardLog', text: '   CASS section already present — skipped.\n', done: false, ok: false });
+      await runCmd('tar', ['-xzf', downloadPath, '-C', stagingDir]);
     }
 
-    // ── Step 6: Restart gateway ───────────────────────────────────────────────
-    post({ type: 'wizardLog', text: '\n⑥ Restarting OpenClaw gateway...\n', done: false, ok: false });
-    const cliPath = await this._findOpenClawPath() ?? 'openclaw';
-    await runCmd(cliPath, ['gateway', 'restart'], isWin ? { shell: true } : {});
-    post({ type: 'wizardLog', text: '   Gateway restarted.\n', done: false, ok: false });
+    // Clean up the downloaded archive
+    try { fs.unlinkSync(downloadPath); } catch {}
 
-    // ── Step 7: Run shim + index + smoke test ─────────────────────────────────
-    post({ type: 'wizardLog', text: '\n⑦ Running initial sync & smoke test...\n', done: false, ok: false });
-    await runCmd(pythonCmd, [shimPath]);
+    // Verify the binary exists in staging
+    const stagedBinary = isWin
+      ? path.join(stagingDir, 'cass.exe')
+      : path.join(stagingDir, 'cass');
 
-    // Find cass binary
-    const cassPath = isWin
-      ? path.join(home, 'AppData', 'Local', 'Programs', 'Python', 'Scripts', 'cass')
-      : path.join(home, '.local', 'bin', 'cass');
-    const cassCmd = fs.existsSync(cassPath) ? cassPath : 'cass';
-
-    const indexResult = await runCmd(cassCmd, ['index', '--full', '--json']);
-    if (indexResult.code !== 0) {
-      post({ type: 'wizardLog', text: '\n⚠️  Index build had issues but may still work. Continuing...\n', done: false, ok: false });
+    // The binary might be nested — try to find it
+    if (!fs.existsSync(stagedBinary)) {
+      const findBinary = (dir: string, name: string): string | null => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name === name) return path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            const r = findBinary(path.join(dir, entry.name), name);
+            if (r) return r;
+          }
+        }
+        return null;
+      };
+      const found = findBinary(stagingDir, isWin ? 'cass.exe' : 'cass');
+      if (found) {
+        fs.copyFileSync(found, stagedBinary);
+      } else {
+        post({ type: 'wizardLog', text: '\n❌ Could not find CASS binary in the downloaded archive.\n', done: true, ok: false });
+        return;
+      }
     }
 
-    const searchResult = await runCmd(cassCmd, ['search', 'test', '--robot', '--limit', '1']);
-    if (searchResult.code === 0) {
-      post({ type: 'wizardLog', text: '\n✅ CASS setup complete! Session search is ready.\n', done: true, ok: true });
-    } else {
-      post({ type: 'wizardLog', text: '\n⚠️  Setup finished but smoke test returned non-zero. CASS may need a few sessions before search works.\n', done: true, ok: true });
-    }
+    post({ type: 'wizardLog', text: `   ✅ Binary staged at ${stagedBinary}\n`, done: false, ok: false });
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Phase 2 — Hand off to MoltPilot for AI-assisted installation
+    // ══════════════════════════════════════════════════════════════════════════
+
+    post({ type: 'wizardLog', text: '\n✅ Download complete — handing off to MoltPilot for installation...\n', done: true, ok: true });
+
+    const binaryName = isWin ? 'cass.exe' : 'cass';
+    const handoffMessage = isWin
+      ? `CASS binary has been downloaded and staged at ~/.occ/cass-staging/${binaryName}.
+
+Please complete the installation:
+1. Create ~/.occ/bin/ if it doesn't exist and move the binary there
+2. Add ~/.occ/bin/ to the user's PATH if not already present
+3. Run \`cass health --json\` to verify it works
+4. Run \`cass index --full --json\` to build the initial index
+5. Update ~/.openclaw/agents/main/AGENTS.md with a CASS section if not already present — add instructions to use \`cass search "<topic>" --robot --limit 5\` before starting tasks
+6. Restart the OpenClaw gateway with \`openclaw gateway restart\`
+7. Run a smoke test: \`cass search "test" --robot --limit 1\`
+
+The binary is already downloaded — do NOT re-download or compile anything.`
+      : `CASS binary has been downloaded and staged at ~/.occ/cass-staging/${binaryName}.
+
+Please complete the installation:
+1. Create ~/.local/bin/ if it doesn't exist and move the binary there
+2. Make it executable: chmod +x ~/.local/bin/cass
+3. Run \`cass health --json\` to verify it works
+4. Run \`cass index --full --json\` to build the initial index
+5. Update ~/.openclaw/agents/main/AGENTS.md with a CASS section if not already present — add instructions to use \`cass search "<topic>" --robot --limit 5\` before starting tasks
+6. Restart the OpenClaw gateway with \`openclaw gateway restart\`
+7. Run a smoke test: \`cass search "test" --robot --limit 1\`
+
+The binary is already downloaded — do NOT re-download or compile anything.`;
+
+    setTimeout(() => {
+      vscode.commands.executeCommand('void.openChatWithMessage', handoffMessage, 'agent');
+    }, 1200);
 
     // Refresh panel
-    setTimeout(() => HomePanel.refresh(), 1500);
+    setTimeout(() => HomePanel.refresh(), 2500);
   }
+
 
   private _getSetupHtml(
     isInstalled: boolean,
