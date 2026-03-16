@@ -155,18 +155,3 @@ Made with [contrib.rocks](https://contrib.rocks).
   </a>
 </p>
 
-## Sponsors
-
-OpenClaw Code is made possible by the generous support of our sponsors.
-
-<h3 align="center">💎 Diamond Sponsor</h3>
-
-<p align="center">
-  <a href="https://moltpod.com">
-    <img src="https://openclawcode.ai/sponsors/moltpod.png" width="140" alt="MoltPod — Diamond Sponsor" />
-  </a>
-</p>
-
----
-
-Want to sponsor OpenClaw Code and support open-source AI? Reach out at [team@mba.sh](mailto:team@mba.sh).
