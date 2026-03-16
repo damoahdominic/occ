@@ -69,7 +69,6 @@ apps/
   web/            # Marketing website (openclawcode.ai)
 packages/
   control-center/ # Shared UI components for the control center
-occ-backend/      # Backend API (auth, billing, inference proxy)
 ```
 
 ## Development
