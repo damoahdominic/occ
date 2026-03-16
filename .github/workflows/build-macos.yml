@@ -446,6 +446,8 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
+    env:
+      AZURE_CLIENT_ID_CHECK: ${{ secrets.AZURE_CLIENT_ID }}
     defaults:
       run:
         shell: bash
@@ -590,7 +592,7 @@ jobs:
           node_modules/.bin/gulp vscode-win32-x64-user-setup
 
       - name: Sign Windows installers (Azure Trusted Signing)
-        if: ${{ secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ env.AZURE_CLIENT_ID_CHECK != '' }}
         uses: azure/trusted-signing-action@87c2e83e6868da99d3380aa309851b32ed9a8346
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
