@@ -838,31 +838,6 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               initial={{ opacity: 0, y: 15 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ delay: 0.15, duration: 0.5 }}
-              className="flex flex-wrap items-center justify-center gap-3 mb-14"
-            >
-              {[
-                { icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", label: "Guardrails" },
-                { icon: "M16 7V5a4 4 0 0 0-8 0v2 M2 7h20v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7z", label: "Compliance" },
-                { icon: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5", label: "Model Orchestration" },
-                { icon: "M13 2L3 14h9l-1 8 10-12h-9l1-8z", label: "One-Line Setup" },
-              ].map((item) => (
-                <span
-                  key={item.label}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-neutral-600/30 bg-white/[0.04] text-neutral-300 text-sm"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/80/70">
-                    <path d={item.icon} />
-                  </svg>
-                  {item.label}
-                </span>
-              ))}
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
               transition={{ delay: 0.3, duration: 0.5 }}
               className="text-center"
             >
