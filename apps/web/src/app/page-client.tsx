@@ -529,6 +529,11 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             <ContainerScroll
               titleComponent={
                 <div className="flex flex-col items-center">
+                  <a href="#nemoclaw" className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-5 hover:bg-emerald-500/15 transition-colors">
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold uppercase tracking-wide">New</span>
+                    Introducing NemoClaw Installation in your OpenClaw
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
+                  </a>
                   <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-6">
                     OpenClaw <span className="text-[var(--accent)]">Code</span>
                   </h1>
@@ -782,7 +787,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
 
 
         {/* NemoClaw Enterprise */}
-        <section className="px-6 py-28 relative overflow-hidden">
+        <section id="nemoclaw" className="px-6 py-28 relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
             <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
