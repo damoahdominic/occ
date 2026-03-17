@@ -808,13 +808,13 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               <div className="relative flex flex-col md:flex-row items-center">
                 {/* Image — left on desktop, top on mobile */}
                 <motion.div
-                  className="relative w-full md:w-[280px] lg:w-[320px] flex-shrink-0"
+                  className="relative w-full md:w-[360px] lg:w-[420px] flex-shrink-0"
                   initial={{ opacity: 0, scale: 0.95 }}
                   whileInView={{ opacity: 1, scale: 1 }}
                   viewport={{ once: true }}
                   transition={{ delay: 0.2, duration: 0.5 }}
                 >
-                  <div className="relative h-[240px] md:h-full md:min-h-[360px] overflow-hidden">
+                  <div className="relative h-[300px] md:h-full md:min-h-[420px] overflow-hidden">
                     <img
                       src="/images/jensen.png"
                       alt="NemoClaw"
