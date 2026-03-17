@@ -529,8 +529,8 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             <ContainerScroll
               titleComponent={
                 <div className="flex flex-col items-center">
-                  <a href="#nemoclaw" className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-5 hover:bg-emerald-500/15 transition-colors">
-                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold uppercase tracking-wide">New</span>
+                  <a href="#nemoclaw" className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.12] text-white/80 text-xs font-medium mb-5 hover:bg-white/[0.1] transition-colors">
+                    <span className="px-1.5 py-0.5 rounded-full bg-white/[0.1] text-[10px] font-bold uppercase tracking-wide">New</span>
                     Introducing NemoClaw Installation in your OpenClaw
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
                   </a>
@@ -789,9 +789,9 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
         {/* NemoClaw Enterprise */}
         <section id="nemoclaw" className="px-6 py-28 relative overflow-hidden">
           <div className="absolute inset-0 pointer-events-none">
-            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
-            <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-emerald-500/[0.03] rounded-full blur-[120px]" />
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+            <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-white/[0.02] rounded-full blur-[120px]" />
           </div>
 
           <div className="max-w-6xl mx-auto relative">
@@ -802,7 +802,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               transition={{ duration: 0.5 }}
               className="text-center mb-16"
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.12] text-white/80 text-sm font-medium mb-6">
                 <motion.svg
                   width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                   animate={{ opacity: [1, 0.4, 1] }}
@@ -813,7 +813,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                 Now Available
               </div>
               <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4">
-                NemoClaw<span className="text-emerald-400">.</span>
+                NemoClaw<span className="text-white/80">.</span>
               </h2>
               <p className="text-[var(--text-muted)] text-lg max-w-2xl mx-auto">
                 Enterprise-grade OpenClaw agents powered by NVIDIA NeMo Guardrails.
@@ -836,9 +836,9 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               ].map((item) => (
                 <span
                   key={item.label}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-300/90 text-sm"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-neutral-600/30 bg-white/[0.04] text-neutral-300 text-sm"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400/70">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/80/70">
                     <path d={item.icon} />
                   </svg>
                   {item.label}
@@ -856,7 +856,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               <div className="inline-flex flex-col sm:flex-row items-center gap-4">
                 <a
                   href="https://docs.openclaw.ai/nemoclaw"
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-colors text-sm"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/[0.06] border border-neutral-600/40 text-white/80 font-medium hover:bg-white/[0.1] transition-colors text-sm"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
