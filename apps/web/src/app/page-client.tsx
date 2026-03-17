@@ -816,59 +816,30 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               </p>
             </motion.div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-14">
-              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">NeMo Guardrails</h3>
-                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Programmable safety rails that prevent prompt injection, topic drift, and policy violations — without sacrificing agent capability.</p>
-                </div>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.1, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 7V5a4 4 0 0 0-8 0v2" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">Compliance-Ready</h3>
-                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Audit logging, data residency controls, and configurable content policies. Meet SOC 2, HIPAA, and GDPR requirements out of the box.</p>
-                </div>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.2, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">Model Orchestration</h3>
-                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Route tasks across LLMs intelligently. Use the right model for each step — fast models for triage, powerful ones for reasoning, local models for sensitive data.</p>
-                </div>
-              </motion.div>
-
-              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.3, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
-                      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-semibold mb-2">One-Line Setup</h3>
-                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Add NemoClaw to any existing OpenClaw deployment with a single configuration. No re-architecture, no downtime, no vendor lock-in.</p>
-                </div>
-              </motion.div>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.15, duration: 0.5 }}
+              className="flex flex-wrap items-center justify-center gap-3 mb-14"
+            >
+              {[
+                { icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", label: "Guardrails" },
+                { icon: "M16 7V5a4 4 0 0 0-8 0v2 M2 7h20v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7z", label: "Compliance" },
+                { icon: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5", label: "Model Orchestration" },
+                { icon: "M13 2L3 14h9l-1 8 10-12h-9l1-8z", label: "One-Line Setup" },
+              ].map((item) => (
+                <span
+                  key={item.label}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-500/15 bg-emerald-500/[0.05] text-emerald-300/90 text-sm"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400/70">
+                    <path d={item.icon} />
+                  </svg>
+                  {item.label}
+                </span>
+              ))}
+            </motion.div>
 
             <motion.div
               initial={{ opacity: 0, y: 15 }}
