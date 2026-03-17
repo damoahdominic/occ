@@ -644,11 +644,12 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
         {/* MoltPilot AI Assistant */}
         <section className="px-6 py-24">
           <div className="max-w-5xl mx-auto">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-              {/* Left — copy */}
+            <div className="flex flex-col items-center gap-12">
+              {/* Header */}
               <motion.div
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
+                className="text-center"
+                initial={{ opacity: 0, y: -20 }}
+                whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-80px" }}
                 transition={{ duration: 0.6, ease: "easeOut" }}
               >
@@ -663,30 +664,14 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                 <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-5 leading-tight">
                   Meet <span className="text-[var(--accent)]">MoltPilot</span>
                 </h2>
-                <p className="text-[var(--text-muted)] text-lg leading-relaxed mb-5">
-                  Your built-in AI guide. Setup, troubleshooting, configuration — MoltPilot handles it all, right inside the app.
-                </p>
-                <div className="flex flex-wrap gap-3">
-                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
-                    Zero-terminal setup
-                  </span>
-                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
-                    Real-time troubleshooting
-                  </span>
-                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
-                    Always available
-                  </span>
-                </div>
+
               </motion.div>
 
-              {/* Right — MoltPilot chat bubbles */}
+              {/* Chat bubbles — centered */}
               <motion.div
-                className="relative"
-                initial={{ opacity: 0, x: 30 }}
-                whileInView={{ opacity: 1, x: 0 }}
+                className="relative w-full max-w-md"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-80px" }}
                 transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" }}
               >
