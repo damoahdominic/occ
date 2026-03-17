@@ -529,11 +529,6 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
             <ContainerScroll
               titleComponent={
                 <div className="flex flex-col items-center">
-                  <a href="#nemoclaw" className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.12] text-white/80 text-xs font-medium mb-5 hover:bg-white/[0.1] transition-colors">
-                    <span className="px-1.5 py-0.5 rounded-full bg-white/[0.1] text-[10px] font-bold uppercase tracking-wide">New</span>
-                    Introducing NemoClaw Installation in your OpenClaw
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
-                  </a>
                   <h1 className="text-5xl sm:text-7xl font-bold tracking-tight mb-6">
                     OpenClaw <span className="text-[var(--accent)]">Code</span>
                   </h1>
