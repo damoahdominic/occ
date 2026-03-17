@@ -140,7 +140,11 @@ async function openOpenClawFolder(): Promise<void> {
   // Only open the workspace if OpenClaw is already installed.
   const openclawPath = path.join(os.homedir(), '.openclaw');
   if (!fs.existsSync(openclawPath)) {
-    return; // OpenClaw not installed yet — nothing to open.
+    // OpenClaw not installed — clean up any stale workspace file so VS Code
+    // doesn't keep opening the workspace with a missing folder on next restart.
+    const staleWorkspaceFile = path.join(occPath, WORKSPACE_FILENAME);
+    try { if (fs.existsSync(staleWorkspaceFile)) { fs.unlinkSync(staleWorkspaceFile); } } catch { /* non-fatal */ }
+    return;
   }
 
   // Workspace file lives in ~/.occ, points at ~/.openclaw as the folder.

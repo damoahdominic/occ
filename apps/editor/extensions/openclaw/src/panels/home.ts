@@ -251,7 +251,7 @@ export class HomePanel {
     post({ type: 'installState', state: 'running' });
 
     const env = panel._buildExecEnv();
-    const isPermError = (s: string) => /EACCES|permission denied|EPERM|not permitted/i.test(s);
+    const isPermError = (s: string) => /EACCES|permission denied|EPERM|not permitted|Need sudo access|needs to be an Administrator/i.test(s);
 
     // Spawn a command silently and stream output to the panel.
     const runCaptured = (cmd: string, args: string[], opts: cp.SpawnOptions = {}): Promise<{ code: number }> =>
@@ -349,11 +349,79 @@ export class HomePanel {
         }
       }
       tee('\nnpm install did not succeed — trying full installer script...\n');
+    } else if (platform !== 'win32') {
+
+      // ── Unix: npm not found — silent Node.js install (no terminal) ──────────
+      // Step A: try nvm (no sudo, no password needed)
+      const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
+      if (fs.existsSync(nvmSh)) {
+        tee('nvm detected — installing Node.js LTS...\n');
+        const nvmR = await runCaptured('bash', ['-c',
+          `. "${nvmSh}" && nvm install --lts && nvm use --lts && npm install -g openclaw`
+        ]);
+        if (nvmR.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
+        tee('nvm install failed — falling back to system install...\n');
+      }
+
+      // Step B: collect password once, cache sudo for all subsequent steps
+      tee('\nNode.js is required. Your password is needed once to install it.\n');
+      const sudoOk = await cacheSudo('Enter your password to install Node.js');
+      if (!sudoOk) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
+
+      if (platform === 'darwin') {
+        // macOS: download official Node.js universal pkg, install silently with cached sudo
+        const nodeVersion = '20.18.2';
+        const pkgUrl = `https://nodejs.org/dist/v${nodeVersion}/node-v${nodeVersion}.pkg`;
+        const pkgPath = `/tmp/.occ-node-${nodeVersion}.pkg`;
+        tee(`Downloading Node.js v${nodeVersion}...\n`);
+        const dlR = await runCaptured('curl', ['-fsSL', pkgUrl, '-o', pkgPath]);
+        if (dlR.code !== 0) { try { fs.unlinkSync(pkgPath); } catch {} await fail(); return; }
+        tee('Installing Node.js (this may take a moment)...\n');
+        const instR = await runCaptured('sudo', ['-n', 'installer', '-pkg', pkgPath, '-target', '/']);
+        try { fs.unlinkSync(pkgPath); } catch { /* non-fatal */ }
+        if (instR.code !== 0) { await fail(); return; }
+      } else {
+        // Linux: detect package manager and install Node.js LTS via nodesource
+        const hasCmdSync = (cmd: string): boolean => {
+          try { cp.execSync(`which ${cmd}`, { env, stdio: 'ignore' }); return true; } catch { return false; }
+        };
+        tee('Installing Node.js via package manager...\n');
+        let pkgResult: { code: number } | undefined;
+        if (hasCmdSync('apt-get')) {
+          pkgResult = await runCaptured('sudo', ['-n', 'bash', '-c',
+            'curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && apt-get install -y nodejs'
+          ]);
+        } else if (hasCmdSync('dnf')) {
+          pkgResult = await runCaptured('sudo', ['-n', 'bash', '-c',
+            'curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash - && dnf install -y nodejs'
+          ]);
+        } else if (hasCmdSync('yum')) {
+          pkgResult = await runCaptured('sudo', ['-n', 'bash', '-c',
+            'curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash - && yum install -y nodejs'
+          ]);
+        }
+        if (!pkgResult) { tee('No supported package manager found (tried apt-get, dnf, yum).\n'); await fail(); return; }
+        if (pkgResult.code !== 0) { await fail(); return; }
+      }
+
+      // Step C: npm is now installed — find it and install openclaw
+      tee('Installing OpenClaw...\n');
+      const npmCandidates = ['/usr/local/bin/npm', '/usr/bin/npm'];
+      const npmBin = npmCandidates.find(p => fs.existsSync(p)) ?? 'npm';
+      const npmR1 = await runCaptured(npmBin, ['install', '-g', 'openclaw']);
+      if (npmR1.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
+      // Global prefix dir may be root-owned — retry with cached sudo
+      if (isPermError(fullLog)) {
+        const npmR2 = await runCaptured('sudo', ['-n', npmBin, 'install', '-g', 'openclaw']);
+        if (npmR2.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
+      }
+      await fail(); return;
+
     } else {
       tee('npm not found — running full installer script...\n');
     }
 
-    // ── Step 2: full install script, captured (no terminal) ───────────────────
+    // ── Step 2: full install script ── (npm found but failed, or Windows no npm)
     if (platform === 'win32') {
       tee('Running PowerShell installer...\n');
       const psArgs = [
@@ -364,13 +432,13 @@ export class HomePanel {
       const r = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
       if (r.code === 0) { await succeed(); return; }
     } else {
+      // npm was found but install failed — try the openclaw installer script
       tee('Running install script...\n');
       const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
       if (r1.code === 0) {
         await fixOpenclawPermissions();
         await succeed(); return;
       }
-      // Permission error → ask for sudo, run installer under sudo, then fix permissions
       if (isPermError(fullLog)) {
         tee('\nPermission error in installer — elevated access required.\n');
         const ok = await cacheSudo('Enter your system password to complete installation');
@@ -994,13 +1062,9 @@ export class HomePanel {
 
   private async _runUninstall(): Promise<void> {
     const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
-    const home = os.homedir();
 
     post({ type: 'uninstallLog', text: 'Handing off to AI for uninstall…\n', done: true, ok: true });
 
-    // IMPORTANT: workspace file deletion must happen AFTER MoltPilot is activated —
-    // deleting the open .code-workspace file can trigger a VS Code window reload
-    // which would cancel any pending setTimeout callbacks.
     setTimeout(() => {
       post({ type: 'uninstallDone' });
       vscode.commands.executeCommand(
@@ -1009,31 +1073,10 @@ export class HomePanel {
         'agent',
       );
       this._schedulePostUninstallClose();
-
-      // Remove ~/.openclaw from the VS Code workspace Explorer sidebar.
-      // Done here (after MoltPilot fires) so workspace changes don't trigger
-      // a window reload that would cancel this callback before it executes.
-      try {
-        const openclawUri = vscode.Uri.file(path.join(home, '.openclaw'));
-        const folders = vscode.workspace.workspaceFolders ?? [];
-        const idx = folders.findIndex(f => f.uri.fsPath === openclawUri.fsPath);
-        if (idx !== -1) {
-          vscode.workspace.updateWorkspaceFolders(idx, 1);
-        }
-      } catch { /* non-fatal */ }
-
-      // Delete the .code-workspace file so the folder doesn't come back on next launch.
-      // Use a small extra delay so VS Code settles after the updateWorkspaceFolders call
-      // before we remove the workspace file (avoids "workspace file missing" prompts).
-      setTimeout(() => {
-        try {
-          const wsFile = path.join(home, '.occ', 'My OpenClaw Workspace.code-workspace');
-          if (fs.existsSync(wsFile)) { fs.unlinkSync(wsFile); }
-        } catch { /* non-fatal */ }
-      }, 800);
-
-      // Reload the panel so it shows the "not installed" state
-      setTimeout(() => HomePanel.refresh(), 1200);
+      // Workspace cleanup (removing ~/.openclaw folder and .code-workspace file) is handled
+      // by openOpenClawFolder() on the next startup — manipulating workspace state here
+      // triggers VS Code to modify/reload the workspace, which can cause the extension to
+      // re-activate and open a duplicate OCC Home tab.
     }, 1200);
   }
 
