@@ -21,13 +21,14 @@ import {
 import { NoiseBackground } from "@/components/ui/noise-background";
 import { ScreenshotShowcase } from "@/components/ui/screenshot-showcase";
 
-export type Platform = "windows" | "macos";
+export type Platform = "windows" | "macos" | "linux";
 export type DownloadUrls = Record<Platform, string>;
 
 function detectPlatform(): Platform {
   if (typeof navigator === "undefined") return "windows";
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes("mac")) return "macos";
+  if (ua.includes("linux")) return "linux";
   return "windows";
 }
 
@@ -36,11 +37,13 @@ const RELEASES = "https://github.com/damoahdominic/occ/releases";
 const FALLBACK_URLS: DownloadUrls = {
   windows: "https://github.com/damoahdominic/occ/releases/latest",
   macos: "https://github.com/damoahdominic/occ/releases/latest",
+  linux: "https://github.com/damoahdominic/occ/releases/latest",
 };
 
 const platformLabels: Record<Platform, string> = {
   windows: "Windows",
   macos: "macOS",
+  linux: "Linux",
 };
 
 const platformIcons: Record<Platform, React.ReactNode> = {
@@ -52,6 +55,11 @@ const platformIcons: Record<Platform, React.ReactNode> = {
   macos: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
       <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+    </svg>
+  ),
+  linux: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097a.32.32 0 00-.14-.074c-.3-.6-.769-1.267-1.537-2.068-.445-.466-.853-.995-1.139-1.585a6.46 6.46 0 01-.587-2.464c-.024-1.327.396-2.395-.09-3.688a4.908 4.908 0 00-1.92-2.317C14.656.461 13.648.04 12.504 0z" />
     </svg>
   ),
 };
@@ -321,6 +329,13 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
 
     let phi = 0; // always-advancing base rotation
 
+    // Guard against missing WebGL (e.g. Linux without GPU)
+    const ctx = canvasRef.current.getContext("webgl");
+    if (!ctx) {
+      console.warn("WebGL not available — globe disabled");
+      return;
+    }
+
     const globe = createGlobe(canvasRef.current, {
       devicePixelRatio: 2,
       width: width * 2,
@@ -360,7 +375,8 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
     });
 
     return () => {
-      globe.destroy();
+      if (typeof globe !== "undefined") globe.destroy();
+
       window.removeEventListener("resize", onResize);
       container.removeEventListener("mouseenter", handleMouseEnter);
       container.removeEventListener("mouseleave", handleMouseLeave);
@@ -368,7 +384,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
     };
   }, []);
 
-  const otherPlatforms = (["windows", "macos"] as Platform[]).filter(
+  const otherPlatforms = (["windows", "macos", "linux"] as Platform[]).filter(
     (p) => p !== platform
   );
 
@@ -544,13 +560,18 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                         Star on GitHub
                       </a>
                     </div>
-                    <a
-                      href={downloadUrls[platform === "windows" ? "macos" : "windows"]}
-                      className="text-sm text-[var(--text-muted)] hover:text-white transition-colors"
-                    >
-                      Also available for{" "}
-                      {platform === "windows" ? "macOS" : "Windows"}
-                    </a>
+                    <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                      Also available for
+                      {otherPlatforms.map((p, i) => (
+                        <span key={p} className="inline-flex items-center gap-1.5">
+                          {i > 0 && <span className="mx-1">·</span>}
+                          <a href={downloadUrls[p]} className="inline-flex items-center gap-1.5 hover:text-white transition-colors">
+                            {platformIcons[p]}
+                            {platformLabels[p]}
+                          </a>
+                        </span>
+                      ))}
+                    </span>
                   </div>
 
 
@@ -620,7 +641,134 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
           </div>
         </section>
 
-        {/* Global community */}
+        {/* MoltPilot AI Assistant */}
+        <section className="px-6 py-24">
+          <div className="max-w-5xl mx-auto">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+              {/* Left — copy */}
+              <motion.div
+                initial={{ opacity: 0, x: -30 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, margin: "-80px" }}
+                transition={{ duration: 0.6, ease: "easeOut" }}
+              >
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium mb-6">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z" />
+                    <path d="M16 12h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h2" />
+                    <line x1="12" y1="16" x2="12" y2="20" />
+                  </svg>
+                  Built-in AI Guide
+                </div>
+                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-5 leading-tight">
+                  Meet <span className="text-[var(--accent)]">MoltPilot</span>
+                </h2>
+                <p className="text-[var(--text-muted)] text-lg leading-relaxed mb-5">
+                  Your built-in AI guide. Setup, troubleshooting, configuration — MoltPilot handles it all, right inside the app.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
+                    Zero-terminal setup
+                  </span>
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
+                    Real-time troubleshooting
+                  </span>
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-neutral-700/40 bg-neutral-800/40 text-sm text-[var(--text-secondary)]">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-red-400"><polyline points="20 6 9 17 4 12" /></svg>
+                    Always available
+                  </span>
+                </div>
+              </motion.div>
+
+              {/* Right — MoltPilot chat bubbles */}
+              <motion.div
+                className="relative"
+                initial={{ opacity: 0, x: 30 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, margin: "-80px" }}
+                transition={{ duration: 0.6, delay: 0.2, ease: "easeOut" }}
+              >
+                <div className="absolute -inset-4 bg-red-500/[0.04] rounded-3xl blur-2xl pointer-events-none" />
+                <div className="space-y-4">
+                  {/* User bubble 1 */}
+                  <motion.div
+                    className="flex justify-end"
+                    initial={{ opacity: 0, y: 15 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.3, duration: 0.4 }}
+                  >
+                    <div className="bg-[var(--accent)]/20 border border-[var(--accent)]/30 rounded-2xl rounded-br-md px-4 py-3 max-w-[85%]">
+                      <p className="text-sm text-white">How do I connect my Telegram to OpenClaw?</p>
+                    </div>
+                  </motion.div>
+
+                  {/* MoltPilot reply 1 */}
+                  <motion.div
+                    className="flex justify-start"
+                    initial={{ opacity: 0, y: 15 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.6, duration: 0.4 }}
+                  >
+                    <div className="bg-neutral-800/80 border border-neutral-700/50 rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%]">
+                      <p className="text-xs text-[var(--accent)] font-medium mb-1.5">MoltPilot</p>
+                      <p className="text-sm text-neutral-200">I&apos;ll walk you through it! First, open <span className="text-white font-medium">@BotFather</span> on Telegram and create a new bot. Once you have the token, I&apos;ll configure everything for you.</p>
+                    </div>
+                  </motion.div>
+
+                  {/* User bubble 2 */}
+                  <motion.div
+                    className="flex justify-end"
+                    initial={{ opacity: 0, y: 15 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.9, duration: 0.4 }}
+                  >
+                    <div className="bg-[var(--accent)]/20 border border-[var(--accent)]/30 rounded-2xl rounded-br-md px-4 py-3 max-w-[85%]">
+                      <p className="text-sm text-white">Done! Here&apos;s the token.</p>
+                    </div>
+                  </motion.div>
+
+                  {/* MoltPilot reply 2 */}
+                  <motion.div
+                    className="flex justify-start"
+                    initial={{ opacity: 0, y: 15 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 1.2, duration: 0.4 }}
+                  >
+                    <div className="bg-neutral-800/80 border border-neutral-700/50 rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%]">
+                      <p className="text-xs text-[var(--accent)] font-medium mb-1.5">MoltPilot</p>
+                      <p className="text-sm text-neutral-200">Connected! \u2705 Your OpenClaw agent is now live on Telegram. Try sending it a message — it&apos;ll respond instantly.</p>
+                    </div>
+                  </motion.div>
+
+                  {/* Typing indicator */}
+                  <motion.div
+                    className="flex justify-start"
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 1.5, duration: 0.3 }}
+                  >
+                    <div className="bg-neutral-800/80 border border-neutral-700/50 rounded-2xl rounded-bl-md px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <motion.span className="w-1.5 h-1.5 rounded-full bg-neutral-500" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0 }} />
+                        <motion.span className="w-1.5 h-1.5 rounded-full bg-neutral-500" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.2 }} />
+                        <motion.span className="w-1.5 h-1.5 rounded-full bg-neutral-500" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.4 }} />
+                      </div>
+                    </div>
+                  </motion.div>
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        </section>
+
+                {/* Global community */}
         <section className="relative px-6 py-24 overflow-hidden">
           <div className="max-w-6xl mx-auto">
             <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
@@ -648,60 +796,121 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
         </section>
 
 
-        {/* Sponsors */}
-        <section className="px-6 py-24 max-w-6xl mx-auto">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)] text-center mb-4">Our Sponsors</p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-center mb-4">
-            Backed by the best
-          </h2>
-          <p className="text-[var(--text-muted)] text-center mb-16 max-w-xl mx-auto">
-            OpenClaw Code is made possible by the generous support of our sponsors.
-          </p>
-
-          {/* Diamond Sponsor */}
-          <div className="mb-16">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-center text-[var(--text-muted)] mb-8">
-              💎 Diamond Sponsor
-            </p>
-            <div className="flex justify-center">
-              <a
-                href="https://moltpod.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group relative rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-8 sm:p-12 hover:border-[var(--accent)]/40 hover:bg-[var(--bg-elevated)] transition-all duration-300"
-              >
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[var(--accent)]/[0.04] to-transparent pointer-events-none" />
-                <Image
-                  src="/sponsors/moltpod.png"
-                  alt="MoltPod — Diamond Sponsor"
-                  width={280}
-                  height={80}
-                  className="relative opacity-90 group-hover:opacity-100 transition-opacity duration-300"
-                  unoptimized
-                />
-              </a>
-            </div>
+        {/* NemoClaw Enterprise */}
+        <section className="px-6 py-28 relative overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
+            <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-emerald-500/[0.03] rounded-full blur-[120px]" />
           </div>
 
-          {/* Become a Sponsor CTA */}
-          <div className="text-center">
-            <p className="text-[var(--text-muted)] text-sm mb-4">
-              Want to sponsor OpenClaw Code and support open-source AI?
-            </p>
-            <a
-              href="mailto:team@mba.sh"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-full border border-[var(--border)] bg-[var(--bg-card)]/60 backdrop-blur-sm text-sm text-[var(--text-muted)] hover:text-white hover:border-white/20 hover:bg-[var(--bg-elevated)] transition-all duration-300"
+          <div className="max-w-6xl mx-auto relative">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-80px" }}
+              transition={{ duration: 0.5 }}
+              className="text-center mb-16"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="4" width="20" height="16" rx="2" />
-                <path d="M22 7l-10 7L2 7" />
-              </svg>
-              Become a sponsor — team@mba.sh
-            </a>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium mb-6">
+                <motion.svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  animate={{ opacity: [1, 0.4, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                >
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </motion.svg>
+                Now Available
+              </div>
+              <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4">
+                NemoClaw<span className="text-emerald-400">.</span>
+              </h2>
+              <p className="text-[var(--text-muted)] text-lg max-w-2xl mx-auto">
+                Enterprise-grade OpenClaw agents powered by NVIDIA NeMo Guardrails.
+                Deploy with confidence — safety, compliance, and scale built in from day one.
+              </p>
+            </motion.div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-14">
+              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">NeMo Guardrails</h3>
+                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Programmable safety rails that prevent prompt injection, topic drift, and policy violations — without sacrificing agent capability.</p>
+                </div>
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.1, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
+                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2" /><path d="M16 7V5a4 4 0 0 0-8 0v2" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">Compliance-Ready</h3>
+                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Audit logging, data residency controls, and configurable content policies. Meet SOC 2, HIPAA, and GDPR requirements out of the box.</p>
+                </div>
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.2, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
+                      <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">Model Orchestration</h3>
+                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Route tasks across LLMs intelligently. Use the right model for each step — fast models for triage, powerful ones for reasoning, local models for sensitive data.</p>
+                </div>
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.3, duration: 0.5 }} className="relative group rounded-2xl border border-neutral-700/40 bg-[var(--bg-card)] p-7 hover:border-emerald-500/30 transition-colors">
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-4">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400">
+                      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">One-Line Setup</h3>
+                  <p className="text-sm text-[var(--text-muted)] leading-relaxed">Add NemoClaw to any existing OpenClaw deployment with a single configuration. No re-architecture, no downtime, no vendor lock-in.</p>
+                </div>
+              </motion.div>
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+              className="text-center"
+            >
+              <div className="inline-flex flex-col sm:flex-row items-center gap-4">
+                <a
+                  href="https://docs.openclaw.ai/nemoclaw"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-colors text-sm"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                  Read the Docs
+                </a>
+                <span className="text-xs text-[var(--text-muted)]">
+                  Works with any OpenClaw v0.9+ deployment
+                </span>
+              </div>
+            </motion.div>
           </div>
         </section>
 
-        {/* CTA */}
+                        {/* CTA */}
         <section id="download" className="px-6 py-24">
           <div className="max-w-4xl mx-auto">
             <div className="relative rounded-3xl overflow-hidden border border-red-500/20 bg-[var(--bg-card)]">
@@ -728,13 +937,18 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                         Download for {platformLabels[platform]}
                       </a>
                     </div>
-                    <a
-                      href={downloadUrls[platform === "windows" ? "macos" : "windows"]}
-                      className="text-sm text-[var(--text-muted)] hover:text-white transition-colors"
-                    >
-                      Also available for{" "}
-                      {platform === "windows" ? "macOS" : "Windows"}
-                    </a>
+                    <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                      Also available for
+                      {otherPlatforms.map((p, i) => (
+                        <span key={p} className="inline-flex items-center gap-1.5">
+                          {i > 0 && <span className="mx-1">·</span>}
+                          <a href={downloadUrls[p]} className="inline-flex items-center gap-1.5 hover:text-white transition-colors">
+                            {platformIcons[p]}
+                            {platformLabels[p]}
+                          </a>
+                        </span>
+                      ))}
+                    </span>
                 </div>
               </div>
 

@@ -5,6 +5,7 @@ const REPO = "damoahdominic/occ";
 const FALLBACK: DownloadUrls = {
   windows: `https://github.com/${REPO}/releases/latest`,
   macos: `https://github.com/${REPO}/releases/latest`,
+  linux: `https://github.com/${REPO}/releases/latest`,
 };
 
 async function getDownloadUrls(): Promise<DownloadUrls> {
@@ -29,6 +30,9 @@ async function getDownloadUrls(): Promise<DownloadUrls> {
     const mac = assets.find(
       (a) => a.name.includes("darwin") && a.name.endsWith(".zip")
     );
+    const lin = assets.find(
+      (a) => a.name.includes("linux") && (a.name.endsWith(".deb") || a.name.endsWith(".AppImage") || a.name.endsWith(".tar.gz"))
+    );
 
     const tagUrl = tag
       ? `https://github.com/${REPO}/releases/tag/${tag}`
@@ -37,6 +41,7 @@ async function getDownloadUrls(): Promise<DownloadUrls> {
     return {
       windows: win?.browser_download_url ?? tagUrl,
       macos: mac?.browser_download_url ?? tagUrl,
+      linux: lin?.browser_download_url ?? tagUrl,
     };
   } catch {
     return FALLBACK;

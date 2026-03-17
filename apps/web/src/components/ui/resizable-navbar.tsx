@@ -269,7 +269,7 @@ export const NavbarLogo = () => {
       className="relative z-20 mr-4 flex items-center space-x-2.5 px-2 py-1"
     >
       <Image src="/icon.png" alt="OCCode" width={28} height={28} className="rounded-lg" />
-      <span className="font-semibold text-base tracking-tight text-white">OCCode</span>
+      <span className="font-semibold text-base tracking-tight"><span className="text-white">OC</span><span className="text-[var(--accent)]">Code</span></span>
     </a>
   );
 };
