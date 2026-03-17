@@ -786,69 +786,67 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
           <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
             <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-white/[0.02] rounded-full blur-[120px]" />
           </div>
 
-          <div className="max-w-5xl mx-auto relative">
+          <div className="max-w-6xl mx-auto relative">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-80px" }}
               transition={{ duration: 0.6 }}
-              className="relative rounded-3xl overflow-hidden border border-neutral-700/30 bg-black"
+              className="relative rounded-3xl overflow-hidden border border-neutral-700/30 bg-black min-h-[500px] md:min-h-[520px]"
             >
-              {/* Background glow */}
-              <div className="absolute inset-0 bg-gradient-to-br from-red-500/[0.03] via-transparent to-white/[0.02] pointer-events-none" />
+              {/* Jensen as full-bleed background */}
+              <div className="absolute inset-0">
+                <img
+                  src="/images/jensen.png"
+                  alt="NemoClaw"
+                  className="w-full h-full object-cover object-center opacity-40"
+                />
+                {/* Dark overlays for text readability */}
+                <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/70 to-black/30" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40" />
+              </div>
 
-              <div className="relative flex flex-col md:flex-row items-center">
-                {/* Image — left on desktop, top on mobile */}
-                <motion.div
-                  className="relative w-full md:w-[360px] lg:w-[420px] flex-shrink-0"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: 0.2, duration: 0.5 }}
-                >
-                  <div className="relative h-[300px] md:h-full md:min-h-[420px] overflow-hidden">
-                    <img
-                      src="/images/jensen.png"
-                      alt="NemoClaw"
-                      className="w-full h-full object-contain object-center md:object-bottom"
-                    />
-                    {/* Fade edges into black */}
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-black/80 hidden md:block pointer-events-none" />
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-black/80 md:hidden pointer-events-none" />
-                  </div>
-                </motion.div>
+              {/* Accent glow */}
+              <div className="absolute top-0 left-0 w-[500px] h-[400px] bg-red-500/[0.06] rounded-full blur-[120px] pointer-events-none" />
 
-                {/* Text — right on desktop, bottom on mobile */}
-                <div className="flex-1 px-8 py-10 md:py-14 md:px-12 lg:px-16 text-center md:text-left">
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/[0.12] text-white/80 text-sm font-medium mb-5">
-                    <motion.svg
-                      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                      animate={{ opacity: [1, 0.4, 1] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                    </motion.svg>
-                    Now Available
-                  </div>
-                  <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-4">
-                    NemoClaw<span className="text-neutral-500">.</span>
-                  </h2>
-                  <p className="text-[var(--text-muted)] text-base sm:text-lg mb-8 max-w-lg leading-relaxed">
-                    Enterprise-grade OpenClaw agents powered by NVIDIA NeMo Guardrails.
-                    Safety, compliance, and scale — built in from day one.
-                  </p>
-                  <a
-                    href="https://docs.openclaw.ai/nemoclaw"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/[0.08] border border-neutral-600/40 text-white font-medium hover:bg-white/[0.12] transition-colors text-sm"
+              {/* Text overlay */}
+              <div className="relative flex items-center min-h-[500px] md:min-h-[520px] px-8 py-16 md:px-16 lg:px-20">
+                <div className="max-w-xl">
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.2, duration: 0.5 }}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                    </svg>
-                    Read the Docs
-                  </a>
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.08] border border-white/[0.15] text-white/90 text-sm font-medium mb-6 backdrop-blur-sm">
+                      <motion.svg
+                        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                        animate={{ opacity: [1, 0.4, 1] }}
+                        transition={{ duration: 2, repeat: Infinity }}
+                      >
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                      </motion.svg>
+                      Now Available
+                    </div>
+                    <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-5 leading-[1.1]">
+                      NemoClaw<span className="text-neutral-500">.</span>
+                    </h2>
+                    <p className="text-white/70 text-lg sm:text-xl mb-10 max-w-md leading-relaxed">
+                      Enterprise-grade OpenClaw agents powered by NVIDIA NeMo Guardrails.
+                      Safety, compliance, and scale — built in from day one.
+                    </p>
+                    <a
+                      href="https://docs.openclaw.ai/nemoclaw"
+                      className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white/[0.1] border border-neutral-500/40 text-white font-medium hover:bg-white/[0.16] transition-colors text-sm backdrop-blur-sm"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                      </svg>
+                      Read the Docs
+                    </a>
+                  </motion.div>
                 </div>
               </div>
             </motion.div>
