@@ -1985,7 +1985,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     }
 
     function stripAnsi(s) {
-      return s.replace(/\x1b(\[[0-9;]*[A-Za-z]|[^[])/g, '');
+      return s.replace(/\\x1b\\[[0-9;]*[A-Za-z]/g, '');
     }
 
     function appendLog(text) {
