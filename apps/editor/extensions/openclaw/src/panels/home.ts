@@ -142,6 +142,7 @@ export class HomePanel {
           'agent',
         );
       } else if (msg.command === 'runSetup') {
+        void vscode.commands.executeCommand('void.sidebar.close');
         void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
       } else if (msg.command === 'autoSetupSkipped') {
         setTimeout(() => {
