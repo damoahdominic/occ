@@ -8,6 +8,20 @@ import * as path from 'path';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
+// ── OCC Legacy model constants ────────────────────────────────────────────────
+const OCC_LEGACY_MODEL_ID   = 'occ-legacy';
+const OCC_LEGACY_MODEL_NAME = 'occ-legacy';
+const OCC_LEGACY_BASE_URL   = 'https://occ.mba.sh/v1';
+const OCC_LEGACY_API        = 'openai-completions';
+const OCC_LEGACY_COST = {
+  input:      0.0000006,
+  output:     0.000003,
+  cacheRead:  0.0000001,
+  cacheWrite: 0,
+};
+const OCC_LEGACY_CONTEXT_WINDOW = 262144;
+const OCC_LEGACY_MAX_TOKENS     = 262144;
+
 /**
  * Resolves the directory where OpenClaw stores its workspace files
  * (AGENTS.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md, SOUL.md, HEARTBEAT.md).
@@ -1000,6 +1014,37 @@ export class HomePanel {
                 JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
               );
             } catch { /* non-fatal */ }
+            // Patch openclaw.json to inject correct cost/context metadata for occ-legacy.
+            // openclaw onboard writes the model with null/zero values; we fix them here.
+            try {
+              const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+              const raw = fs.readFileSync(configPath, 'utf-8');
+              const cfg = JSON.parse(raw) as Record<string, unknown>;
+              // Recursively find any model object with id === OCC_LEGACY_MODEL_ID and patch it.
+              const patchModel = (obj: unknown): boolean => {
+                if (!obj || typeof obj !== 'object') return false;
+                if (Array.isArray(obj)) {
+                  for (const item of obj) {
+                    if (patchModel(item)) return true;
+                  }
+                  return false;
+                }
+                const o = obj as Record<string, unknown>;
+                if (o['id'] === OCC_LEGACY_MODEL_ID) {
+                  o['name']          = OCC_LEGACY_MODEL_NAME;
+                  o['reasoning']     = false;
+                  o['input']         = ['text'];
+                  o['cost']          = { ...OCC_LEGACY_COST };
+                  o['contextWindow'] = OCC_LEGACY_CONTEXT_WINDOW;
+                  o['maxTokens']     = OCC_LEGACY_MAX_TOKENS;
+                  return true;
+                }
+                for (const v of Object.values(o)) { patchModel(v); }
+                return false;
+              };
+              patchModel(cfg);
+              fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+            } catch { /* non-fatal — openclaw.json may not exist yet */ }
           }
           setTimeout(() => {
             HomePanel.refresh();
@@ -2364,6 +2409,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       border: 1px solid #2b2b2b;
       border-radius: 8px;
       padding: 6px clamp(10px, 3vw, 16px);
+      margin-top: 20px;
       margin-bottom: 10px;
       font-size: clamp(11px, 2.5vw, 12px);
     }
@@ -3026,7 +3072,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <!-- More Options menu (left of avatar) -->
     ${isInstalled ? `<div class="more-menu-wrap" id="more-menu-wrap">
       <button class="more-menu-btn" onclick="toggleMoreMenu(event)" aria-haspopup="true" aria-expanded="false">
-        Quick Actions
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Search Actions
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="more-menu-dropdown" id="more-menu-dropdown" role="menu">
@@ -3170,7 +3217,6 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   ${isInstalled ? `
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
-  <div class="status ${statusClass}">${statusIcon} ${statusText}</div>
   <div class="checks">
     <div class="check-row ${dirClass === 'ok' ? 'check-row-clickable' : ''}" ${dirClass === 'ok' ? 'onclick="cmd(\'openConfigFile\')" title="Open openclaw.json"' : ''}>
       <span class="row-icon">${icFolder}</span>
