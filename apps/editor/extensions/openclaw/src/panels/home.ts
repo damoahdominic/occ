@@ -107,6 +107,24 @@ export class HomePanel {
               'agent');
           }, 1000);
         }, 500);
+      } else if (msg.command === 'verifyCliBeforeSetup') {
+        // After install, verify the CLI is actually findable before auto-configuring.
+        void this._testOpenClawCli().then(result => {
+          if (result.ok) {
+            try {
+              this._panel.webview.postMessage({ type: 'proceedAutoSetup' });
+            } catch {}
+          } else {
+            try {
+              this._panel.webview.postMessage({
+                type: 'installLog',
+                text: '\n⚠️  OpenClaw was installed but could not be found in PATH.\n' +
+                      '    Please restart OCCode to pick up the new PATH.\n'
+              });
+            } catch {}
+            void this._update();
+          }
+        });
       } else if (msg.command === 'sudoPassword') {
         // Password modal submitted or cancelled from the webview.
         HomePanel._pendingPasswordResolve?.(msg.password as string | undefined);
@@ -234,6 +252,12 @@ export class HomePanel {
    * If sudo is needed, a VS Code password dialog is shown.
    * On any failure the AI is invoked immediately with full context.
    */
+  /**
+   * Fully silent install — no terminal is ever opened.
+   * Output is streamed line-by-line to the home panel webview.
+   * Proactively detects if sudo is needed and asks for password BEFORE any install attempt.
+   * On any failure the AI is invoked immediately with full context.
+   */
   public static async runInstall(
     extensionUri: vscode.Uri,
     platform: string,
@@ -251,7 +275,6 @@ export class HomePanel {
     post({ type: 'installState', state: 'running' });
 
     const env = panel._buildExecEnv();
-    const isPermError = (s: string) => /EACCES|permission denied|EPERM|not permitted/i.test(s);
 
     // Spawn a command silently and stream output to the panel.
     const runCaptured = (cmd: string, args: string[], opts: cp.SpawnOptions = {}): Promise<{ code: number }> =>
@@ -281,9 +304,6 @@ export class HomePanel {
     };
 
     // Fix ~/.openclaw ownership after any sudo-based install.
-    // Uses `sudo -n` (non-interactive) which succeeds as long as the cached sudo session
-    // from cacheSudo() is still valid (~15 min default). Safe to call even when sudo
-    // wasn't used — chown is a no-op when the directory is already user-owned.
     const fixOpenclawPermissions = async () => {
       if (platform === 'win32') return;
       const openclawDir = path.join(os.homedir(), '.openclaw');
@@ -319,73 +339,200 @@ export class HomePanel {
     const succeed = async () => {
       tee('\n✅  Installed successfully!\n');
       post({ type: 'installState', state: 'done' });
-      // Webview drives the post-install navigation via autoSetupSkipped or wizardLog done
     };
 
-    // ── Step 1: try npm install -g openclaw ───────────────────────────────────
-    tee('Checking for npm...\n');
-    const npmOk = await new Promise<boolean>(resolve =>
-      cp.exec('npm --version', { env, timeout: 5000, windowsHide: true }, err => resolve(!err))
-    );
+    // ══════════════════════════════════════════════════════════════════════════
+    // PREREQUISITE CHECKS — platform-specific, run BEFORE any install attempt
+    // ══════════════════════════════════════════════════════════════════════════
 
-    if (npmOk) {
-      tee('npm found — installing openclaw...\n');
-      const spawnOpts: cp.SpawnOptions = platform === 'win32' ? { shell: true, windowsHide: true } : {};
-      const r1 = await runCaptured('npm', ['install', '-g', 'openclaw'], spawnOpts);
-      if (r1.code === 0) {
-        await fixOpenclawPermissions();
-        await succeed(); return;
-      }
-      // Permission error on Unix → ask for sudo, then retry
-      if (platform !== 'win32' && isPermError(fullLog)) {
-        tee('\nPermission error — elevated access required.\n');
-        const ok = await cacheSudo('Enter your system password to install OpenClaw');
-        if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
-        tee('Retrying with elevated permissions...\n');
-        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
-        if (r2.code === 0) {
-          await fixOpenclawPermissions();
-          await succeed(); return;
-        }
-      }
-      tee('\nnpm install did not succeed — trying full installer script...\n');
-    } else {
-      tee('npm not found — running full installer script...\n');
-    }
-
-    // ── Step 2: full install script, captured (no terminal) ───────────────────
     if (platform === 'win32') {
-      tee('Running PowerShell installer...\n');
+      // ── Windows prerequisites ───────────────────────────────────────────────
+      tee('Checking prerequisites...\n');
+
+      const nodeOk = await new Promise<boolean>(resolve =>
+        cp.exec('node --version', { env, timeout: 5000, windowsHide: true }, err => resolve(!err))
+      );
+      if (!nodeOk) {
+        tee('❌ Node.js not found.\n');
+        tee('   Please install Node.js 20+ from https://nodejs.org\n');
+        tee('   After installing Node.js, restart OCCode and try again.\n');
+        await fail(); return;
+      }
+      tee('  ✓ Node.js found\n');
+
+      const npmOk = await new Promise<boolean>(resolve =>
+        cp.exec('npm --version', { env, timeout: 5000, windowsHide: true }, err => resolve(!err))
+      );
+      if (!npmOk) {
+        tee('❌ npm not found (should come with Node.js).\n');
+        tee('   Please reinstall Node.js from https://nodejs.org\n');
+        await fail(); return;
+      }
+      tee('  ✓ npm found\n\n');
+
+      // Windows install — no sudo needed
+      tee('Installing openclaw...\n');
+      const spawnOpts: cp.SpawnOptions = { shell: true, windowsHide: true };
+      const r1 = await runCaptured('npm', ['install', '-g', 'openclaw'], spawnOpts);
+      if (r1.code === 0) { await succeed(); return; }
+
+      // Fallback to PowerShell installer
+      tee('\nnpm install did not succeed — trying PowerShell installer...\n');
       const psArgs = [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
         `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; ` +
         `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
       ];
-      const r = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
-      if (r.code === 0) { await succeed(); return; }
-    } else {
-      tee('Running install script...\n');
-      const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
-      if (r1.code === 0) {
-        await fixOpenclawPermissions();
-        await succeed(); return;
+      const r2 = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
+      if (r2.code === 0) { await succeed(); return; }
+
+      await fail();
+      return;
+    }
+
+    // ── macOS / Linux prerequisites ─────────────────────────────────────────
+    tee('Checking prerequisites...\n');
+
+    // 1. Xcode Command Line Tools (macOS only)
+    if (platform === 'darwin') {
+      const xcodeOk = await new Promise<boolean>(resolve =>
+        cp.exec('xcode-select -p', { env, timeout: 5000 }, (err, stdout) => {
+          resolve(!err && !!stdout?.toString().trim());
+        })
+      );
+      if (!xcodeOk) {
+        tee('  ⚠ Xcode Command Line Tools not installed.\n');
+        tee('  Installing Xcode Command Line Tools (this may show a system dialog)...\n');
+        await runCaptured('xcode-select', ['--install']);
+        tee('  ⏳ Please complete the Xcode tools installation in the system dialog,\n');
+        tee('     then restart OCCode and try again.\n');
+        await fail(); return;
       }
-      // Permission error → ask for sudo, run installer under sudo, then fix permissions
-      if (isPermError(fullLog)) {
-        tee('\nPermission error in installer — elevated access required.\n');
-        const ok = await cacheSudo('Enter your system password to complete installation');
-        if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
-        tee('Retrying with elevated permissions...\n');
-        const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
-        if (r2.code === 0) {
-          await fixOpenclawPermissions();
-          await succeed(); return;
+      tee('  ✓ Xcode Command Line Tools\n');
+    }
+
+    // 2. Check for Node.js (direct or via nvm)
+    const nodeCheck = await new Promise<{ ok: boolean; version: string }>(resolve =>
+      cp.exec('node --version', { env, timeout: 5000 }, (err, stdout) => {
+        resolve({ ok: !err, version: stdout?.toString().trim() || '' });
+      })
+    );
+
+    let nodeViaShell = false;
+    if (!nodeCheck.ok) {
+      const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
+      if (fs.existsSync(nvmSh)) {
+        const nvmResult = await new Promise<boolean>(resolve =>
+          cp.exec(`bash -c '. "${nvmSh}" 2>/dev/null && node --version'`, { timeout: 10000 }, (err) => resolve(!err))
+        );
+        if (nvmResult) { nodeViaShell = true; }
+      }
+    }
+
+    if (!nodeCheck.ok && !nodeViaShell) {
+      tee('  ⚠ Node.js not found — will be installed via install script\n');
+    } else {
+      tee(`  ✓ Node.js ${nodeCheck.version || '(via nvm)'}\n`);
+    }
+
+    // 3. Check npm
+    const npmOk = await new Promise<boolean>(resolve =>
+      cp.exec('npm --version', { env, timeout: 5000 }, err => resolve(!err))
+    );
+    if (npmOk) {
+      tee('  ✓ npm found\n');
+    } else {
+      tee('  ⚠ npm not found — will be installed via install script\n');
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PROACTIVE SUDO DETECTION — check BEFORE any install attempt
+    // ══════════════════════════════════════════════════════════════════════════
+    tee('\nChecking permissions...\n');
+    let needsSudo = false;
+
+    if (npmOk) {
+      // Check if user can write to npm global prefix
+      const prefixResult = await new Promise<string>(resolve =>
+        cp.exec('npm config get prefix', { env, timeout: 5000 }, (err, stdout) =>
+          resolve(err ? '' : stdout?.toString().trim() || ''))
+      );
+      if (prefixResult) {
+        try {
+          const globalBinDir = path.join(prefixResult, 'bin');
+          const globalLibDir = path.join(prefixResult, 'lib');
+          if (fs.existsSync(globalBinDir)) fs.accessSync(globalBinDir, fs.constants.W_OK);
+          if (fs.existsSync(globalLibDir)) fs.accessSync(globalLibDir, fs.constants.W_OK);
+          tee('  ✓ Can write to npm global directory\n');
+        } catch {
+          needsSudo = true;
+          tee(`  ⚠ npm global directory (${prefixResult}) requires elevated permissions\n`);
         }
       }
+    } else {
+      // No npm — install script will likely need to write to system directories
+      const commonDirs = ['/usr/local/bin', '/usr/local/lib'];
+      for (const dir of commonDirs) {
+        try {
+          if (fs.existsSync(dir)) {
+            fs.accessSync(dir, fs.constants.W_OK);
+          }
+        } catch {
+          needsSudo = true;
+          break;
+        }
+      }
+      if (needsSudo) {
+        tee('  ⚠ System directories require elevated permissions\n');
+      } else {
+        tee('  ✓ Write access to system directories\n');
+      }
+    }
+
+    // Ask for sudo password UPFRONT if needed
+    if (needsSudo) {
+      tee('\nAdministrator password required for installation.\n');
+      const sudoOk = await cacheSudo('Enter your system password to install OpenClaw');
+      if (!sudoOk) {
+        tee('Incorrect password or cancelled.\n');
+        failCancelled();
+        return;
+      }
+      tee('  ✓ Credentials verified\n');
+    }
+
+    tee('\n');
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // INSTALL — sudo is already cached if needed, no mid-install password prompts
+    // ══════════════════════════════════════════════════════════════════════════
+
+    if (npmOk) {
+      tee('Installing openclaw via npm...\n');
+      const npmArgs = ['install', '-g', 'openclaw'];
+      const r = needsSudo
+        ? await runCaptured('sudo', ['-E', 'npm', ...npmArgs])
+        : await runCaptured('npm', npmArgs);
+      if (r.code === 0) {
+        if (needsSudo) await fixOpenclawPermissions();
+        await succeed(); return;
+      }
+      tee('\nnpm install did not succeed — trying full installer script...\n');
+    }
+
+    // Full install script
+    tee('Running install script...\n');
+    const r = needsSudo
+      ? await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash'])
+      : await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+    if (r.code === 0) {
+      if (needsSudo) await fixOpenclawPermissions();
+      await succeed(); return;
     }
 
     await fail();
   }
+
 
   public dispose() {
     HomePanel.currentPanel = undefined;
@@ -1776,26 +1923,31 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
           // Advance timeline: mark install done, configure active
           document.getElementById('step-install').className = 'step-item done';
           document.getElementById('step-configure').className = 'step-item active';
-          // Auto-configure after short delay — skip interactive panel
+          // Verify CLI is findable before auto-configuring (2s for PATH to settle)
           setTimeout(function() {
-            document.getElementById('log-wrap').classList.remove('visible');
-            document.getElementById('log-box').innerHTML = '';
-            fullLog = '';
-            setLogStatus('', '');
-            var occKey = _occUser && _occUser.api_keys && _occUser.api_keys.occKey;
-            if (occKey) {
-              showLog('Setting up with OCC Legacy inference...\\n');
-              setLogStatus('Configuring', 'dots');
-              vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: occKey, port: '18789' });
-            } else {
-              showLog('Skipping AI configuration — not logged in.\\n');
-              setLogStatus('Skipping', 'done');
-              setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
-            }
-          }, 1200);
+            vscode.postMessage({ command: 'verifyCliBeforeSetup' });
+          }, 2000);
         } else if (d.state === 'failed') {
           setLogStatus('Installation failed', 'failed');
           showMoltHelp();
+        }
+      }
+
+
+      if (d.type === 'proceedAutoSetup') {
+        document.getElementById('log-wrap').classList.remove('visible');
+        document.getElementById('log-box').innerHTML = '';
+        fullLog = '';
+        setLogStatus('', '');
+        var occKey = _occUser && _occUser.api_keys && _occUser.api_keys.occKey;
+        if (occKey) {
+          showLog('Setting up with OCC Legacy inference...\n');
+          setLogStatus('Configuring', 'dots');
+          vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: occKey, port: '18789' });
+        } else {
+          showLog('Skipping AI configuration — not logged in.\n');
+          setLogStatus('Skipping', 'done');
+          setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
         }
       }
 
@@ -4001,6 +4153,39 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       extra.push(path.join(os.homedir(), '.local', 'bin'));
       extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
       extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
+
+      // Add nvm-managed Node.js paths (newest version first)
+      const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), '.nvm');
+      const nvmVersionsDir = path.join(nvmDir, 'versions', 'node');
+      if (fs.existsSync(nvmVersionsDir)) {
+        try {
+          const versions = fs.readdirSync(nvmVersionsDir)
+            .filter(e => /^v?\d+/.test(e))
+            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+          for (const v of versions.slice(0, 3)) {
+            extra.push(path.join(nvmVersionsDir, v, 'bin'));
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      // Add fnm paths (another popular Node version manager on macOS)
+      const fnmDir = path.join(os.homedir(), '.local', 'share', 'fnm', 'node-versions');
+      if (fs.existsSync(fnmDir)) {
+        try {
+          const versions = fs.readdirSync(fnmDir)
+            .filter(e => /^v?\d+/.test(e))
+            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+          for (const v of versions.slice(0, 3)) {
+            extra.push(path.join(fnmDir, v, 'installation', 'bin'));
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      // Homebrew Node.js (macOS)
+      if (process.platform === 'darwin') {
+        extra.push('/opt/homebrew/opt/node/bin');
+        extra.push('/usr/local/opt/node/bin');
+      }
     }
     const sep = process.platform === 'win32' ? ';' : ':';
     env.PATH = [...extra, basePath].filter(Boolean).join(sep);
