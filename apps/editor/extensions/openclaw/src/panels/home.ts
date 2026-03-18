@@ -2098,11 +2098,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         setLogStatus('', '');
         var occKey = _occUser && _occUser.api_keys && _occUser.api_keys.occKey;
         if (occKey) {
-          showLog('Setting up with OCC Legacy inference...\n');
+          showLog('Setting up with OCC Legacy inference...\\n');
           setLogStatus('Configuring', 'dots');
           vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: occKey, port: '18789' });
         } else {
-          showLog('Skipping AI configuration — not logged in.\n');
+          showLog('Skipping AI configuration — not logged in.\\n');
           setLogStatus('Skipping', 'done');
           setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
         }
