@@ -281,7 +281,6 @@ export class HomePanel {
       'openclawHome', 'OCC Home', vscode.ViewColumn.One,
       { enableScripts: true, localResourceRoots: [
         vscode.Uri.joinPath(extensionUri, 'media'),
-        vscode.Uri.joinPath(extensionUri, '..', '..', 'void_icons', 'emojis'),
       ] }
     );
     HomePanel.currentPanel = new HomePanel(panel, extensionUri);
@@ -728,7 +727,7 @@ export class HomePanel {
       this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
       const emojiBaseUri = this._panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(this._extensionUri, '..', '..', 'void_icons', 'emojis')
+        vscode.Uri.joinPath(this._extensionUri, 'media', 'emojis')
       ).toString();
       // Read AI model info from openclaw.json
       let aiModelName = '';
