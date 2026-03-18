@@ -101,6 +101,42 @@ export function getOrStartConfigProxy(targetPort = DEFAULT_GATEWAY_PORT): Promis
     setTimeout(function(){ tryFill(0); }, 600);
   })();
 
+  // ── NAVIGATION BRIDGE ──
+  // Intercept window.open() / target="_blank" links so they open in the
+  // system browser instead of silently failing inside the webview iframe.
+  var _origOpen = window.open.bind(window);
+  window.open = function(url, target, features) {
+    if (url) { window.parent.postMessage({ type: 'occ-open-external', url: String(url) }, '*'); return null; }
+    return _origOpen(url, target, features);
+  };
+  // Also intercept anchor clicks with target="_blank"
+  document.addEventListener('click', function(ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('a[target="_blank"]') : null;
+    if (el && el.href) {
+      ev.preventDefault();
+      window.parent.postMessage({ type: 'occ-open-external', url: el.href }, '*');
+    }
+  }, true);
+  // Report URL + title changes to the parent so the toolbar stays in sync.
+  var _lastUrl = '';
+  function reportNav() {
+    var url = location.href;
+    if (url !== _lastUrl) {
+      _lastUrl = url;
+      window.parent.postMessage({ type: 'occ-nav-update', url: url, title: document.title }, '*');
+    }
+  }
+  // Use both popstate and a periodic tick (SPAs update location without events).
+  window.addEventListener('popstate', reportNav);
+  setInterval(reportNav, 800);
+  // Navigation commands from the toolbar.
+  window.addEventListener('message', function(ev) {
+    var d = ev.data;
+    if (!d) return;
+    if (d.type === 'occ-nav-back') history.back();
+    if (d.type === 'occ-nav-forward') history.forward();
+  });
+
   // ── CLIPBOARD BRIDGE ──
   // VS Code routes Cmd+C/X/V through Electron's webContents.copy/cut/paste(),
   // which fire DOM 'copy'/'cut'/'paste' events — NOT 'keydown' events.
@@ -408,6 +444,8 @@ export class ConfigPanel {
 
     const iconRefreshCw    = icon('<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>');
     const iconExternalLink = icon('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>');
+    const iconChevronLeft  = icon('<polyline points="15 18 9 12 15 6"/>');
+    const iconChevronRight = icon('<polyline points="9 18 15 12 9 6"/>');
 
     return `<!DOCTYPE html>
 <html style="margin:0;padding:0;height:100%;overflow:hidden;">
@@ -456,14 +494,17 @@ export class ConfigPanel {
       transition: background 0.1s, color 0.1s;
       flex-shrink: 0;
     }
-    button:hover { background: #3c3c3c; color: #e0e0e0; }
-    button:active { background: #505050; }
+    button:hover:not(:disabled) { background: #3c3c3c; color: #e0e0e0; }
+    button:active:not(:disabled) { background: #505050; }
+    button:disabled { opacity: 0.35; cursor: default; }
     button svg { pointer-events: none; }
     iframe { flex: 1; width: 100%; border: none; min-height: 0; }
   </style>
 </head>
 <body>
   <div id="toolbar">
+    <button id="btn-back" title="Back" disabled>${iconChevronLeft}</button>
+    <button id="btn-forward" title="Forward" disabled>${iconChevronRight}</button>
     <button id="btn-refresh" title="Refresh">${iconRefreshCw}</button>
     <div id="url-bar">${src}</div>
     <button id="btn-external" title="Open in browser">${iconExternalLink}</button>
@@ -476,18 +517,47 @@ export class ConfigPanel {
   <script>
     const vscode = acquireVsCodeApi();
     const frame = document.getElementById('frame');
+    const urlBar = document.getElementById('url-bar');
+    const btnBack = document.getElementById('btn-back');
+    const btnForward = document.getElementById('btn-forward');
+
+    // Navigation history stack for enabling/disabling back/forward buttons.
+    var _history = ['${src}'];
+    var _histIdx = 0;
+
+    function updateNavButtons() {
+      btnBack.disabled = _histIdx <= 0;
+      btnForward.disabled = _histIdx >= _history.length - 1;
+    }
 
     // Refresh: reassign src — cross-origin iframes block contentWindow.location.reload()
     document.getElementById('btn-refresh').onclick = () => { var s = frame.src; frame.src = ''; frame.src = s; };
     document.getElementById('btn-external').onclick = () => vscode.postMessage({ command: 'openExternal', url: '${externalSrc}' });
 
-    // ── Clipboard bridge ─────────────────────────────────────────────────────
-    // navigator.clipboard is unreliable inside VS Code webviews (focus/permission
-    // issues). Always route through the extension host which uses vscode.env.clipboard.
+    btnBack.onclick = () => {
+      if (_histIdx > 0) { _histIdx--; frame.contentWindow.postMessage({ type: 'occ-nav-back' }, '*'); updateNavButtons(); }
+    };
+    btnForward.onclick = () => {
+      if (_histIdx < _history.length - 1) { _histIdx++; frame.contentWindow.postMessage({ type: 'occ-nav-forward' }, '*'); updateNavButtons(); }
+    };
 
     window.addEventListener('message', function(ev) {
       var d = ev.data;
       if (!d || typeof d !== 'object') return;
+
+      // Iframe navigated — update URL bar and history stack.
+      if (d.type === 'occ-nav-update' && d.url) {
+        urlBar.textContent = d.url;
+        // Trim forward entries and push new URL.
+        _history = _history.slice(0, _histIdx + 1);
+        if (_history[_histIdx] !== d.url) { _history.push(d.url); _histIdx++; }
+        updateNavButtons();
+      }
+
+      // Iframe wants to open a new window — open in system browser.
+      if (d.type === 'occ-open-external' && d.url) {
+        vscode.postMessage({ command: 'openExternal', url: d.url });
+      }
 
       // Iframe wants to paste — ask extension host for clipboard text.
       if (d.type === 'occ-request-paste') {
