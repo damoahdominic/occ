@@ -408,13 +408,14 @@ export class HomePanel {
         }
 
         tee(`  Extracting...\n`);
+        // Pre-compute the inner folder name (avoids | pipe which cmd.exe would intercept)
+        const innerDir = path.join(tmpExtract, `node-v${nodeVersion}-win-${nodeArch}`);
         const exR = await runCaptured('powershell', [
           '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
           `$ProgressPreference='SilentlyContinue'; ` +
           `Expand-Archive -Path '${tmpZip}' -DestinationPath '${tmpExtract}' -Force; ` +
-          `$inner = Get-ChildItem '${tmpExtract}' | Select-Object -First 1; ` +
           `if (Test-Path '${installDir}') { Remove-Item '${installDir}' -Recurse -Force }; ` +
-          `Move-Item $inner.FullName '${installDir}'`,
+          `Move-Item '${innerDir}' '${installDir}'`,
         ], { windowsHide: true, shell: true } as cp.SpawnOptions);
 
         try { fs.unlinkSync(tmpZip); } catch {}
@@ -1659,14 +1660,15 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     .log-wrap.visible { display: block; }
     .log-box {
       background: #0d0d0d; border: 1px solid #222; border-radius: 8px;
-      padding: 12px 14px; height: 160px; overflow-y: auto;
+      padding: 12px 14px; height: 200px; overflow-y: auto;
       font-family: 'SF Mono', 'Fira Mono', 'Consolas', monospace;
       font-size: 11px; line-height: 1.6; text-align: left; color: #888;
       scroll-behavior: smooth;
     }
     .log-line { white-space: pre-wrap; word-break: break-all; }
-    .log-line.ok { color: #4ade80; }
-    .log-line.err { color: #f87171; }
+    .log-line.ok   { color: #4ade80; }
+    .log-line.err  { color: #f87171; }
+    .log-line.warn { color: #fbbf24; }
     .log-status {
       font-size: 12px; color: #555; margin-top: 8px; text-align: center;
     }
@@ -1937,7 +1939,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       lines.forEach(function(line) {
         if (!line.trim()) return;
         var el = document.createElement('div');
-        el.className = 'log-line' + (line.includes('✅') || line.includes('successfully') ? ' ok' : line.includes('Error') || line.includes('failed') || line.includes('FAIL') ? ' err' : '');
+        var isOk   = line.includes('✅') || line.includes('✓') || /successfully|installed to/i.test(line);
+        var isErr  = line.includes('❌') || /\\bError\\b|\\bfailed\\b|\\bFAIL\\b/.test(line);
+        var isWarn = line.includes('⚠');
+        el.className = 'log-line' + (isOk ? ' ok' : isErr ? ' err' : isWarn ? ' warn' : '');
         el.textContent = line;
         box.appendChild(el);
       });
