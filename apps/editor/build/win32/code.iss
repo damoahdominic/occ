@@ -101,9 +101,9 @@ Source: "appx\*"; DestDir: "{app}\appx"; BeforeInstall: RemoveAppxPackage; After
 #endif
 
 [Icons]
-Name: "{group}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; AppUserModelID: "{#AppUserId}"
-Name: "{autodesktop}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; Tasks: desktopicon; AppUserModelID: "{#AppUserId}"
-Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; Tasks: quicklaunchicon; AppUserModelID: "{#AppUserId}"
+Name: "{group}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; IconFilename: "{app}\{#ExeBasename}.exe"; AppUserModelID: "{#AppUserId}"
+Name: "{autodesktop}\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; IconFilename: "{app}\{#ExeBasename}.exe"; Tasks: desktopicon; AppUserModelID: "{#AppUserId}"
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#NameLong}"; Filename: "{app}\{#ExeBasename}.exe"; IconFilename: "{app}\{#ExeBasename}.exe"; Tasks: quicklaunchicon; AppUserModelID: "{#AppUserId}"
 
 [Run]
 Filename: "{app}\{#ExeBasename}.exe"; Description: "{cm:LaunchProgram,{#NameLong}}"; Tasks: runcode; Flags: nowait postinstall; Check: ShouldRunAfterUpdate
