@@ -327,7 +327,7 @@ export function stopConfigProxy(): void {
 // Avoids shelling out to `openclaw dashboard --no-open` which requires the
 // binary to be on PATH (unreliable inside a VS Code extension host process).
 
-function getDashboardUrl(): { url: string; port: number } | undefined {
+export function getDashboardUrl(): { url: string; port: number } | undefined {
   try {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     const raw = require('fs').readFileSync(configPath, 'utf-8') as string;

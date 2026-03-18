@@ -6,7 +6,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
-import { ConfigPanel, stopConfigProxy } from './panels/config';
+import { stopConfigProxy, getDashboardUrl } from './panels/config';
 
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -540,7 +540,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const reachable = await isWebServerReachable();
       if (reachable) {
-        await ConfigPanel.createOrShow();
+        const dashInfo = getDashboardUrl();
+        const url = dashInfo?.url ?? `http://localhost:${getConfiguredGatewayPort()}/`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
       } else {
         // Web server not running — ask the AI to start it
         const port = getConfiguredGatewayPort();
@@ -549,7 +551,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           `The OpenClaw web configuration server is not running at ${configUrl}.\n\n` +
           `Please start it now by running the OpenClaw gateway in the terminal:\n` +
           `\`\`\`\nopenclaw gateway start\n\`\`\`\n\n` +
-          `Once it is running, I will be able to open the configuration UI at ${configUrl} inside the editor.`;
+          `Once it is running, the configuration UI will open at ${configUrl} in your browser.`;
         await vscode.commands.executeCommand('void.openChatWithMessage', message);
         spendBalance();
       }
