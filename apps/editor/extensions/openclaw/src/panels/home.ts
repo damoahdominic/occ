@@ -1196,6 +1196,51 @@ export class HomePanel {
       post({ type: 'wizardLog', text, done, ok });
     };
     const env = this._buildExecEnv();
+
+    // openclaw requires Node.js >= 22. Check the active version and auto-install
+    // via nvm if needed — the editor pins v20, so users may only have v20 active.
+    if (process.platform !== 'win32') {
+      const nodeVerRaw = await new Promise<string>(resolve => {
+        cp.exec('node --version', { env, timeout: 5000 }, (err, stdout) =>
+          resolve((stdout || '').toString().trim())
+        );
+      });
+      const nodeMinor = parseInt((nodeVerRaw.match(/^v?(\d+)/) || [])[1] || '0', 10);
+      if (nodeMinor < 22) {
+        const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
+        if (fs.existsSync(nvmSh)) {
+          wizardPost(`Node.js ${nodeVerRaw || 'unknown'} detected — openclaw requires v22+. Installing Node.js 22 via nvm...\n`, false, false);
+          const nvmR = await new Promise<number>(resolve => {
+            const child = cp.spawn('bash', ['-c',
+              `. "${nvmSh}" && nvm install 22 && nvm use 22 && nvm alias default 22`
+            ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+            child.stdout?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
+            child.stderr?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
+            child.on('close', code => resolve(code ?? 1));
+            child.on('error', () => resolve(1));
+          });
+          if (nvmR === 0) {
+            // Rebuild env so the new Node 22 bin is on PATH
+            const nvmVersionsDir = path.join(os.homedir(), '.nvm', 'versions', 'node');
+            const v22dirs = fs.existsSync(nvmVersionsDir)
+              ? fs.readdirSync(nvmVersionsDir).filter(v => /^v?22/.test(v))
+              : [];
+            if (v22dirs.length > 0) {
+              const v22bin = path.join(nvmVersionsDir, v22dirs[0], 'bin');
+              env.PATH = [v22bin, env.PATH || ''].filter(Boolean).join(':');
+              (env as any).Path = env.PATH;
+            }
+            wizardPost('  ✓ Node.js 22 ready.\n', false, false);
+          } else {
+            wizardPost('  ⚠️  Node.js 22 install via nvm failed. Setup may fail.\n', false, false);
+          }
+        } else {
+          wizardPost(`⚠️  Node.js ${nodeVerRaw || 'v20'} is active but openclaw requires v22+.\n  Please install Node.js 22 (e.g. via https://nodejs.org) and restart OCCode.\n`, true, false);
+          return;
+        }
+      }
+    }
+
     const cliPath = await this._findOpenClawPath() ?? 'openclaw';
     const port = data.port && /^\d+$/.test(data.port) ? data.port : '18789';
     const isFree = data.provider === 'free';
