@@ -175,7 +175,7 @@ jobs:
         run: |
           APP_DIR="$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64"
           cd "$APP_DIR"
-          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64.zip" "OCcode.app"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64-${GITHUB_REF_NAME}.zip" "OCcode.app"
 
       - name: Notarize
         env:
@@ -189,7 +189,7 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
 
-          xcrun notarytool submit "$RUNNER_TEMP/OCcode-darwin-arm64.zip" \
+          xcrun notarytool submit "$RUNNER_TEMP/OCcode-darwin-arm64-${GITHUB_REF_NAME}.zip" \
             --key ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_KEY_ISSUER" \
@@ -203,7 +203,7 @@ jobs:
       - name: Re-zip stapled app
         run: |
           cd "$GITHUB_WORKSPACE/apps/VSCode-darwin-arm64"
-          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64-signed.zip" "OCcode.app"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-arm64-${GITHUB_REF_NAME}-signed.zip" "OCcode.app"
 
       - name: Verify signature
         run: |
@@ -214,15 +214,15 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-darwin-arm64-signed
-          path: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
+          name: OCcode-darwin-arm64-${{ github.ref_name }}-signed
+          path: ${{ runner.temp }}/OCcode-darwin-arm64-${{ github.ref_name }}-signed.zip
           retention-days: 30
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
-          files: ${{ runner.temp }}/OCcode-darwin-arm64-signed.zip
+          files: ${{ runner.temp }}/OCcode-darwin-arm64-${{ github.ref_name }}-signed.zip
           name: OCcode ${{ github.ref_name }}
           draft: false
           prerelease: false
@@ -390,7 +390,7 @@ jobs:
         run: |
           APP_DIR="$GITHUB_WORKSPACE/apps/VSCode-darwin-x64"
           cd "$APP_DIR"
-          zip -Xry "$RUNNER_TEMP/OCcode-darwin-x64.zip" "OCcode.app"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-x64-${GITHUB_REF_NAME}.zip" "OCcode.app"
 
       - name: Notarize
         env:
@@ -403,7 +403,7 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APPLE_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8
 
-          xcrun notarytool submit "$RUNNER_TEMP/OCcode-darwin-x64.zip" \
+          xcrun notarytool submit "$RUNNER_TEMP/OCcode-darwin-x64-${GITHUB_REF_NAME}.zip" \
             --key ~/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_KEY_ISSUER" \
@@ -417,7 +417,7 @@ jobs:
       - name: Re-zip stapled app
         run: |
           cd "$GITHUB_WORKSPACE/apps/VSCode-darwin-x64"
-          zip -Xry "$RUNNER_TEMP/OCcode-darwin-x64-signed.zip" "OCcode.app"
+          zip -Xry "$RUNNER_TEMP/OCcode-darwin-x64-${GITHUB_REF_NAME}-signed.zip" "OCcode.app"
 
       - name: Verify signature
         run: |
@@ -428,15 +428,15 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-darwin-x64-signed
-          path: ${{ runner.temp }}/OCcode-darwin-x64-signed.zip
+          name: OCcode-darwin-x64-${{ github.ref_name }}-signed
+          path: ${{ runner.temp }}/OCcode-darwin-x64-${{ github.ref_name }}-signed.zip
           retention-days: 30
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
-          files: ${{ runner.temp }}/OCcode-darwin-x64-signed.zip
+          files: ${{ runner.temp }}/OCcode-darwin-x64-${{ github.ref_name }}-signed.zip
           name: OCcode ${{ github.ref_name }}
           draft: false
           prerelease: false
@@ -612,7 +612,7 @@ jobs:
         shell: pwsh
         run: |
           $appDir = "$env:GITHUB_WORKSPACE\apps\VSCode-win32-x64"
-          $outZip = "$env:RUNNER_TEMP\OCcode-win32-x64.zip"
+          $outZip = "$env:RUNNER_TEMP\OCcode-win32-x64-$env:GITHUB_REF_NAME.zip"
           Compress-Archive -Path "$appDir\*" -DestinationPath $outZip
 
       - name: Collect installer paths
@@ -622,32 +622,32 @@ jobs:
           echo "system_setup=$(ls $BUILD/system-setup/VSCodeSetup.exe)" >> $GITHUB_OUTPUT
           echo "user_setup=$(ls $BUILD/user-setup/VSCodeSetup.exe)" >> $GITHUB_OUTPUT
 
+      - name: Rename installers for release
+        run: |
+          cp apps/editor/.build/win32-x64/system-setup/VSCodeSetup.exe \
+             "$RUNNER_TEMP/OCcode-win32-x64-${GITHUB_REF_NAME}-system-setup.exe"
+          cp apps/editor/.build/win32-x64/user-setup/VSCodeSetup.exe \
+             "$RUNNER_TEMP/OCcode-win32-x64-${GITHUB_REF_NAME}-user-setup.exe"
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-win32-x64
+          name: OCcode-win32-x64-${{ github.ref_name }}
           path: |
-            apps/editor/.build/win32-x64/system-setup/VSCodeSetup.exe
-            apps/editor/.build/win32-x64/user-setup/VSCodeSetup.exe
-            ${{ runner.temp }}/OCcode-win32-x64.zip
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}-system-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}-user-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}.zip
           retention-days: 30
-
-      - name: Rename installers for release
-        run: |
-          cp apps/editor/.build/win32-x64/system-setup/VSCodeSetup.exe \
-             "$RUNNER_TEMP/OCcode-win32-x64-system-setup.exe"
-          cp apps/editor/.build/win32-x64/user-setup/VSCodeSetup.exe \
-             "$RUNNER_TEMP/OCcode-win32-x64-user-setup.exe"
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
           files: |
-            ${{ runner.temp }}/OCcode-win32-x64-system-setup.exe
-            ${{ runner.temp }}/OCcode-win32-x64-user-setup.exe
-            ${{ runner.temp }}/OCcode-win32-x64.zip
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}-system-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}-user-setup.exe
+            ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}.zip
           name: OCcode ${{ github.ref_name }}
           draft: false
           prerelease: false
@@ -814,21 +814,21 @@ jobs:
         run: |
           DEB=$(ls .build/linux/deb/amd64/deb/*.deb)
           echo "path=$DEB" >> $GITHUB_OUTPUT
-          cp "$DEB" "$RUNNER_TEMP/OCcode-linux-x64.deb"
+          cp "$DEB" "$RUNNER_TEMP/OCcode-linux-x64-${GITHUB_REF_NAME}.deb"
 
       - name: Create .tar.gz (universal Linux)
         run: |
           APP_DIR="$GITHUB_WORKSPACE/apps/VSCode-linux-x64"
-          tar -czf "$RUNNER_TEMP/OCcode-linux-x64.tar.gz" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
+          tar -czf "$RUNNER_TEMP/OCcode-linux-x64-${GITHUB_REF_NAME}.tar.gz" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-linux-x64
+          name: OCcode-linux-x64-${{ github.ref_name }}
           path: |
-            ${{ runner.temp }}/OCcode-linux-x64.deb
-            ${{ runner.temp }}/OCcode-linux-x64.tar.gz
+            ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.deb
+            ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.tar.gz
           retention-days: 30
 
       - name: Create GitHub Release (on tag)
@@ -836,8 +836,8 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
         with:
           files: |
-            ${{ runner.temp }}/OCcode-linux-x64.deb
-            ${{ runner.temp }}/OCcode-linux-x64.tar.gz
+            ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.deb
+            ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.tar.gz
           name: OCcode ${{ github.ref_name }}
           draft: false
           prerelease: false
