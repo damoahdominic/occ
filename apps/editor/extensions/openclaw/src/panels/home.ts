@@ -384,23 +384,66 @@ export class HomePanel {
     }
 
     if (platform === 'win32') {
-      // Windows: check Node.js exists
-      const nodeOk = await cmdExists('node --version');
+      // Windows: check Node.js exists; auto-install if missing (no UAC required)
+      let nodeOk = await cmdExists('node --version');
       if (!nodeOk) {
-        tee('  ❌ Node.js not found.\n');
-        tee('     Please install Node.js 20+ from https://nodejs.org\n');
-        tee('     After installing Node.js, restart OCCode and try again.\n');
-        await fail(); return;
+        const nodeVersion = '20.18.2';
+        const nodeArch = arch === 'arm64' ? 'arm64' : 'x64';
+        const zipName = `node-v${nodeVersion}-win-${nodeArch}.zip`;
+        const zipUrl = `https://nodejs.org/dist/v${nodeVersion}/${zipName}`;
+        const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+        const installDir = path.join(localAppData, 'Programs', 'nodejs');
+        const tmpZip = path.join(os.tmpdir(), zipName);
+        const tmpExtract = path.join(os.tmpdir(), `occ-node-${Date.now()}`);
+
+        tee(`  ⚠ Node.js not found — downloading v${nodeVersion} (${nodeArch})...\n`);
+        const dlR = await runCaptured('powershell', [
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+          `$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing '${zipUrl}' -OutFile '${tmpZip}'`,
+        ], { windowsHide: true, shell: true } as cp.SpawnOptions);
+
+        if (dlR.code !== 0) {
+          tee('  ❌ Failed to download Node.js. Check your internet connection.\n');
+          await fail(); return;
+        }
+
+        tee(`  Extracting...\n`);
+        const exR = await runCaptured('powershell', [
+          '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+          `$ProgressPreference='SilentlyContinue'; ` +
+          `Expand-Archive -Path '${tmpZip}' -DestinationPath '${tmpExtract}' -Force; ` +
+          `$inner = Get-ChildItem '${tmpExtract}' | Select-Object -First 1; ` +
+          `if (Test-Path '${installDir}') { Remove-Item '${installDir}' -Recurse -Force }; ` +
+          `Move-Item $inner.FullName '${installDir}'`,
+        ], { windowsHide: true, shell: true } as cp.SpawnOptions);
+
+        try { fs.unlinkSync(tmpZip); } catch {}
+
+        if (exR.code !== 0) {
+          tee('  ❌ Failed to extract Node.js.\n');
+          await fail(); return;
+        }
+
+        // Make new Node.js dir visible to all subsequent commands in this install run
+        env.PATH = [installDir, env.PATH || ''].filter(Boolean).join(';');
+        (env as any).Path = env.PATH;
+
+        nodeOk = await cmdExists('node --version');
+        if (!nodeOk) {
+          tee('  ❌ Node.js install did not complete properly.\n');
+          await fail(); return;
+        }
+        tee(`  ✓ Node.js v${nodeVersion} installed to ${installDir}\n`);
+      } else {
+        tee('  ✓ Node.js found\n');
       }
-      tee('  ✓ Node.js found\n');
     }
 
     const npmOk = await cmdExists('npm --version');
     if (npmOk) {
       tee('  ✓ npm found\n');
     } else if (platform === 'win32') {
-      tee('  ❌ npm not found (should come with Node.js).\n');
-      tee('     Please reinstall Node.js from https://nodejs.org\n');
+      tee('  ❌ npm not found after Node.js install — unexpected.\n');
       await fail(); return;
     } else {
       tee('  ⚠ npm not found — will attempt to install Node.js\n');
