@@ -97,6 +97,7 @@ export class HomePanel {
   private _lastJwt = '';
   private _lastInstalledVersion: string | null = null;
   private _autoUpdateTriggered = false; // fire at most once per panel session
+  private _closeSidebarOnGatewayStart = false; // close sidebar once gateway reaches running after first install
   private _uninstallCloseSidebarTimer: ReturnType<typeof setTimeout> | undefined;
   private _uninstallCloseWatcher: ReturnType<typeof setInterval> | undefined;
 
@@ -142,7 +143,6 @@ export class HomePanel {
           'agent',
         );
       } else if (msg.command === 'runSetup') {
-        void vscode.commands.executeCommand('void.sidebar.close');
         void this._runSetup(msg as { command: string; provider: string; apiKey: string; port: string });
       } else if (msg.command === 'autoSetupSkipped') {
         setTimeout(() => {
@@ -871,6 +871,11 @@ export class HomePanel {
       if (!this._commandAction) {
         try { this._panel.webview.postMessage({ type: 'gatewayStatus', status }); } catch {}
       }
+      // After first-install setup: close the sidebar once the gateway is confirmed running.
+      if (this._closeSidebarOnGatewayStart && status === 'running') {
+        this._closeSidebarOnGatewayStart = false;
+        void vscode.commands.executeCommand('void.sidebar.close');
+      }
       try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
       try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
       // Full re-render if JWT changed (e.g. deep-link auth arrived while panel was open).
@@ -1255,8 +1260,10 @@ export class HomePanel {
             if (isFree) {
               vscode.commands.executeCommand('openclaw.openWorkspace');
             }
-            // Give the dashboard time to render, then open a new chat asking AI to start the gateway
+            // Give the dashboard time to render, then open a new chat asking AI to start the gateway.
+            // Set flag so the sidebar auto-closes once the gateway is confirmed running.
             setTimeout(() => {
+              this._closeSidebarOnGatewayStart = true;
               vscode.commands.executeCommand('void.openChatWithMessage',
                 'Run `openclaw gateway start` to start the OpenClaw gateway.',
                 'agent');
