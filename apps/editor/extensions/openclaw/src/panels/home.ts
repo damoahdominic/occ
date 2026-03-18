@@ -8,6 +8,34 @@ import * as path from 'path';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
+// ── Persistent diagnostics log ────────────────────────────────────────────────
+const LOG_PATH     = path.join(os.homedir(), '.openclaw', 'occ-home.log');
+const LOG_MAX_BYTES = 512 * 1024; // 500 KB — rotate when exceeded
+
+/**
+ * Append timestamped text to ~/.openclaw/occ-home.log.
+ * Creates the file (and directory) on first use. Rotates by dropping the
+ * oldest half of lines when the file exceeds LOG_MAX_BYTES. Never throws.
+ */
+function writeLog(text: string): void {
+  try {
+    const dir = path.dirname(LOG_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // Rotate if oversized
+    if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > LOG_MAX_BYTES) {
+      const lines = fs.readFileSync(LOG_PATH, 'utf-8').split('\n');
+      fs.writeFileSync(LOG_PATH, lines.slice(Math.floor(lines.length / 2)).join('\n'), 'utf-8');
+    }
+    const ts = new Date().toISOString();
+    // Stamp every non-empty line; leave blank lines unstemmed
+    const stamped = text
+      .split('\n')
+      .map(l => (l.trim() ? `[${ts}] ${l}` : l))
+      .join('\n');
+    fs.appendFileSync(LOG_PATH, stamped, 'utf-8');
+  } catch { /* non-fatal */ }
+}
+
 // ── OCC Legacy model constants ────────────────────────────────────────────────
 const OCC_LEGACY_MODEL_ID   = 'occ-legacy';
 const OCC_LEGACY_MODEL_NAME = 'occ-legacy';
@@ -165,6 +193,12 @@ export class HomePanel {
       } else if (msg.command === 'openConfigFile') {
         const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(configPath));
+      } else if (msg.command === 'openLogs') {
+        if (!fs.existsSync(LOG_PATH)) {
+          vscode.window.showInformationMessage('No log file yet — logs are created when install or setup runs.');
+        } else {
+          vscode.commands.executeCommand('vscode.open', vscode.Uri.file(LOG_PATH));
+        }
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'SOUL.md', 'HEARTBEAT.md']);
         const file = msg.file as string;
@@ -278,8 +312,9 @@ export class HomePanel {
 
     const post = (msg: object) => { try { panel._panel.webview.postMessage(msg); } catch {} };
     let fullLog = '';
-    const tee = (text: string) => { fullLog += text; post({ type: 'installLog', text }); };
+    const tee = (text: string) => { fullLog += text; post({ type: 'installLog', text }); writeLog(text); };
 
+    writeLog(`\n=== runInstall START platform=${platform} arch=${arch} ===\n`);
     post({ type: 'installState', state: 'running' });
 
     const env = panel._buildExecEnv();
@@ -340,6 +375,7 @@ export class HomePanel {
     };
 
     const fail = async () => {
+      writeLog('=== runInstall END failed ===\n');
       post({ type: 'installState', state: 'failed' });
       const platformDesc = platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : `Linux (${arch})`;
       await vscode.commands.executeCommand('void.openChatWithMessage', [
@@ -356,6 +392,7 @@ export class HomePanel {
 
     const succeed = async () => {
       tee('\n✅  Installed successfully!\n');
+      writeLog('=== runInstall END ok ===\n');
       post({ type: 'installState', state: 'done' });
       // Webview drives the post-install navigation via autoSetupSkipped or wizardLog done
     };
@@ -657,6 +694,7 @@ export class HomePanel {
     }
 
     const cliCheck = await this._testOpenClawCli();
+    writeLog(`[cli-check] ok=${cliCheck.ok} cmd="${cliCheck.command}" output="${(cliCheck.output ?? '').trim()}"\n`);
     const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     const isConfigured = fs.existsSync(configFile);
     const isInstalled = isConfigured; // config file is the sole source of truth — a leftover binary without config is not "installed"
@@ -1103,6 +1141,10 @@ export class HomePanel {
 
   private async _runSetup(data: { provider: string; apiKey: string; port: string }): Promise<void> {
     const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
+    const wizardPost = (text: string, done: boolean, ok: boolean) => {
+      writeLog(text);
+      post({ type: 'wizardLog', text, done, ok });
+    };
     const env = this._buildExecEnv();
     const cliPath = await this._findOpenClawPath() ?? 'openclaw';
     const port = data.port && /^\d+$/.test(data.port) ? data.port : '18789';
@@ -1131,7 +1173,7 @@ export class HomePanel {
     };
     const flags = providerFlags[data.provider];
     if (!flags) {
-      post({ type: 'wizardLog', text: 'Unknown provider selected.\n', done: true, ok: false });
+      wizardPost('Unknown provider selected.\n', true, false);
       return;
     }
 
@@ -1145,7 +1187,8 @@ export class HomePanel {
       ...flags,
     ];
 
-    post({ type: 'wizardLog', text: isFree ? 'Installing Inference for MoltPilot...\nInstalling Inference for your new OpenClaw...\n' : 'Installing Inference for your new OpenClaw...\n', done: false, ok: false });
+    writeLog(`\n=== _runSetup START provider=${data.provider} port=${port} ===\n`);
+    wizardPost(isFree ? 'Installing Inference for MoltPilot...\nInstalling Inference for your new OpenClaw...\n' : 'Installing Inference for your new OpenClaw...\n', false, false);
 
     await new Promise<void>(resolve => {
       const child = cp.spawn(cliPath, args, {
@@ -1153,11 +1196,12 @@ export class HomePanel {
         stdio: ['ignore', 'pipe', 'pipe'],
         ...(process.platform === 'win32' ? { shell: true, windowsHide: true } : {}),
       });
-      child.stdout?.on('data', (d: Buffer) => post({ type: 'wizardLog', text: d.toString(), done: false, ok: false }));
-      child.stderr?.on('data', (d: Buffer) => post({ type: 'wizardLog', text: d.toString(), done: false, ok: false }));
+      child.stdout?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
+      child.stderr?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
       child.on('close', code => {
         const ok = code === 0;
-        post({ type: 'wizardLog', text: ok ? '\n✅ Setup complete!\n' : `\nSetup exited with code ${code}.\n`, done: true, ok });
+        writeLog(`=== _runSetup END code=${code} ===\n`);
+        wizardPost(ok ? '\n✅ Setup complete!\n' : `\nSetup exited with code ${code}.\n`, true, ok);
         if (ok) {
           if (isFree) {
             // Write local free-tier marker (no remote enforcement).
@@ -1217,7 +1261,7 @@ export class HomePanel {
         resolve();
       });
       child.on('error', err => {
-        post({ type: 'wizardLog', text: `Error: ${err.message}\n`, done: true, ok: false });
+        wizardPost(`Error: ${err.message}\n`, true, false);
         resolve();
       });
     });
@@ -3267,6 +3311,13 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
               </button>
             </div>
           </div>
+        </div>
+        <div class="more-menu-section">
+          <div class="more-menu-section-label">Diagnostics</div>
+          <button class="more-menu-item" role="menuitem" data-search="open logs diagnostics debug" onclick="cmd('openLogs');closeMoreMenu()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Open Logs
+          </button>
         </div>
         <div class="more-menu-section">
           <button class="more-menu-item more-menu-item-danger" role="menuitem" data-search="uninstall openclaw" onclick="closeMoreMenu();showConfirm()">
