@@ -85,6 +85,8 @@ export class HomePanel {
   private static _installTerminal: vscode.Terminal | undefined;
   /** Resolves with the password (or undefined on cancel) when the webview modal submits. */
   private static _pendingPasswordResolve: ((pwd: string | undefined) => void) | undefined;
+  /** Absolute path to the openclaw binary found immediately after a successful install. */
+  private static _installedCliPath: string | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
@@ -156,6 +158,13 @@ export class HomePanel {
         }, 500);
       } else if (msg.command === 'verifyCliBeforeSetup') {
         // After install, verify the CLI is actually findable before auto-configuring.
+        // First: use the path we captured immediately after npm install (most reliable).
+        const storedPath = HomePanel._installedCliPath;
+        if (storedPath && fs.existsSync(storedPath)) {
+          try { this._panel.webview.postMessage({ type: 'proceedAutoSetup' }); } catch {}
+          return;
+        }
+        // Fallback: full PATH-based search.
         void this._testOpenClawCli().then(result => {
           if (result.ok) {
             try {
@@ -368,7 +377,7 @@ export class HomePanel {
       try {
         const username = os.userInfo().username;
         tee('Fixing .openclaw folder ownership...\n');
-        await runCaptured('sudo', ['-n', 'chown', '-R', `${username}:${username}`, openclawDir]);
+        await runCaptured('sudo', ['-n', 'chown', '-R', username, openclawDir]);
         await runCaptured('chmod', ['700', openclawDir]);
         tee('✅  Permissions set (700, owned by you)\n');
       } catch { /* non-fatal */ }
@@ -394,7 +403,43 @@ export class HomePanel {
       void vscode.commands.executeCommand('openclaw.balance.spend');
     };
 
+    // After a successful npm install, find the binary's absolute path immediately
+    // (before PATH settles) so verifyCliBeforeSetup can use it directly.
+    const captureInstalledPath = async (): Promise<void> => {
+      if (platform === 'win32') return; // Windows uses cmd shims; handled by _testOpenClawCli
+      const candidates: string[] = [];
+      // 1. Ask npm where its global prefix is (same env as the install used)
+      const prefixResult = await new Promise<string>(resolve => {
+        cp.exec('npm config get prefix', { env, timeout: 5000 }, (err, stdout) =>
+          resolve(err ? '' : (stdout || '').trim())
+        );
+      });
+      if (prefixResult) candidates.push(path.join(prefixResult, 'bin', 'openclaw'));
+      // 2. Hard-coded common macOS/Linux paths
+      const home = os.homedir();
+      candidates.push(
+        '/usr/local/bin/openclaw',
+        '/opt/homebrew/bin/openclaw',
+        path.join(home, '.local', 'bin', 'openclaw'),
+        path.join(home, '.npm-global', 'bin', 'openclaw'),
+        path.join(home, '.openclaw', 'bin', 'openclaw'),
+      );
+      // 3. nvm versions (newest first)
+      const nvmVersionsDir = path.join(home, '.nvm', 'versions', 'node');
+      if (fs.existsSync(nvmVersionsDir)) {
+        fs.readdirSync(nvmVersionsDir)
+          .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+          .forEach(ver => candidates.push(path.join(nvmVersionsDir, ver, 'bin', 'openclaw')));
+      }
+      const found = candidates.find(c => c && fs.existsSync(c));
+      if (found) {
+        HomePanel._installedCliPath = found;
+        tee(`  ✓ Binary found at ${found}\n`);
+      }
+    };
+
     const succeed = async () => {
+      await captureInstalledPath();
       tee('\n✅  Installed successfully!\n');
       writeLog('=== runInstall END ok ===\n');
       post({ type: 'installState', state: 'done' });
@@ -414,12 +459,8 @@ export class HomePanel {
         })
       );
       if (!xcodeOk) {
-        tee('  ⚠ Xcode Command Line Tools not installed.\n');
-        tee('  Installing Xcode Command Line Tools (this may show a system dialog)...\n');
-        await runCaptured('xcode-select', ['--install']);
-        tee('  ⏳ Please complete the Xcode tools installation in the system dialog,\n');
-        tee('     then restart OCCode and try again.\n');
-        await fail(); return;
+        post({ type: 'xcodeRequired' });
+        return;
       }
       tee('  ✓ Xcode Command Line Tools\n');
     }
@@ -1810,6 +1851,27 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     </button>
   </div>
 
+  <!-- Panel: Xcode CLI required (macOS only) -->
+  <div class="panel" id="panel-xcode-required" style="display:none;flex-direction:column;align-items:center;gap:16px;max-width:360px;text-align:center;">
+    <div style="font-size:36px;">🛠️</div>
+    <div class="panel-title" style="font-size:15px;font-weight:600;">Xcode Command Line Tools Required</div>
+    <div class="panel-desc" style="color:#a0a0a0;font-size:13px;line-height:1.55;">
+      Node.js and OpenClaw need Xcode CLI Tools to run on macOS.
+      This is a one-time setup — Apple ships it free.
+    </div>
+    <div style="background:#1e1e1e;border:1px solid #333;border-radius:8px;padding:16px;width:100%;text-align:left;font-size:12px;line-height:1.8;">
+      <div style="color:#a0a0a0;margin-bottom:8px;font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em;">Steps</div>
+      <div><span style="color:#7c8cf8;">1.</span> Open <strong>Terminal</strong></div>
+      <div><span style="color:#7c8cf8;">2.</span> Run: <code style="background:#2a2a2a;padding:2px 6px;border-radius:4px;color:#e2e8f0;">xcode-select --install</code></div>
+      <div><span style="color:#7c8cf8;">3.</span> Follow the system dialog</div>
+      <div><span style="color:#7c8cf8;">4.</span> Return here and click <strong>Retry</strong></div>
+    </div>
+    <button class="btn-primary" onclick="retryAfterXcode()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+      Retry Installation
+    </button>
+  </div>
+
   <!-- Panel B: Configure — Step B0: no longer shown (auto-configured on install) -->
   <div class="panel" id="panel-cfg-b0" style="display:none;flex-direction:column;align-items:center;gap:12px;">
     <div class="panel-title">Configure AI Model</div>
@@ -1923,8 +1985,14 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     // ── Install ────────────────────────────────────────────────────
     function startInstall() {
       document.getElementById('panel-install').style.display = 'none';
+      document.getElementById('panel-xcode-required').style.display = 'none';
       showLog('Installing OpenClaw...');
       vscode.postMessage({ command: 'openclaw.install' });
+    }
+
+    function retryAfterXcode() {
+      document.getElementById('panel-xcode-required').style.display = 'none';
+      startInstall();
     }
 
     // ── Configure: choose mode ─────────────────────────────────────
@@ -2071,6 +2139,13 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       // Install log stream
       if (d.type === 'installLog') {
         appendLog(d.text || '');
+      }
+
+      // Xcode CLI not installed — show dedicated instructions panel
+      if (d.type === 'xcodeRequired') {
+        document.getElementById('log-wrap').classList.remove('visible');
+        document.getElementById('panel-install').style.display = 'none';
+        document.getElementById('panel-xcode-required').style.display = 'flex';
       }
 
       // Install lifecycle
