@@ -17,6 +17,9 @@ const LOG_MAX_BYTES = 512 * 1024; // 500 KB — rotate when exceeded
  * Creates the file (and directory) on first use. Rotates by dropping the
  * oldest half of lines when the file exceeds LOG_MAX_BYTES. Never throws.
  */
+// Strip ANSI/VT escape sequences (e.g. colour codes from npm/openclaw output)
+const _ansiRe = /\x1b(\[[0-9;]*[A-Za-z]|[^[])/g;
+
 function writeLog(text: string): void {
   try {
     const dir = path.dirname(LOG_PATH);
@@ -27,8 +30,9 @@ function writeLog(text: string): void {
       fs.writeFileSync(LOG_PATH, lines.slice(Math.floor(lines.length / 2)).join('\n'), 'utf-8');
     }
     const ts = new Date().toISOString();
-    // Stamp every non-empty line; leave blank lines unstemmed
-    const stamped = text
+    const clean = text.replace(_ansiRe, '');
+    // Stamp every non-empty line; leave blank lines unstamped
+    const stamped = clean
       .split('\n')
       .map(l => (l.trim() ? `[${ts}] ${l}` : l))
       .join('\n');
@@ -1848,6 +1852,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
       Ask MoltPilot to fix this
     </button>
+    <button class="molt-help" id="show-error-logs" onclick="cmd('openLogs');closeMoreMenu&&closeMoreMenu()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Show Error Logs
+    </button>
     <button class="molt-help" id="retry-install" onclick="retryInstall()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.36"/></svg>
       Try Again
@@ -1976,10 +1984,15 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       appendLog(initialMsg);
     }
 
+    function stripAnsi(s) {
+      return s.replace(/\x1b(\[[0-9;]*[A-Za-z]|[^[])/g, '');
+    }
+
     function appendLog(text) {
-      fullLog += text;
+      var clean = stripAnsi(text);
+      fullLog += clean;
       var box = document.getElementById('log-box');
-      var lines = text.split('\\n');
+      var lines = clean.split('\\n');
       lines.forEach(function(line) {
         if (!line.trim()) return;
         var el = document.createElement('div');
@@ -2007,6 +2020,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
     function showMoltHelp() {
       document.getElementById('molt-help').classList.add('visible');
+      document.getElementById('show-error-logs').classList.add('visible');
     }
 
     function showRetryButton() {
@@ -2014,11 +2028,12 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     }
 
     function retryInstall() {
-      // Reset log and status, hide both action buttons, restart install
+      // Reset log and status, hide all action buttons, restart install
       document.getElementById('log-box').innerHTML = '';
       fullLog = '';
       setLogStatus('Installing', 'dots');
       document.getElementById('molt-help').classList.remove('visible');
+      document.getElementById('show-error-logs').classList.remove('visible');
       document.getElementById('retry-install').classList.remove('visible');
       vscode.postMessage({ command: 'openclaw.install' });
     }
@@ -2058,6 +2073,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         if (d.state === 'running') {
           setLogStatus('Installing', 'dots');
           document.getElementById('molt-help').classList.remove('visible');
+          document.getElementById('show-error-logs').classList.remove('visible');
           document.getElementById('retry-install').classList.remove('visible');
         } else if (d.state === 'cancelled') {
           setLogStatus('Wrong password or cancelled', 'failed');
