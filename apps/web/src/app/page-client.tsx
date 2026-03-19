@@ -916,16 +916,12 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
               ].map((app, i) => (
                 <motion.div
                   key={app.name}
-                  className="group relative bg-[var(--bg)] p-8 sm:p-10 transition-all duration-500 hover:bg-white/[0.02]"
+                  className="group relative bg-[var(--bg)] p-8 sm:p-10 transition-transform duration-300"
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: "-40px" }}
                   transition={{ delay: i * 0.06, duration: 0.5, ease: "easeOut" }}
                 >
-                  {/* Hover glow */}
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-red-500/[0.06] rounded-full blur-3xl" />
-                  </div>
 
                   <div className="relative">
                     <div className="w-14 h-14 mb-6 text-[var(--accent)] group-hover:scale-110 transition-transform duration-300">
