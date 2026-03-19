@@ -88,7 +88,7 @@ export class NativeDialogHandler extends AbstractDialogHandler {
 				`V8: ${process.versions['v8']}`,
 				`OS: ${osProps.type} ${osProps.arch} ${osProps.release}${isLinuxSnap ? ' snap' : ''}`,
 				``,
-				`Made by Making Better Agents (Community)`,
+				`Made with love by the Making Better Agents Community`,
 			].join('\n');
 		};
 

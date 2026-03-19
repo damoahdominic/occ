@@ -33,10 +33,14 @@ jobs:
           node -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
-            p.occRelease = process.env.GITHUB_REF_NAME;
-            p.commit = process.env.GITHUB_REF_NAME;
+            const tag = process.env.GITHUB_REF_NAME;
+            const sha = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : tag;
+            p.occRelease = tag;
+            p.voidVersion = tag;
+            p.commit = sha;
+            p.date = new Date().toISOString();
             fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
-            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+            console.log('Stamped version =>', tag, 'commit =>', sha);
           "
 
       - name: Install editor dependencies
@@ -251,10 +255,14 @@ jobs:
           node -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
-            p.occRelease = process.env.GITHUB_REF_NAME;
-            p.commit = process.env.GITHUB_REF_NAME;
+            const tag = process.env.GITHUB_REF_NAME;
+            const sha = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : tag;
+            p.occRelease = tag;
+            p.voidVersion = tag;
+            p.commit = sha;
+            p.date = new Date().toISOString();
             fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
-            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+            console.log('Stamped version =>', tag, 'commit =>', sha);
           "
 
       - name: Install editor dependencies
@@ -470,10 +478,14 @@ jobs:
           node -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
-            p.occRelease = process.env.GITHUB_REF_NAME;
-            p.commit = process.env.GITHUB_REF_NAME;
+            const tag = process.env.GITHUB_REF_NAME;
+            const sha = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : tag;
+            p.occRelease = tag;
+            p.voidVersion = tag;
+            p.commit = sha;
+            p.date = new Date().toISOString();
             fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
-            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+            console.log('Stamped version =>', tag, 'commit =>', sha);
           "
 
       - name: Install editor dependencies
@@ -693,10 +705,14 @@ jobs:
           node -e "
             const fs = require('fs');
             const p = JSON.parse(fs.readFileSync('product.json', 'utf8'));
-            p.occRelease = process.env.GITHUB_REF_NAME;
-            p.commit = process.env.GITHUB_REF_NAME;
+            const tag = process.env.GITHUB_REF_NAME;
+            const sha = process.env.GITHUB_SHA ? process.env.GITHUB_SHA.slice(0, 7) : tag;
+            p.occRelease = tag;
+            p.voidVersion = tag;
+            p.commit = sha;
+            p.date = new Date().toISOString();
             fs.writeFileSync('product.json', JSON.stringify(p, null, '\t'));
-            console.log('Stamped occRelease/commit =>', process.env.GITHUB_REF_NAME);
+            console.log('Stamped version =>', tag, 'commit =>', sha);
           "
 
       - name: Install editor dependencies
