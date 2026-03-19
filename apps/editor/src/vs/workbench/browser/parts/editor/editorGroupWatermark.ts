@@ -192,50 +192,6 @@ export class EditorGroupWatermark extends Disposable {
 				buttonContainer.style.marginBottom = '16px';
 				voidIconBox.appendChild(buttonContainer);
 
-				// Open OpenClaw State Directory button
-				const openFolderButton = h('button')
-				openFolderButton.root.classList.add('void-openfolder-button')
-				openFolderButton.root.style.display = 'block'
-				openFolderButton.root.style.width = '260px'
-				openFolderButton.root.textContent = 'Open OpenClaw State Directory'
-				openFolderButton.root.onclick = async () => {
-					// Open AI sidebar if not visible
-					void this.viewsService.openViewContainer('workbench.view.void');
-
-					// Check for ~/.openclaw workspace file
-					const home = process.env['HOME'] || process.env['USERPROFILE'] || '';
-					const openclawDir = home ? `${home}/.openclaw` : '';
-					const workspaceFile = openclawDir ? `${openclawDir}/My OpenClaw Workspace.code-workspace` : '';
-
-					let opened = false;
-					if (workspaceFile) {
-						try {
-							const { promises: fsPromises } = await import('fs');
-							await fsPromises.access(workspaceFile);
-							// Workspace file exists — open it
-							const { URI } = await import('../../../../base/common/uri.js');
-							await this.hostService.openWindow([{ workspaceUri: URI.file(workspaceFile) }]);
-							opened = true;
-						} catch {
-							// workspace file missing — try opening the folder directly
-							if (openclawDir) {
-								try {
-									const { promises: fsPromises } = await import('fs');
-									await fsPromises.access(openclawDir);
-									const { URI } = await import('../../../../base/common/uri.js');
-									await this.hostService.openWindow([{ folderUri: URI.file(openclawDir) }]);
-									opened = true;
-								} catch { /* fall through to picker */ }
-							}
-						}
-					}
-
-					if (!opened) {
-						// ~/.openclaw doesn't exist — let user pick a folder
-						this.commandService.executeCommand(isMacintosh && isNative ? OpenFileFolderAction.ID : OpenFolderAction.ID);
-					}
-				}
-				buttonContainer.appendChild(openFolderButton.root);
 
 
 				// Recents
