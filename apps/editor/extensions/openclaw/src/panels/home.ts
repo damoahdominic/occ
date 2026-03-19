@@ -3327,6 +3327,9 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       cursor: pointer; flex-shrink: 0; font-family: inherit; transition: background 0.15s;
     }
     .app-wip-copy-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+    .app-wip-maintainer { font-size: 11px; color: #555; margin: 0 0 14px; line-height: 1.5; }
+    .app-wip-maintainer a { color: #666; text-decoration: none; border-bottom: 1px solid #444; }
+    .app-wip-maintainer a:hover { color: #999; border-bottom-color: #666; }
     .app-wip-actions { display: flex; gap: 8px; }
     .app-wip-btn-cancel {
       flex: 1; padding: 9px 0; border-radius: 8px;
@@ -3483,20 +3486,23 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         <div class="apps-panel-title">OCC Apps</div>
         <div class="apps-grid">
           ${[
-            { label: 'Chat',     icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',     emoji: 'speech-balloon_1f4ac.png' },
-            { label: 'Channels', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.26h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.83a16 16 0 0 0 6 6l.83-.83a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>', emoji: 'satellite-antenna_1f4e1.png' },
-            { label: 'Agents',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/><circle cx="12" cy="16" r="1" fill="currentColor"/></svg>',   emoji: 'briefcase_1f4bc.png' },
-            { label: 'Models',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4.03 3-9 3S3 13.66 3 12"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/></svg>',   emoji: 'alembic_2697-fe0f.png' },
-            { label: 'Skills',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',   emoji: 'high-voltage_26a1.png' },
-            { label: 'Security', icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>', emoji: 'shield_1f6e1-fe0f.png' },
-            { label: 'Memory',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',   emoji: 'floppy-disk_1f4be.png' },
-            { label: 'Empire',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20M4 20V10l8-7 8 7v10"/><path d="M10 20v-5h4v5"/></svg>',   emoji: 'crown_1f451.png' },
-            { label: 'Social',   icon: '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',   emoji: 'handshake_1f91d.png' },
-          ].map(app => `
-          <div class="app-tile" onclick="showWipModal('${app.label}', '${emojiBaseUri}/${app.emoji}')">
+            { label: 'Chat',     emoji: 'speech-balloon_1f4ac.png',     maintainer: null },
+            { label: 'Channels', emoji: 'satellite-antenna_1f4e1.png', maintainer: null },
+            { label: 'Agents',   emoji: 'briefcase_1f4bc.png',         maintainer: null },
+            { label: 'Models',   emoji: 'alembic_2697-fe0f.png',       maintainer: null },
+            { label: 'Skills',   emoji: 'high-voltage_26a1.png',       maintainer: null },
+            { label: 'Security', emoji: 'shield_1f6e1-fe0f.png',       maintainer: { name: 'Fletcher Frimpong', url: 'https://github.com/FletcherFrimpong' } },
+            { label: 'Memory',   emoji: 'floppy-disk_1f4be.png',       maintainer: null },
+            { label: 'Empire',   emoji: 'crown_1f451.png',             maintainer: null },
+            { label: 'Social',   emoji: 'handshake_1f91d.png',         maintainer: null },
+          ].map(app => {
+            const maintainerJson = app.maintainer ? JSON.stringify(app.maintainer).replace(/'/g, '\\x27') : 'null';
+            return `
+          <div class="app-tile" onclick="showWipModal('${app.label}', '${emojiBaseUri}/${app.emoji}', ${maintainerJson})">
             <div class="app-tile-icon"><img src="${emojiBaseUri}/${app.emoji}" alt="${app.label}" style="width:22px;height:22px;object-fit:contain;filter:grayscale(100%) brightness(0.75);pointer-events:none;" /></div>
             <span class="app-tile-label">${app.label}</span>
-          </div>`).join('')}
+          </div>`;
+          }).join('')}
         </div>
       </div>
     </div>
@@ -3515,6 +3521,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         <span class="app-wip-copy-text" id="app-wip-copy-text">I want to contribute to [App]</span>
         <button class="app-wip-copy-btn" onclick="copyWipMessage()">Copy</button>
       </div>
+      <p id="app-wip-maintainer" class="app-wip-maintainer"></p>
       <div class="app-wip-actions">
         <button class="app-wip-btn-cancel" onclick="closeWipModal()">Close</button>
         <button class="app-wip-btn-community" onclick="openCommunity()">Join Community →</button>
@@ -3692,12 +3699,20 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const input = document.getElementById('more-menu-search-input');
       if (input) { input.value = ''; filterMoreMenu(''); }
     }
-    function showWipModal(appName, emojiSrc) {
+    function showWipModal(appName, emojiSrc, maintainer) {
       const msg = 'I want to contribute to the ' + appName + ' app on OCC.';
       document.getElementById('app-wip-title').textContent = appName + ' — Coming Soon';
       document.getElementById('app-wip-copy-text').textContent = msg;
       const icon = document.getElementById('app-wip-icon');
       if (icon) { icon.src = emojiSrc; icon.alt = appName; }
+      const el = document.getElementById('app-wip-maintainer');
+      if (el) {
+        if (maintainer && maintainer.name) {
+          el.innerHTML = 'Maintained by <a href="#" onclick="event.preventDefault();vscode.postMessage({command:\'openUrl\',url:\'' + maintainer.url + '\'})">' + maintainer.name + '</a>';
+        } else {
+          el.innerHTML = 'Interested in maintaining this app? <a href="#" onclick="event.preventDefault();vscode.postMessage({command:\'openUrl\',url:\'mailto:team@mba.sh\'})">team@mba.sh</a>';
+        }
+      }
       document.getElementById('app-wip-overlay').classList.add('visible');
       closeAppsPanel();
     }
