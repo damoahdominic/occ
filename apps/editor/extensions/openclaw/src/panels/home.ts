@@ -3700,6 +3700,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const input = document.getElementById('more-menu-search-input');
       if (input) { input.value = ''; filterMoreMenu(''); }
     }
+    function openMaintainerLink(el) {
+      vscode.postMessage({ command: 'openUrl', url: el.dataset.url });
+      return false;
+    }
     function showWipModal(appName, emojiSrc, maintainerName, maintainerUrl) {
       const msg = 'I want to contribute to the ' + appName + ' app on OCC.';
       document.getElementById('app-wip-title').textContent = appName + ' — Coming Soon';
@@ -3709,9 +3713,9 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const el = document.getElementById('app-wip-maintainer');
       if (el) {
         if (maintainerName) {
-          el.innerHTML = 'Maintained by <a href="#" onclick="vscode.postMessage({command:\'openUrl\',url:\'' + maintainerUrl + '\'});return false;">' + maintainerName + '</a>';
+          el.innerHTML = 'Maintained by <a href="#" data-url="' + maintainerUrl + '" onclick="return openMaintainerLink(this);">' + maintainerName + '</a>';
         } else {
-          el.innerHTML = 'Interested in maintaining this app? <a href="#" onclick="vscode.postMessage({command:\'openUrl\',url:\'mailto:team@mba.sh\'});return false;">team@mba.sh</a>';
+          el.innerHTML = 'Interested in maintaining this app? <a href="#" data-url="mailto:team@mba.sh" onclick="return openMaintainerLink(this);">team@mba.sh</a>';
         }
       }
       document.getElementById('app-wip-overlay').classList.add('visible');
