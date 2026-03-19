@@ -3496,9 +3496,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
             { label: 'Empire',   emoji: 'crown_1f451.png',             maintainer: null },
             { label: 'Social',   emoji: 'handshake_1f91d.png',         maintainer: null },
           ].map(app => {
-            const maintainerJson = app.maintainer ? JSON.stringify(app.maintainer).replace(/'/g, '\\x27') : 'null';
+            const mName = app.maintainer ? app.maintainer.name.replace(/'/g, '\\x27') : '';
+            const mUrl  = app.maintainer ? app.maintainer.url.replace(/'/g, '\\x27')  : '';
             return `
-          <div class="app-tile" onclick="showWipModal('${app.label}', '${emojiBaseUri}/${app.emoji}', ${maintainerJson})">
+          <div class="app-tile" onclick="showWipModal('${app.label}', '${emojiBaseUri}/${app.emoji}', '${mName}', '${mUrl}')">
             <div class="app-tile-icon"><img src="${emojiBaseUri}/${app.emoji}" alt="${app.label}" style="width:22px;height:22px;object-fit:contain;filter:grayscale(100%) brightness(0.75);pointer-events:none;" /></div>
             <span class="app-tile-label">${app.label}</span>
           </div>`;
@@ -3699,7 +3700,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const input = document.getElementById('more-menu-search-input');
       if (input) { input.value = ''; filterMoreMenu(''); }
     }
-    function showWipModal(appName, emojiSrc, maintainer) {
+    function showWipModal(appName, emojiSrc, maintainerName, maintainerUrl) {
       const msg = 'I want to contribute to the ' + appName + ' app on OCC.';
       document.getElementById('app-wip-title').textContent = appName + ' — Coming Soon';
       document.getElementById('app-wip-copy-text').textContent = msg;
@@ -3707,10 +3708,10 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       if (icon) { icon.src = emojiSrc; icon.alt = appName; }
       const el = document.getElementById('app-wip-maintainer');
       if (el) {
-        if (maintainer && maintainer.name) {
-          el.innerHTML = 'Maintained by <a href="#" onclick="event.preventDefault();vscode.postMessage({command:\'openUrl\',url:\'' + maintainer.url + '\'})">' + maintainer.name + '</a>';
+        if (maintainerName) {
+          el.innerHTML = 'Maintained by <a href="#" onclick="vscode.postMessage({command:\'openUrl\',url:\'' + maintainerUrl + '\'});return false;">' + maintainerName + '</a>';
         } else {
-          el.innerHTML = 'Interested in maintaining this app? <a href="#" onclick="event.preventDefault();vscode.postMessage({command:\'openUrl\',url:\'mailto:team@mba.sh\'})">team@mba.sh</a>';
+          el.innerHTML = 'Interested in maintaining this app? <a href="#" onclick="vscode.postMessage({command:\'openUrl\',url:\'mailto:team@mba.sh\'});return false;">team@mba.sh</a>';
         }
       }
       document.getElementById('app-wip-overlay').classList.add('visible');
