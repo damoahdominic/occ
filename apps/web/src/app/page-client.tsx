@@ -66,8 +66,8 @@ const platformIcons: Record<Platform, React.ReactNode> = {
 
 const features = [
   {
-    title: "Ready in one click",
-    desc: "OpenClaw is set up for you automatically. No complicated steps, no confusing settings — just open the app and go.",
+    title: "Ready in One Click",
+    desc: "Installs locally on your machine. No servers, no cloud setup — just download, click install, and OpenClaw is running.",
     icon: (
       <svg viewBox="0 0 32 32" fill="none">
         <path
@@ -79,20 +79,8 @@ const features = [
     ),
   },
   {
-    title: "A real workspace",
-    desc: "Built on the same tools professionals use, so you get a powerful, polished experience from day one.",
-    icon: (
-      <svg viewBox="0 0 32 32" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        {/* heroicons code-bracket scaled to 32×32 */}
-        <path d="M23 9L30 16l-7 7" />
-        <path d="M9 9L2 16l7 7" />
-        <path d="M19.5 5l-7 22" />
-      </svg>
-    ),
-  },
-  {
-    title: "Works on any computer",
-    desc: "Whether you're on Windows, Mac, or Linux — it just works. Same great experience everywhere.",
+    title: "Cross Platform",
+    desc: "Works on every computer — Windows, Mac, or Linux. Same polished experience no matter what you're running.",
     icon: (
       <svg viewBox="0 0 32 32" fill="none" className="animate-icon-float">
         <circle cx="16" cy="16" r="12" stroke="var(--accent)" strokeWidth="2" />
@@ -104,8 +92,20 @@ const features = [
     ),
   },
   {
-    title: "Everything in one place",
-    desc: "Check your status, tweak your settings, and manage everything from a single, easy-to-use app.",
+    title: "Apps to Manage OpenClaw",
+    desc: "A companion control center to configure, monitor, and manage your OpenClaw agent — all from one clean interface.",
+    icon: (
+      <svg viewBox="0 0 32 32" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="4" width="10" height="10" rx="2" />
+        <rect x="18" y="4" width="10" height="10" rx="2" />
+        <rect x="4" y="18" width="10" height="10" rx="2" />
+        <rect x="18" y="18" width="10" height="10" rx="2" />
+      </svg>
+    ),
+  },
+  {
+    title: "Everything in One Place",
+    desc: "Settings, status, channels, skills — all accessible from a single app. No jumping between terminals and config files.",
     icon: (
       <svg viewBox="0 0 32 32" fill="none">
         <path
@@ -126,8 +126,8 @@ const features = [
     ),
   },
   {
-    title: "Free to use",
-    desc: "Completely free to use. No subscriptions, no hidden fees — just download and get started.",
+    title: "Free to Start / BYOK",
+    desc: "Completely free to get started. Bring your own API keys and you're good to go — no subscriptions, no hidden fees.",
     icon: (
       <svg viewBox="0 0 32 32" fill="none">
         <rect x="7" y="15" width="18" height="13" rx="3" stroke="var(--accent)" strokeWidth="2" />
@@ -630,7 +630,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                     className={`group relative h-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-6 transition-all duration-300 hover:bg-[var(--bg-elevated)] ${isHero ? "flex flex-col justify-between" : ""}`}
                   >
                     <div>
-                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-12 h-12" : "w-8 h-8"}`}>{f.icon}</div>
+                      <div className={`mb-3 group-hover:scale-110 transition-transform duration-300 ${isHero ? "w-16 h-16" : "w-12 h-12"}`}>{f.icon}</div>
                       <h3 className={`font-semibold mb-2 ${isHero ? "text-2xl" : "text-lg"}`}>{f.title}</h3>
                       <p className={`text-[var(--text-muted)] leading-relaxed ${isHero ? "text-base max-w-md" : "text-sm"}`}>{f.desc}</p>
                     </div>
