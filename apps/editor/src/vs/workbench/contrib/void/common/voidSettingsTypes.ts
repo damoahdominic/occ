@@ -729,7 +729,7 @@ When you use the terminal to run commands, **always clean up after yourself**:
 	syncSCMToChat: true,
 	enableFastApply: true,
 	chatMode: 'agent',
-	autoApprove: {},
+	autoApprove: { terminal: true },
 	showInlineSuggestions: true,
 	includeToolLintErrors: true,
 	isOnboardingComplete: false,
