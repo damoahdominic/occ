@@ -1028,7 +1028,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                       Safety, compliance, and scale — built in from day one.
                     </p>
                     <a
-                      href="https://docs.openclawcode.ai"
+                      href="https://docs.openclawcode.ai/nemoclaw"
                       className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white/[0.1] border border-neutral-500/40 text-white font-medium hover:bg-white/[0.16] transition-colors text-sm backdrop-blur-sm"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
