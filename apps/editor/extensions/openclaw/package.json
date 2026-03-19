@@ -87,7 +87,7 @@
 			},
 			{
 				"command": "openclaw.configure",
-				"title": "OpenClaw: Configure"
+				"title": "OpenClaw: Open Web Control"
 			},
 			{
 				"command": "openclaw.install",

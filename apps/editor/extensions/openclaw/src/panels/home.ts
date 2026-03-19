@@ -2667,7 +2667,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     const statusIcon = isInstalled ? '✅' : '⚠️';
     const statusText = isInstalled ? 'OpenClaw detected' : 'OpenClaw not found';
     const statusClass = isInstalled ? 'detected' : 'not-found';
-    const buttonLabel = isInstalled ? 'Configure OpenClaw' : 'Install OpenClaw';
+    const buttonLabel = isInstalled ? 'Open Web Control' : 'Install OpenClaw';
     const buttonCommand = isInstalled ? 'openclaw.configure' : 'openclaw.install';
     const dirText = dirExists ? 'found' : 'missing';
     const dirClass = dirExists ? 'ok' : 'warn';
@@ -3618,7 +3618,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     ).join('\n    ')}
   </div>
   <div class="btn-group">
-    <button id="btn-primary" class="btn-primary" onclick="cmd('openclaw.configure')">${icSettings}Configure OpenClaw</button>
+    <button id="btn-primary" class="btn-primary" onclick="cmd('openclaw.configure')">${icSettings}Open Web Control</button>
     <button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates</button>
     <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
   </div>
