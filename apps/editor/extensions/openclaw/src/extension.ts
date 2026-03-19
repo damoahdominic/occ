@@ -331,6 +331,20 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         // Self-healing: restart the poll timer after every successful fetch so the
         // interval resets cleanly and polling survives network blips or missed starts.
         startBackendPolling();
+
+        // Report OS platform to backend once per install so the admin dashboard has reliable data.
+        const OS_REPORTED_KEY = 'occ.osPlatformReported';
+        if (!context.globalState.get<boolean>(OS_REPORTED_KEY)) {
+          const platformMap: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+          const osPlatform = platformMap[process.platform] || process.platform;
+          fetch('https://occ.mba.sh/api/v1/me/platform', {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ os_platform: osPlatform }),
+          }).then(resp => {
+            if (resp.ok) { void context.globalState.update(OS_REPORTED_KEY, true); }
+          }).catch(() => { /* will retry next poll cycle */ });
+        }
       } else if (r.status === 401) {
         // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
         void context.globalState.update(OCC_JWT_KEY, '');
