@@ -753,6 +753,196 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
           </div>
         </section>
 
+
+        {/* ── Apps Ecosystem ─────────────────────────────────────────────── */}
+        <section className="px-6 py-28 relative overflow-hidden">
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
+          </div>
+
+          <div className="max-w-6xl mx-auto">
+            <motion.div
+              className="text-center mb-20"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-80px" }}
+              transition={{ duration: 0.6 }}
+            >
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium mb-6">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+                </svg>
+                The Suite
+              </div>
+              <h2 className="text-3xl sm:text-5xl font-bold tracking-tight mb-5 leading-tight">
+                Your command center<span className="text-[var(--accent)]">.</span>
+              </h2>
+              <p className="text-[var(--text-muted)] text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
+                Nine purpose-built apps to manage every dimension of your OpenClaw instance — from conversations to security to real-time observability.
+              </p>
+            </motion.div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-px bg-white/[0.04] rounded-3xl overflow-hidden border border-white/[0.06]">
+              {[
+                {
+                  name: "Chat",
+                  tagline: "Talk to your agent",
+                  desc: "A beautifully designed chat interface you can expose securely via Tailscale. Your private line to your AI.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <rect x="4" y="6" width="40" height="30" rx="6" stroke="var(--accent)" strokeWidth="2.5" />
+                      <path d="M14 36l-4 8v-8" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" />
+                      <circle cx="16" cy="21" r="2" fill="var(--accent)" opacity="0.6" />
+                      <circle cx="24" cy="21" r="2" fill="var(--accent)" />
+                      <circle cx="32" cy="21" r="2" fill="var(--accent)" opacity="0.6" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Channels",
+                  tagline: "Connect everywhere",
+                  desc: "The best UI for connecting OpenClaw to over a dozen messaging platforms — Telegram, Discord, Slack, WhatsApp, and more.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <circle cx="24" cy="24" r="18" stroke="var(--accent)" strokeWidth="2" opacity="0.3" />
+                      <circle cx="24" cy="24" r="11" stroke="var(--accent)" strokeWidth="2" opacity="0.5" />
+                      <circle cx="24" cy="24" r="4" fill="var(--accent)" />
+                      <line x1="24" y1="6" x2="24" y2="13" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+                      <line x1="24" y1="35" x2="24" y2="42" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+                      <line x1="6" y1="24" x2="13" y2="24" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+                      <line x1="35" y1="24" x2="42" y2="24" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Agents",
+                  tagline: "Run many, manage one",
+                  desc: "Create and manage multiple agents on a single host. Each with its own personality, skills, and purpose.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <circle cx="24" cy="14" r="6" stroke="var(--accent)" strokeWidth="2.5" />
+                      <circle cx="12" cy="34" r="5" stroke="var(--accent)" strokeWidth="2" opacity="0.5" />
+                      <circle cx="36" cy="34" r="5" stroke="var(--accent)" strokeWidth="2" opacity="0.5" />
+                      <line x1="24" y1="20" x2="14" y2="29" stroke="var(--accent)" strokeWidth="1.5" opacity="0.4" />
+                      <line x1="24" y1="20" x2="34" y2="29" stroke="var(--accent)" strokeWidth="1.5" opacity="0.4" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Models",
+                  tagline: "Pick your brain",
+                  desc: "Configure AI models for inference, image generation, and fallback chains — all through a clean, intuitive interface.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <path d="M8 38V18l16-10 16 10v20L24 48 8 38z" stroke="var(--accent)" strokeWidth="2" opacity="0.4" />
+                      <path d="M8 18l16 10 16-10" stroke="var(--accent)" strokeWidth="2" opacity="0.4" />
+                      <line x1="24" y1="28" x2="24" y2="48" stroke="var(--accent)" strokeWidth="2" opacity="0.4" />
+                      <path d="M14 34V22l10-6 10 6v12l-10 6-10-6z" stroke="var(--accent)" strokeWidth="2.5" />
+                      <path d="M14 22l10 6 10-6" stroke="var(--accent)" strokeWidth="2" />
+                      <line x1="24" y1="28" x2="24" y2="40" stroke="var(--accent)" strokeWidth="2" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Skills",
+                  tagline: "Teach it anything",
+                  desc: "Build custom skills, browse existing ones, and discover community-built skills in a marketplace with built-in virus scanning.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <path d="M24 4l4 8 8 1-6 6 2 8-8-4-8 4 2-8-6-6 8-1z" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" />
+                      <path d="M16 32l-4 3v7l12-5 12 5v-7l-4-3" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.5" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Security",
+                  tagline: "Lock it down",
+                  desc: "An amazing panel for securing agent resources, controlling data access, and governing how your agents process information.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <path d="M24 4L8 12v12c0 10.5 6.8 20.3 16 24 9.2-3.7 16-13.5 16-24V12L24 4z" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" />
+                      <path d="M18 24l4 4 8-8" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Memory",
+                  tagline: "Never forgets",
+                  desc: "Ensure your agent remembers like an elephant. The most efficient way to give your AI persistent, reliable long-term memory.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <circle cx="24" cy="24" r="16" stroke="var(--accent)" strokeWidth="2" opacity="0.3" />
+                      <path d="M24 8c-8.8 0-16 7.2-16 16" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx="24" cy="24" r="8" stroke="var(--accent)" strokeWidth="2.5" />
+                      <circle cx="24" cy="24" r="2" fill="var(--accent)" />
+                      <line x1="24" y1="24" x2="30" y2="18" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Empire",
+                  tagline: "See everything",
+                  desc: "A real-time visualization of all your agents and the work they\'re performing — beautiful agent observability at a glance.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <circle cx="24" cy="24" r="3" fill="var(--accent)" />
+                      <circle cx="24" cy="24" r="9" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.5" />
+                      <circle cx="24" cy="24" r="16" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="4 4" opacity="0.3" />
+                      <circle cx="33" cy="18" r="2.5" fill="var(--accent)" opacity="0.7" />
+                      <circle cx="15" cy="30" r="2.5" fill="var(--accent)" opacity="0.7" />
+                      <circle cx="30" cy="33" r="2" fill="var(--accent)" opacity="0.5" />
+                      <circle cx="14" cy="17" r="2" fill="var(--accent)" opacity="0.5" />
+                      <circle cx="37" cy="28" r="1.5" fill="var(--accent)" opacity="0.4" />
+                    </svg>
+                  ),
+                },
+                {
+                  name: "Social",
+                  tagline: "Where agents hang out",
+                  desc: "A social hub to control where your agents live in the agentic universe — manage presence across platforms and communities.",
+                  icon: (
+                    <svg viewBox="0 0 48 48" fill="none" className="w-full h-full">
+                      <circle cx="16" cy="16" r="5" stroke="var(--accent)" strokeWidth="2" />
+                      <circle cx="36" cy="14" r="4" stroke="var(--accent)" strokeWidth="2" opacity="0.6" />
+                      <circle cx="20" cy="36" r="4" stroke="var(--accent)" strokeWidth="2" opacity="0.6" />
+                      <circle cx="38" cy="34" r="3" stroke="var(--accent)" strokeWidth="1.5" opacity="0.4" />
+                      <line x1="20" y1="19" x2="33" y2="13" stroke="var(--accent)" strokeWidth="1.5" opacity="0.3" />
+                      <line x1="18" y1="21" x2="19" y2="32" stroke="var(--accent)" strokeWidth="1.5" opacity="0.3" />
+                      <line x1="24" y1="36" x2="35" y2="34" stroke="var(--accent)" strokeWidth="1.5" opacity="0.3" />
+                      <line x1="37" y1="18" x2="38" y2="31" stroke="var(--accent)" strokeWidth="1.5" opacity="0.3" />
+                    </svg>
+                  ),
+                },
+              ].map((app, i) => (
+                <motion.div
+                  key={app.name}
+                  className="group relative bg-[var(--bg)] p-8 sm:p-10 transition-all duration-500 hover:bg-white/[0.02]"
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: "-40px" }}
+                  transition={{ delay: i * 0.06, duration: 0.5, ease: "easeOut" }}
+                >
+                  {/* Hover glow */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-red-500/[0.06] rounded-full blur-3xl" />
+                  </div>
+
+                  <div className="relative">
+                    <div className="w-14 h-14 mb-6 text-[var(--accent)] group-hover:scale-110 transition-transform duration-300">
+                      {app.icon}
+                    </div>
+                    <div className="flex items-baseline gap-3 mb-3">
+                      <h3 className="text-xl font-bold text-white">{app.name}</h3>
+                      <span className="text-xs text-[var(--accent)] font-medium opacity-70">{app.tagline}</span>
+                    </div>
+                    <p className="text-sm text-[var(--text-muted)] leading-relaxed">{app.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </section>
+
                 {/* Global community */}
         <section className="relative px-6 py-24 overflow-hidden">
           <div className="max-w-6xl mx-auto">
