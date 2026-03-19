@@ -540,11 +540,11 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
 
                   {/* Download + Star buttons */}
                   <div className="flex flex-col items-center gap-3 mb-10">
-                    <div className="flex items-center gap-3">
-                      <div className="relative btn-glow rounded-xl">
+                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                      <div className="relative btn-glow rounded-xl w-full sm:w-auto">
                         <a
                           href={downloadUrls[platform]}
-                          className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all"
+                          className="inline-flex items-center justify-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all w-full sm:w-auto"
                         >
                           {platformIcons[platform]}
                           Download for {platformLabels[platform]}
@@ -554,7 +554,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                         href="https://github.com/damoahdominic/occ"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-white font-semibold px-5 py-3.5 rounded-xl text-base transition-all hover:bg-white/5"
+                        className="inline-flex items-center justify-center gap-2 border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-white font-semibold px-5 py-3.5 rounded-xl text-base transition-all hover:bg-white/5 w-full sm:w-auto"
                       >
                         <svg viewBox="0 0 16 16" className="w-5 h-5" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
                         Star on GitHub
@@ -871,7 +871,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
                 </p>
 
                 <div className="flex flex-col items-center justify-center gap-3">
-                    <div className="relative btn-glow rounded-xl">
+                    <div className="relative btn-glow rounded-xl w-full sm:w-auto">
                       <a
                         href={downloadUrls[platform]}
                         className="inline-flex items-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-colors"
@@ -912,7 +912,7 @@ export default function Home({ downloadUrls = FALLBACK_URLS }: { downloadUrls?: 
         {/* Footer links */}
         <div className="border-t border-[var(--border)] px-6 py-8">
           <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
               <Image src="/icon.png" alt="OCCode" width={24} height={24} className="rounded-md opacity-60" />
               <span className="text-sm text-[var(--text-muted)]">
                 Built by the <a href="https://mba.sh" className="hover:text-white transition-colors underline underline-offset-4 decoration-[var(--border)] hover:decoration-white/40">Making Better Agents</a> community
