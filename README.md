@@ -5,7 +5,7 @@
 <h1 align="center">OpenClaw Code</h1>
 
 <p align="center">
-  <strong>AI-Powered Harness for OpenClaw</strong><br/>
+  <strong>Cursor for OpenClaw</strong><br/>
   Set up, manage, and troubleshoot your OpenClaw agent — no terminal needed.
 </p>
 
@@ -27,7 +27,7 @@
 ---
 
 <p align="center">
-  <img src="docs/screenshot-home.png" width="720" alt="OCCode Home — AI-powered harness for OpenClaw" />
+  <img src="docs/screenshot-home.png" width="720" alt="OCCode Home — Cursor for OpenClaw" />
 </p>
 
 ## What is OCCode?

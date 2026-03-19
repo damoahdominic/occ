@@ -1178,7 +1178,7 @@ export class HomePanel {
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
-  <p class="tagline">AI Powered Harness for OpenClaw</p>
+  <p class="tagline">Cursor for OpenClaw</p>
   <div class="spinner-wrap">
     <div class="spinner"></div>
     <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
