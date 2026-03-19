@@ -824,7 +824,12 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 						resMessageIsDonePromise({ type: 'llmDone', toolCall, info: { fullText, fullReasoning, anthropicReasoning } }) // resolve with tool calls
 					},
 					onError: async (error) => {
-						resMessageIsDonePromise({ type: 'llmError', error: error })
+						const msg = error?.message ?? ''
+						const isCreditsError = msg.includes('402') || msg.toLowerCase().includes('credits') || msg.toLowerCase().includes('litellm.apierror')
+						const sanitizedError = isCreditsError
+							? { message: "⚡ We'll be back shortly — our AI service is temporarily unavailable.", fullError: null }
+							: error
+						resMessageIsDonePromise({ type: 'llmError', error: sanitizedError })
 					},
 					onAbort: () => {
 						// stop the loop to free up the promise, but don't modify state (already handled by whatever stopped it)
