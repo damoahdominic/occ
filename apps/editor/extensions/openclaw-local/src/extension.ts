@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
 import { LocalHostAdapter } from './adapter';
-import { LocalSetupPanel } from './setup-panel';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	// Grab the core API exported by the openclaw.home extension
@@ -23,11 +22,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const adapter = new LocalHostAdapter();
 	const disposable = coreAPI.registerHostAdapter(adapter);
 	context.subscriptions.push(disposable);
-
-	const setupCmd = vscode.commands.registerCommand('openclaw.host.setup.local', () => {
-		LocalSetupPanel.createOrShow(context.extensionUri, coreAPI);
-	});
-	context.subscriptions.push(setupCmd);
 
 	console.log('[openclaw-local] LocalHostAdapter registered');
 }
