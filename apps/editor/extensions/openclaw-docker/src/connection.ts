@@ -227,15 +227,7 @@ export class DockerHostConnection implements HostConnection {
 	// ── OpenClaw config ───────────────────────
 
 	async getConfigPath(): Promise<string> {
-		return '/home/node/.openclaw/openclaw.json'; // official image runs as user 'node' (uid 1000)
-	}
-
-	gatewayHostPort(): number | undefined {
-		return this._config.portMappings?.gateway;
-	}
-
-	localStateDir(): string {
-		return this._config.localMountPath ?? path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+		return '/root/.openclaw/openclaw.json'; // containers typically run as root
 	}
 
 	async readConfig(): Promise<OpenClawConfig> {
@@ -308,21 +300,6 @@ export class DockerHostConnection implements HostConnection {
 		if (!cliPath) { throw new Error('OpenClaw CLI not installed'); }
 		const code = await this.execStream(cliPath, ['gateway', 'restart'], {}, onLog, onLog);
 		if (code !== 0) { throw new Error(`gateway restart exited with code ${code}`); }
-	}
-
-	async gatewayReboot(onLog: LogFn): Promise<void> {
-		const cliPath = await this.findOpenClawPath();
-		if (cliPath) {
-			try {
-				const code = await this.execStream(cliPath, ['gateway', 'reboot'], {}, onLog, onLog);
-				if (code === 0) return;
-			} catch { /* fall through to warning */ }
-		}
-		// For Docker hosts, we cannot reboot the host from inside the container.
-		// The existing "Restart" button handles container restart. Reboot should
-		// prompt the user to reboot the host machine externally.
-		onLog('Cannot reboot Docker host from inside container — please reboot the host machine externally');
-		throw new Error('Docker host reboot requires external reboot (not container restart)');
 	}
 
 	// ── Full install + onboard ────────────────
