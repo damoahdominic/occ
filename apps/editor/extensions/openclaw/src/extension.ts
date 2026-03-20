@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as cp from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,7 +6,6 @@ import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
-import { setActiveOpenClawWorkspaceFolder } from './panels/statusController';
 import { stopConfigProxy, getDashboardUrl } from './panels/config';
 import { HostRegistry } from './hosts/registry';
 import { HostManager } from './hosts/manager';
@@ -31,85 +29,9 @@ function getConfiguredGatewayPort(): number {
   }
 }
 
-// ── Window host binding ─────────────────────────────────────────────────────
-
-/** Describes which host this VS Code window is currently bound to. */
-export interface WindowHostBinding {
-  type: 'local' | 'docker' | 'ssh';
-  hostId: string;
-  port: number;
-  label: string;
-}
-
-const WINDOW_HOST_KEY = 'occ.windowHost';
-
-function registerWindowHostCommands(context: vscode.ExtensionContext): void {
-  context.subscriptions.push(
-    vscode.commands.registerCommand('occ.window.setHost', (binding: WindowHostBinding) => {
-      void context.workspaceState.update(WINDOW_HOST_KEY, binding);
-    }),
-    vscode.commands.registerCommand('occ.window.clearHost', () => {
-      void context.workspaceState.update(WINDOW_HOST_KEY, undefined);
-    }),
-    /** Returns the current WindowHostBinding for this window, or null. */
-    vscode.commands.registerCommand('occ.window.getHost', () => {
-      return context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
-    }),
-  );
-}
-
-/**
- * Smart routing for the "OCC Home" command.
- * Priority: stored window binding → detected state → install wizard.
- */
-function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext, forcePicker = false): void {
-  // When forcePicker is set (e.g. after disconnect) always show the host picker — never auto-route.
-  if (forcePicker) {
-    HomePanel.createOrShow(extensionUri, true);
-    return;
-  }
-
-  // 1. If this window already has a binding, honour it.
-  const binding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-  if (binding?.type === 'local') {
-    void vscode.commands.executeCommand('openclaw.host.setup.local');
-    return;
-  }
-  if (binding?.type === 'docker') {
-    void vscode.commands.executeCommand('openclaw.host.setup.docker');
-    return;
-  }
-
-  // 2. No binding — detect installed hosts and route.
-  const isLocalInstalled = fs.existsSync(
-    path.join(os.homedir(), '.openclaw', 'openclaw.json')
-  );
-
-  let isDockerRunning = false;
-  try {
-    const result = cp.spawnSync(
-      'docker',
-      ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
-      { timeout: 3000, windowsHide: true },
-    );
-    const st = (result.stdout?.toString() ?? '').trim();
-    isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
-  } catch { /* docker not available */ }
-
-  if (isLocalInstalled && isDockerRunning) {
-    HomePanel.createOrShow(extensionUri);          // hosts overview — user picks
-  } else if (isLocalInstalled) {
-    void vscode.commands.executeCommand('openclaw.host.setup.local');
-  } else if (isDockerRunning) {
-    void vscode.commands.executeCommand('openclaw.host.setup.docker');
-  } else {
-    HomePanel.createOrShow(extensionUri);          // install wizard
-  }
-}
-
 /** Returns true if the OpenClaw web server is reachable. */
-function isWebServerReachable(portOverride?: number): Promise<boolean> {
-  const port = portOverride ?? getConfiguredGatewayPort();
+function isWebServerReachable(): Promise<boolean> {
+  const port = getConfiguredGatewayPort();
   const url = `http://localhost:${port}/`;
   return new Promise(resolve => {
     const req = http.get(url, { timeout: 3000 }, res => {
@@ -213,7 +135,7 @@ async function hideActivityBarItems(
  */
 const WORKSPACE_FILENAME = 'My OpenClaw Workspace.code-workspace';
 
-async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<void> {
+async function openOpenClawFolder(): Promise<void> {
   // Ensure ~/.occ exists — OCcode's internal state directory.
   const occPath = path.join(os.homedir(), '.occ');
   if (!fs.existsSync(occPath)) {
@@ -260,15 +182,9 @@ async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<vo
     );
   }
 
-  // If we're already inside this workspace, nothing more to do — except ensure
-  // the workspace folder reflects the current host (not a stale Docker folder).
+  // If we're already inside this workspace, nothing more to do.
   const workspaceFileUri = vscode.Uri.file(workspaceFilePath);
   if (vscode.workspace.workspaceFile?.fsPath === workspaceFileUri.fsPath) {
-    const binding = context?.workspaceState.get<{ type: string }>(WINDOW_HOST_KEY);
-    if (binding?.type !== 'docker') {
-      // Not bound to Docker — ensure ~/.openclaw is shown, not occ-state-dir.
-      setActiveOpenClawWorkspaceFolder(openclawPath);
-    }
     return;
   }
 
@@ -279,7 +195,7 @@ async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<vo
 
 // ── Inference balance status bar ──────────────────────────────────────────────
 const BACKEND_BALANCE_KEY = 'occBackendBalanceV1'; // cached backend balance — persists across restarts
-const OCC_JWT_KEY = 'occJwtV1'; // JWT stored in SecretStorage (OS keychain) — encrypted at rest
+const OCC_JWT_KEY = 'occJwtV1'; // JWT stored directly in extension storage — no renderer IPC needed
 
 function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => void {
   // Restore cached backend balance so status bar shows the correct value immediately on startup
@@ -373,13 +289,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       // FALLBACK: if extension globalState has no JWT (e.g. user signed in before this session
       // synced, or the extension was reloaded), read from occLegacyJwt in VS Code settings and
       // backfill extension globalState so future reads work without IPC.
-      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
+      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
       if (!jwt) {
         try {
           const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
           if (legacyJwt) {
             jwt = legacyJwt;
-            await context.secrets.store(OCC_JWT_KEY, jwt);
+            await context.globalState.update(OCC_JWT_KEY, jwt);
           }
         } catch { /* renderer not ready yet — will retry on next poll */ }
       }
@@ -405,7 +321,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
         // Guard: only sync back if the JWT wasn't cleared while the fetch was in-flight.
         // Without this check, an in-flight poll completing after sign-out would re-log the user in.
-        const currentJwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
+        const currentJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
         if (currentJwt !== jwt) { return; }
         // Sync JWT + keys to renderer settings so ocFreeModel works
         vscode.commands.executeCommand('occ.auth.setLegacyJwt', jwt);
@@ -436,7 +352,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         }
       } else if (r.status === 401) {
         // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
-        void context.secrets.delete(OCC_JWT_KEY);
+        void context.globalState.update(OCC_JWT_KEY, '');
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
         stopCountdown();
@@ -489,7 +405,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     // Called from the renderer (sidebarActions.ts occ.auth.setLegacyJwt) to sync the JWT
     // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
     vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
-      if (token) { await context.secrets.store(OCC_JWT_KEY, token); } else { await context.secrets.delete(OCC_JWT_KEY); }
+      await context.globalState.update(OCC_JWT_KEY, token ?? '');
       // Stop polling immediately on sign-out so no more in-flight fetches can re-set the JWT
       if (!token && backendPollTimer) {
         clearInterval(backendPollTimer);
@@ -509,13 +425,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       log('');
 
       // 1. JWT
-      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
-      log(`[1] JWT in SecretStorage (occJwtV1): ${jwt ? 'OK present [redacted]' : 'MISSING'}`);
+      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      log(`[1] JWT in extension globalState (occJwtV1): ${jwt ? 'OK present (' + jwt.substring(0, 20) + '...)' : 'MISSING'}`);
       // Check what the renderer has for occLegacyJwt — this is what voidSettingsService reads
       try {
         const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
-        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present [redacted]' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
-        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.secrets.store(OCC_JWT_KEY, jwt); }
+        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present (' + legacyJwt.substring(0, 20) + '...)' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
+        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.globalState.update(OCC_JWT_KEY, jwt); }
       } catch { log('    occLegacyJwt check: renderer not ready'); }
 
       if (!jwt) { lines.push('\nNot signed in — cannot proceed.'); }
@@ -535,8 +451,8 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
             log(`    Status: 200 OK`);
             log(`    Email:        ${d.email ?? '(not returned)'}`);
             log(`    Balance:      $${balanceBefore.toFixed(6)}`);
-            log(`    MoltpilotKey: ${moltpilotKey ? 'OK [redacted]' : 'MISSING'}`);
-            log(`    OccKey:       ${occKey ? 'OK [redacted]' : 'MISSING'}`);
+            log(`    MoltpilotKey: ${moltpilotKey ? 'OK ' + moltpilotKey.substring(0, 12) + '...' : 'MISSING'}`);
+            log(`    OccKey:       ${occKey ? 'OK ' + occKey.substring(0, 12) + '...' : 'MISSING'}`);
           } else {
             log(`    HTTP ${r.status} -- JWT may be expired`);
           }
@@ -599,245 +515,24 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
   return () => {}; // spend is a no-op — kept so call sites don't break
 }
 
-// ── Module-level context ref — needed by deactivate() which has no params ───
-let _extensionContext: vscode.ExtensionContext | undefined;
-
-// ── Protocol handler constants ────────────────────────────────────────────────
-const PROD_HANDLER_KEY = 'occ.linuxProtocolHandlerRegisteredFor';
-const DEV_PREV_HANDLER_KEY = 'occ.prevOccodeHandler';
-const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
-
-// ── mimeapps.list helpers (Linux) ─────────────────────────────────────────────
-
-function ensureMimeSection(content: string, section: string, entry: string): string {
-  const header = `[${section}]`;
-  const keyPrefix = entry.split('=')[0] + '=';
-  if (!content.includes(header)) {
-    return content + (content.endsWith('\n') || content === '' ? '' : '\n') + `${header}\n${entry}\n`;
-  }
-  const lines = content.split('\n');
-  const secIdx = lines.findIndex(l => l.trim() === header);
-  for (let i = secIdx + 1; i < lines.length; i++) {
-    if (lines[i].startsWith('[')) { lines.splice(secIdx + 1, 0, entry); return lines.join('\n'); }
-    if (lines[i].startsWith(keyPrefix)) { lines[i] = entry; return lines.join('\n'); }
-  }
-  lines.splice(secIdx + 1, 0, entry);
-  return lines.join('\n');
-}
-
-function removeMimeEntry(content: string, section: string, keyPrefix: string): string {
-  const header = `[${section}]`;
-  if (!content.includes(header)) return content;
-  const lines = content.split('\n');
-  const secIdx = lines.findIndex(l => l.trim() === header);
-  for (let i = secIdx + 1; i < lines.length; i++) {
-    if (lines[i].startsWith('[')) break;
-    if (lines[i].startsWith(keyPrefix)) { lines.splice(i, 1); break; }
-  }
-  return lines.join('\n');
-}
-
-// ── Protocol handler registration ─────────────────────────────────────────────
-//
-// Dev mode (launch-editor.sh present): temporarily own occode:// for the
-// lifetime of this process, restoring the previous handler on exit.
-//
-// Production: Linux-only permanent registration (existing behaviour).
-
-async function ensureDevProtocolHandler(context: vscode.ExtensionContext): Promise<void> {
-  try {
-    const appRoot = vscode.env.appRoot;
-    const devLauncher = path.resolve(appRoot, '../../launch-editor.sh');
-    const isDevMode = fs.existsSync(devLauncher);
-
-    const product = JSON.parse(
-      fs.readFileSync(path.join(appRoot, 'product.json'), 'utf-8')
-    ) as { applicationName: string; urlProtocol: string; nameLong: string; linuxIconName: string; linuxDescription: string };
-
-    if (!isDevMode) {
-      // ── Production: Linux-only permanent registration ──────────────────────
-      if (process.platform !== 'linux') return;
-      const execPath = process.execPath;
-      const stored = context.globalState.get<string>(PROD_HANDLER_KEY, '');
-      if (stored === execPath) return;
-
-      const appsDir = path.join(os.homedir(), '.local', 'share', 'applications');
-      fs.mkdirSync(appsDir, { recursive: true });
-      const desktopContent = [
-        '[Desktop Entry]',
-        `Name=${product.nameLong} - URL Handler`,
-        `Comment=${product.linuxDescription || ''}`,
-        'GenericName=Text Editor',
-        `Exec="${execPath}" --open-url %U`,
-        `Icon=${product.linuxIconName}`,
-        'Type=Application',
-        'NoDisplay=true',
-        'StartupNotify=true',
-        'Categories=Utility;TextEditor;Development;IDE;',
-        `MimeType=x-scheme-handler/${product.urlProtocol};`,
-        'Keywords=vscode;',
-        '',
-      ].join('\n');
-      fs.writeFileSync(path.join(appsDir, `${product.applicationName}-url-handler.desktop`), desktopContent, 'utf-8');
-
-      const mimeappsPath = path.join(os.homedir(), '.config', 'mimeapps.list');
-      const mimeEntry = `x-scheme-handler/${product.urlProtocol}=${product.applicationName}-url-handler.desktop`;
-      let mimeContent = '';
-      try { mimeContent = fs.readFileSync(mimeappsPath, 'utf-8'); } catch {}
-      mimeContent = ensureMimeSection(mimeContent, 'Default Applications', mimeEntry);
-      mimeContent = ensureMimeSection(mimeContent, 'Added Associations', mimeEntry);
-      fs.mkdirSync(path.dirname(mimeappsPath), { recursive: true });
-      fs.writeFileSync(mimeappsPath, mimeContent, 'utf-8');
-      cp.spawn('update-desktop-database', [appsDir], { stdio: 'ignore', detached: true }).unref();
-      await context.globalState.update(PROD_HANDLER_KEY, execPath);
-      return;
-    }
-
-    // ── Dev mode: temporarily own occode:// ───────────────────────────────────
-
-    if (process.platform === 'linux') {
-      const appsDir = path.join(os.homedir(), '.local', 'share', 'applications');
-      const desktopPath = path.join(appsDir, `${product.applicationName}-url-handler.desktop`);
-      const mimeappsPath = path.join(os.homedir(), '.config', 'mimeapps.list');
-      const keyPrefix = `x-scheme-handler/${product.urlProtocol}=`;
-
-      // Read current mimeapps entry — this is what we'll restore on exit
-      let mimeContent = '';
-      try { mimeContent = fs.readFileSync(mimeappsPath, 'utf-8'); } catch {}
-      const existingEntry = mimeContent.split('\n').find(l => l.startsWith(keyPrefix)) ?? '';
-
-      // If the existing .desktop has a dead dev PID, don't restore that ghost
-      let prevEntry = existingEntry;
-      try {
-        const existingDesktop = fs.readFileSync(desktopPath, 'utf-8');
-        const pidMatch = existingDesktop.match(/^X-OCC-Dev-PID=(\d+)$/m);
-        if (pidMatch) {
-          const pid = parseInt(pidMatch[1], 10);
-          let isAlive = false;
-          try { process.kill(pid, 0); isAlive = true; } catch {}
-          if (!isAlive) prevEntry = ''; // stale — nothing to restore
-        }
-      } catch {}
-      await context.globalState.update(DEV_PREV_HANDLER_KEY, prevEntry);
-
-      // Write .desktop with dev PID marker
-      fs.mkdirSync(appsDir, { recursive: true });
-      const desktopContent = [
-        '[Desktop Entry]',
-        `Name=${product.nameLong} - URL Handler`,
-        `Comment=${product.linuxDescription || ''}`,
-        'GenericName=Text Editor',
-        `Exec="${devLauncher}" --open-url %U`,
-        `Icon=${product.linuxIconName}`,
-        'Type=Application',
-        'NoDisplay=true',
-        'StartupNotify=true',
-        'Categories=Utility;TextEditor;Development;IDE;',
-        `MimeType=x-scheme-handler/${product.urlProtocol};`,
-        'Keywords=vscode;',
-        `X-OCC-Dev-PID=${process.pid}`,
-        '',
-      ].join('\n');
-      fs.writeFileSync(desktopPath, desktopContent, 'utf-8');
-
-      const mimeEntry = `x-scheme-handler/${product.urlProtocol}=${product.applicationName}-url-handler.desktop`;
-      mimeContent = ensureMimeSection(mimeContent, 'Default Applications', mimeEntry);
-      mimeContent = ensureMimeSection(mimeContent, 'Added Associations', mimeEntry);
-      fs.mkdirSync(path.dirname(mimeappsPath), { recursive: true });
-      fs.writeFileSync(mimeappsPath, mimeContent, 'utf-8');
-      cp.spawn('update-desktop-database', [appsDir], { stdio: 'ignore', detached: true }).unref();
-
-    } else if (process.platform === 'darwin') {
-      const appBundle = path.join(appRoot, `../../.build/electron/${product.nameLong}.app`);
-      if (!fs.existsSync(appBundle)) return;
-      await context.globalState.update(DEV_PREV_HANDLER_KEY, appBundle);
-      cp.spawn(LSREGISTER, ['-R', '-f', appBundle], { stdio: 'ignore', detached: true }).unref();
-
-    } else if (process.platform === 'win32') {
-      const proto = product.urlProtocol;
-      const electronExe = process.execPath;
-      await context.globalState.update(DEV_PREV_HANDLER_KEY, 'win32-dev');
-      const cmd = `"${electronExe}" --open-url "%1"`;
-      cp.execSync(`reg add "HKCU\\Software\\Classes\\${proto}" /ve /d "URL:${proto} protocol" /f`);
-      cp.execSync(`reg add "HKCU\\Software\\Classes\\${proto}" /v "URL Protocol" /d "" /f`);
-      cp.execSync(`reg add "HKCU\\Software\\Classes\\${proto}\\shell\\open\\command" /ve /d "${cmd}" /f`);
-    }
-  } catch {
-    // Silent failure — non-critical
-  }
-}
-
-async function releaseDevProtocolHandler(context: vscode.ExtensionContext): Promise<void> {
-  try {
-    const appRoot = vscode.env.appRoot;
-    const devLauncher = path.resolve(appRoot, '../../launch-editor.sh');
-    if (!fs.existsSync(devLauncher)) return; // production — nothing to release
-
-    const product = JSON.parse(
-      fs.readFileSync(path.join(appRoot, 'product.json'), 'utf-8')
-    ) as { applicationName: string; urlProtocol: string; nameLong: string; linuxIconName: string; linuxDescription: string };
-
-    const prevEntry = context.globalState.get<string>(DEV_PREV_HANDLER_KEY, '');
-
-    if (process.platform === 'linux') {
-      const appsDir = path.join(os.homedir(), '.local', 'share', 'applications');
-      const mimeappsPath = path.join(os.homedir(), '.config', 'mimeapps.list');
-      const keyPrefix = `x-scheme-handler/${product.urlProtocol}=`;
-      let mimeContent = '';
-      try { mimeContent = fs.readFileSync(mimeappsPath, 'utf-8'); } catch {}
-
-      if (prevEntry) {
-        mimeContent = ensureMimeSection(mimeContent, 'Default Applications', prevEntry);
-        mimeContent = ensureMimeSection(mimeContent, 'Added Associations', prevEntry);
-      } else {
-        mimeContent = removeMimeEntry(mimeContent, 'Default Applications', keyPrefix);
-        mimeContent = removeMimeEntry(mimeContent, 'Added Associations', keyPrefix);
-      }
-      fs.writeFileSync(mimeappsPath, mimeContent, 'utf-8');
-      cp.spawn('update-desktop-database', [appsDir], { stdio: 'ignore', detached: true }).unref();
-
-    } else if (process.platform === 'darwin') {
-      if (prevEntry) {
-        cp.spawn(LSREGISTER, ['-R', '-u', prevEntry], { stdio: 'ignore', detached: true }).unref();
-      }
-
-    } else if (process.platform === 'win32') {
-      const proto = product.urlProtocol;
-      try { cp.execSync(`reg delete "HKCU\\Software\\Classes\\${proto}" /f`); } catch {}
-    }
-
-    await context.globalState.update(DEV_PREV_HANDLER_KEY, undefined);
-  } catch {
-    // Silent failure — non-critical
-  }
-}
-
 export async function activate(context: vscode.ExtensionContext): Promise<OpenClawCoreAPI> {
-  // ── One-time migration: move JWT from globalState → SecretStorage ────────────
-  const legacyJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
-  if (legacyJwt) {
-    await context.secrets.store(OCC_JWT_KEY, legacyJwt);
-    await context.globalState.update(OCC_JWT_KEY, undefined);
-  }
-
-  _extensionContext = context;
-
-  // ── Dev: temporarily own occode:// scheme; production: permanent Linux registration ──
-  void ensureDevProtocolHandler(context);
-
-  // Release ownership on exit — covers graceful shutdown, Ctrl+C, and SIGTERM.
-  const releaseHandler = () => { if (_extensionContext) void releaseDevProtocolHandler(_extensionContext); };
-  process.once('SIGTERM', releaseHandler);
-  process.once('SIGINT', releaseHandler);
-  context.subscriptions.push({ dispose: releaseHandler });
-
   // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
   const hostRegistry = new HostRegistry();
   await hostRegistry.init();
   const hostManager = new HostManager(hostRegistry);
   context.subscriptions.push(hostRegistry, hostManager);
 
-  // (OPENCLAW HOSTS tree view and status bar removed — window-level binding used instead)
+  // Status bar: shows active host name
+  const hostStatusBar = new HostStatusBarItem(hostManager);
+  context.subscriptions.push(hostStatusBar);
+
+  // Tree view: lists all registered hosts
+  const hostTreeProvider = new HostTreeProvider(hostManager);
+  const hostTreeView = vscode.window.createTreeView('openclaw.hosts', {
+    treeDataProvider: hostTreeProvider,
+    showCollapseAll: false,
+  });
+  context.subscriptions.push(hostTreeView, hostTreeProvider);
 
   // Host management commands
   context.subscriptions.push(
@@ -861,7 +556,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
   await hideActivityBarItems(context);
 
   // Open ~/.openclaw as "My OpenClaw Workspace" (may reload the window once).
-  await openOpenClawFolder(context);
+  await openOpenClawFolder();
 
   // Close the Explorer sidebar on startup — the user opens it explicitly when needed.
   // Use a short delay so the workbench has finished restoring its layout first.
@@ -879,8 +574,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
           const params = new URLSearchParams(uri.query);
           const token = params.get('token');
           if (token) {
-            // Store JWT in SecretStorage (OS keychain) — encrypted at rest.
-            void context.secrets.store(OCC_JWT_KEY, token).then(() => {
+            // Store JWT in extension-host storage immediately (no renderer IPC needed).
+            void context.globalState.update(OCC_JWT_KEY, token).then(() => {
               // Also sync to renderer settings service (for chat / other renderer consumers).
               vscode.commands.executeCommand('occ.auth.setLegacyJwt', token);
             });
@@ -890,87 +585,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     }),
   );
 
-  registerWindowHostCommands(context);
-
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      routeHome(context.extensionUri, context);
-    }),
-    // Always shows the host picker regardless of what is installed — used after disconnect.
-    vscode.commands.registerCommand('openclaw.home.picker', () => {
-      routeHome(context.extensionUri, context, true);
-    }),
-    // Host-specific setup commands — invoked by routeHome() and the host picker in HomePanel.
-    // Each sets the window binding for this host type then opens the home panel,
-    // which renders the appropriate dashboard or setup wizard based on the binding.
-    vscode.commands.registerCommand('openclaw.host.setup.local', async () => {
-      const existing = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-      if (!existing || existing.type !== 'local') {
-        await context.workspaceState.update(WINDOW_HOST_KEY, {
-          type: 'local', hostId: 'local:main', port: getConfiguredGatewayPort(), label: 'Local',
-        } satisfies WindowHostBinding);
-      }
-      HomePanel.createOrShow(context.extensionUri);
-    }),
-    vscode.commands.registerCommand('openclaw.host.setup.docker', async () => {
-      const existing = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-      if (!existing || existing.type !== 'docker') {
-        await context.workspaceState.update(WINDOW_HOST_KEY, {
-          type: 'docker', hostId: 'docker:occ-openclaw', port: DEFAULT_GATEWAY_PORT, label: 'Docker',
-        } satisfies WindowHostBinding);
-      }
-      HomePanel.createOrShow(context.extensionUri, false, 'docker');
-    }),
-    vscode.commands.registerCommand('openclaw.host.setup.ssh', () => {
-      // SSH host details are entered via the home panel UI — open it and let the panel drive.
       HomePanel.createOrShow(context.extensionUri);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
-      const windowHostBinding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-
-      // ── Docker path ───────────────────────────────────────────────────────
-      if (windowHostBinding?.type === 'docker') {
-        const container = windowHostBinding.hostId.replace(/^docker:/, '') || 'occ-openclaw';
-        const hostPort = windowHostBinding.port; // e.g. 18790
-        const containerPort = 18789;
-
-        // 1. Start the gateway inside the container (detached — safe if already running)
-        cp.spawn('docker', ['exec', '-d', container, 'openclaw', 'gateway', 'run'], {
-          windowsHide: true,
-          detached: true,
-        }).unref();
-
-        // 2. Give it a moment to start, then get the tokenized dashboard URL
-        await new Promise<void>(r => setTimeout(r, 2000));
-
-        const dashResult = cp.spawnSync(
-          'docker',
-          ['exec', container, 'openclaw', 'dashboard', '--no-open'],
-          { timeout: 10000, windowsHide: true, encoding: 'utf-8' },
-        );
-        let rawUrl = (dashResult.stdout as string ?? '').trim();
-
-        if (rawUrl) {
-          // Rewrite the internal container port to the host-mapped port
-          const url = rawUrl
-            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
-            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
-          await vscode.env.openExternal(vscode.Uri.parse(url));
-        } else {
-          // dashboard command failed — open plain URL as fallback
-          await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${hostPort}/`));
-        }
-        return;
-      }
-
-      // ── Local / SSH path ──────────────────────────────────────────────────
-      const effectivePort = windowHostBinding ? windowHostBinding.port : getConfiguredGatewayPort();
-      const reachable = await isWebServerReachable(effectivePort);
+      const reachable = await isWebServerReachable();
       if (reachable) {
-        const url = getDashboardUrl()?.url ?? `http://localhost:${effectivePort}/`;
+        const dashInfo = getDashboardUrl();
+        const url = dashInfo?.url ?? `http://localhost:${getConfiguredGatewayPort()}/`;
         await vscode.env.openExternal(vscode.Uri.parse(url));
       } else {
-        const configUrl = `http://localhost:${effectivePort}/`;
+        // Web server not running — ask the AI to start it
+        const port = getConfiguredGatewayPort();
+        const configUrl = `http://localhost:${port}/`;
         const message =
           `The OpenClaw web configuration server is not running at ${configUrl}.\n\n` +
           `Please start it now by running the OpenClaw gateway in the terminal:\n` +
@@ -1000,26 +628,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       spendBalance();
     }),
     vscode.commands.registerCommand('openclaw.install', () => {
-      // Delegate to LocalSetupPanel via the host setup command
-      void vscode.commands.executeCommand('openclaw.host.setup.local');
+      void HomePanel.runInstall(
+        context.extensionUri,
+        process.platform,
+        process.arch,
+        process.env.SHELL ?? '',
+      );
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();
-    }),
-    vscode.commands.registerCommand('occ.setup.reset', async (options?: { full?: boolean }) => {
-      const full = options?.full === true;
-      const confirm = await vscode.window.showWarningMessage(
-        'This will stop all Docker containers and remove volumes. Your openclaw.json will be preserved. Continue?',
-        'Yes, Reset',
-        'Cancel',
-      );
-      if (confirm !== 'Yes, Reset') return;
-
-      await context.workspaceState.update(WINDOW_HOST_KEY, undefined);
-
-      HomePanel.currentPanel?.resetSetup(full);
-
-      HomePanel.createOrShow(context.extensionUri, true);
     }),
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
@@ -1056,7 +673,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       if (!password) return { result: 'User cancelled the password prompt.', exitCode: 1 };
 
       return new Promise(resolve => {
-        const child = cp.spawn('sudo', ['-S', 'bash', '-c', command], {
+        const child = require('child_process').spawn('sudo', ['-S', 'bash', '-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.stdin?.write(password + '\n');
@@ -1106,12 +723,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       hasAiModel: boolean;
       hasChannels: boolean;
       channelNames: string[];
-      hostType: 'local' | 'docker' | 'ssh' | null;
-      containerName: string | null;
-      gatewayPort: number;
     }> => {
-      // Resolve window-level host binding first
-      const windowHost = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
       const homedir = os.homedir();
       const configPath = path.join(homedir, '.openclaw', 'openclaw.json');
       const installed = fs.existsSync(configPath);
@@ -1121,11 +733,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
         try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
       }
 
-      // Determine gateway port — for Docker/SSH hosts use the window binding's port directly
+      // Determine gateway port
       const port = (() => {
-        if (windowHost?.type === 'docker' || windowHost?.type === 'ssh') {
-          return windowHost.port;
-        }
         const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
         if (p === undefined) return 18789;
         const n = Number(p);
@@ -1187,12 +796,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       } catch {}
       const hasAgents = agentNames.length > 0;
 
-      const hostType = windowHost?.type ?? 'local';
-      const containerName = (windowHost?.type === 'docker' || windowHost?.type === 'ssh')
-        ? (windowHost.hostId ?? null)
-        : null;
-
-      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames, hostType, containerName, gatewayPort: port };
+      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames };
     }),
   );
 
@@ -1231,7 +835,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
   // Auto-show OCC Home on startup (after activation settles).
   setTimeout(() => {
-    routeHome(context.extensionUri, context);
+    HomePanel.createOrShow(context.extensionUri);
   }, 500);
 
   // Return OpenClawCoreAPI so adapter extensions can register their adapters.
@@ -1240,5 +844,4 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
 export function deactivate() {
   stopConfigProxy();
-  if (_extensionContext) void releaseDevProtocolHandler(_extensionContext);
 }

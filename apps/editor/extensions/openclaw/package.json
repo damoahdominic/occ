@@ -83,7 +83,15 @@
 		"viewsContainers": {
 			"activitybar": []
 		},
-		"views": {},
+		"views": {
+			"explorer": [
+				{
+					"id": "openclaw.hosts",
+					"name": "OpenClaw Hosts",
+					"when": "true"
+				}
+			]
+		},
 		"commands": [
 			{
 				"command": "openclaw.home",
@@ -120,10 +128,6 @@
 			{
 				"command": "openclaw.refreshHost",
 				"title": "OpenClaw: Refresh Host Status"
-			},
-			{
-				"command": "openclaw.host.setup.docker",
-				"title": "OpenClaw: Docker Setup"
 			}
 		]
 	},
@@ -134,7 +138,6 @@
 	"devDependencies": {
 		"@types/node": "^20.19.35",
 		"@types/vscode": "^1.85.0",
-		"dotenv": "^17.3.1",
 		"typescript": "^5.9.3"
 	},
 	"icon": "media/icon.png",
