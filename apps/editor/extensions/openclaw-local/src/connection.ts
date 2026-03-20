@@ -79,6 +79,7 @@ export class LocalHostConnection implements HostConnection {
 				env: { ...process.env, ...opts.env },
 				timeout: opts.timeout,
 				windowsHide: opts.windowsHide ?? true,
+				shell: opts.shell,
 			});
 
 			if (opts.stdinData !== undefined) {
@@ -111,6 +112,7 @@ export class LocalHostConnection implements HostConnection {
 				env: { ...process.env, ...opts.env },
 				timeout: opts.timeout,
 				windowsHide: opts.windowsHide ?? true,
+				shell: opts.shell,
 			});
 
 			if (opts.stdinData !== undefined) {

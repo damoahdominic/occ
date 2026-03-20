@@ -5,6 +5,8 @@ import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
+import type { HostConnection, OpenClawCoreAPI } from '../hosts/types';
+import { DefaultLocalHostConnection } from '../hosts/localDefault';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
@@ -102,11 +104,27 @@ export class HomePanel {
   private _closeSidebarOnGatewayStart = false; // close sidebar once gateway reaches running after first install
   private _uninstallCloseSidebarTimer: ReturnType<typeof setTimeout> | undefined;
   private _uninstallCloseWatcher: ReturnType<typeof setInterval> | undefined;
+  /** Active host connection — defaults to local; swapped when the user picks a remote host. */
+  private _host: HostConnection = new DefaultLocalHostConnection();
+  /** Cached gateway port — populated on every _update() so _getConfiguredPort() stays sync. */
+  private _cachedGatewayPort = 18789;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
+    // Subscribe to active host changes from the core extension if available.
+    const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
+    if (coreExt?.isActive && coreExt.exports != null) {
+      const coreAPI = coreExt.exports;
+      const hostSub = coreAPI.onDidChangeActiveHost(conn => {
+        this._host = conn ?? new DefaultLocalHostConnection();
+        void this._update();
+      });
+      this._disposables.push(hostSub);
+      const active = coreAPI.getActiveHost();
+      if (active) { this._host = active; }
+    }
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
@@ -723,11 +741,26 @@ export class HomePanel {
   }
 
   private async _update() {
+    // Get config path and check existence via the active host.
+    const configFile = await this._host.getConfigPath();
+    const isConfigured = await this._host.exists(configFile);
+
+    // Update cached port from config (keeps _getConfiguredPort() synchronous).
+    if (isConfigured) {
+      try {
+        const cfg = await this._host.readConfig();
+        const gateway = cfg['gateway'] as Record<string, unknown> | undefined;
+        const p = gateway?.['port'] ?? cfg['port'] ?? cfg['gateway_port'] ?? cfg['gatewayPort'];
+        const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
+        if (Number.isFinite(n) && n > 0 && n < 65536) {
+          this._cachedGatewayPort = n;
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Silently fix ownership if ~/.openclaw was created as root (local host only, non-interactive sudo).
     const openclawDir = path.join(os.homedir(), '.openclaw');
     const dirExists = fs.existsSync(openclawDir);
-
-    // Silently fix ownership if ~/.openclaw was created as root (e.g. after a sudo install).
-    // sudo -n is non-interactive — only succeeds if a sudo session is still cached; otherwise a no-op.
     if (dirExists && process.platform !== 'win32') {
       try {
         const stat = fs.statSync(openclawDir);
@@ -740,8 +773,6 @@ export class HomePanel {
 
     const cliCheck = await this._testOpenClawCli();
     writeLog(`[cli-check] ok=${cliCheck.ok} cmd="${cliCheck.command}" output="${(cliCheck.output ?? '').trim()}"\n`);
-    const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    const isConfigured = fs.existsSync(configFile);
     const isInstalled = isConfigured; // config file is the sole source of truth — a leftover binary without config is not "installed"
     this._lastInstalledState = isInstalled;
     this._lastInstalledVersion = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
@@ -770,11 +801,10 @@ export class HomePanel {
       const emojiBaseUri = this._panel.webview.asWebviewUri(
         vscode.Uri.joinPath(this._extensionUri, 'media', 'emojis')
       ).toString();
-      // Read AI model info from openclaw.json
+      // Read AI model info from openclaw.json (via active host)
       let aiModelName = '';
       try {
-        const raw = fs.readFileSync(configFile, 'utf-8');
-        const cfg = JSON.parse(raw) as Record<string, unknown>;
+        const cfg = await this._host.readConfig() as Record<string, unknown>;
         const primaryModel = (cfg as Record<string, Record<string, Record<string, Record<string, string>>>>)
           ?.agents?.defaults?.model?.primary ?? '';
         if (primaryModel) {
@@ -812,21 +842,11 @@ export class HomePanel {
   // ── Gateway status helpers ─────────────────────────────────────────────────
 
   /**
-   * Reads the gateway port from ~/.openclaw/openclaw.json.
-   * Falls back to 18789 if the file is missing or the field is absent.
+   * Returns the last-known gateway port (populated by _update() via host.readConfig()).
+   * Falls back to 18789 before the first update completes.
    */
   private _getConfiguredPort(): number {
-    try {
-      const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const config = JSON.parse(raw) as Record<string, unknown>;
-      const gateway = config['gateway'] as Record<string, unknown> | undefined;
-      const p = gateway?.['port'] ?? config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
-      const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
-      return Number.isFinite(n) && n > 0 && n < 65536 ? n : 18789;
-    } catch {
-      return 18789;
-    }
+    return this._cachedGatewayPort;
   }
 
   /** Raw HTTP probe against the configured port — no _commandAction guard. Used by the polling loop. */
@@ -854,13 +874,16 @@ export class HomePanel {
   }
 
   /**
-   * Fast synchronous check — ~/.openclaw/openclaw.json is the single
-   * definitive signal that OpenClaw is installed and initialised.
+   * Check — openclaw.json is the single definitive signal that OpenClaw
+   * is installed and initialised on the active host.
    */
-  private _quickInstallCheck(): boolean {
-    // Config file is the sole source of truth — no config means not installed,
-    // even if the binary is still on PATH.
-    return fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
+  private async _quickInstallCheck(): Promise<boolean> {
+    try {
+      const cfgPath = await this._host.getConfigPath();
+      return this._host.exists(cfgPath);
+    } catch {
+      return false;
+    }
   }
 
   private _startPolling(): void {
@@ -874,7 +897,7 @@ export class HomePanel {
       // No process spawn — just cheap stat calls. If the result differs from
       // the last known state, do a full _update() to confirm and re-render.
       if (this._pollTick % 2 === 0) {
-        const nowInstalled = this._quickInstallCheck();
+        const nowInstalled = await this._quickInstallCheck();
         if (nowInstalled !== this._lastInstalledState) {
           void this._update();
           return;
@@ -1200,26 +1223,21 @@ export class HomePanel {
     // openclaw requires Node.js >= 22. Check the active version and auto-install
     // via nvm if needed — the editor pins v20, so users may only have v20 active.
     if (process.platform !== 'win32') {
-      const nodeVerRaw = await new Promise<string>(resolve => {
-        cp.exec('node --version', { env, timeout: 5000 }, (err, stdout) =>
-          resolve((stdout || '').toString().trim())
-        );
-      });
+      const nodeResult = await this._host.exec('node', ['--version'], { env: env as Record<string, string | undefined>, timeout: 5000 });
+      const nodeVerRaw = nodeResult.stdout.trim();
       const nodeMinor = parseInt((nodeVerRaw.match(/^v?(\d+)/) || [])[1] || '0', 10);
       if (nodeMinor < 22) {
         const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
         if (fs.existsSync(nvmSh)) {
           wizardPost(`Node.js ${nodeVerRaw || 'unknown'} detected — openclaw requires v22+. Installing Node.js 22 via nvm...\n`, false, false);
-          const nvmR = await new Promise<number>(resolve => {
-            const child = cp.spawn('bash', ['-c',
-              `. "${nvmSh}" && nvm install 22 && nvm use 22 && nvm alias default 22`
-            ], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-            child.stdout?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
-            child.stderr?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
-            child.on('close', code => resolve(code ?? 1));
-            child.on('error', () => resolve(1));
-          });
-          if (nvmR === 0) {
+          const nvmCode = await this._host.execStream(
+            'bash',
+            ['-c', `. "${nvmSh}" && nvm install 22 && nvm use 22 && nvm alias default 22`],
+            { env: env as Record<string, string | undefined> },
+            (d) => wizardPost(d, false, false),
+            (d) => wizardPost(d, false, false),
+          );
+          if (nvmCode === 0) {
             // Rebuild env so the new Node 22 bin is on PATH
             const nvmVersionsDir = path.join(os.homedir(), '.nvm', 'versions', 'node');
             const v22dirs = fs.existsSync(nvmVersionsDir)
@@ -1285,83 +1303,77 @@ export class HomePanel {
     writeLog(`\n=== _runSetup START provider=${data.provider} port=${port} ===\n`);
     wizardPost(isFree ? 'Installing Inference for MoltPilot...\nInstalling Inference for your new OpenClaw...\n' : 'Installing Inference for your new OpenClaw...\n', false, false);
 
-    await new Promise<void>(resolve => {
-      const child = cp.spawn(cliPath, args, {
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        ...(process.platform === 'win32' ? { shell: true, windowsHide: true } : {}),
-      });
-      child.stdout?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
-      child.stderr?.on('data', (d: Buffer) => wizardPost(d.toString(), false, false));
-      child.on('close', code => {
-        const ok = code === 0;
-        writeLog(`=== _runSetup END code=${code} ===\n`);
-        wizardPost(ok ? '\n✅ Setup complete!\n' : `\nSetup exited with code ${code}.\n`, true, ok);
-        if (ok) {
-          if (isFree) {
-            // Write local free-tier marker (no remote enforcement).
-            try {
-              const occDir = path.join(os.homedir(), '.occ');
-              if (!fs.existsSync(occDir)) fs.mkdirSync(occDir, { recursive: true });
-              fs.writeFileSync(
-                path.join(occDir, 'moltpilot-tier.json'),
-                JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
-              );
-            } catch { /* non-fatal */ }
-            // Patch openclaw.json to inject correct cost/context metadata for occ-legacy.
-            // openclaw onboard writes the model with null/zero values; we fix them here.
-            try {
-              const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-              const raw = fs.readFileSync(configPath, 'utf-8');
-              const cfg = JSON.parse(raw) as Record<string, unknown>;
-              // Recursively find any model object with id === OCC_LEGACY_MODEL_ID and patch it.
-              const patchModel = (obj: unknown): boolean => {
-                if (!obj || typeof obj !== 'object') return false;
-                if (Array.isArray(obj)) {
-                  for (const item of obj) {
-                    if (patchModel(item)) return true;
-                  }
-                  return false;
-                }
-                const o = obj as Record<string, unknown>;
-                if (o['id'] === OCC_LEGACY_MODEL_ID) {
-                  o['name']          = OCC_LEGACY_MODEL_NAME;
-                  o['reasoning']     = false;
-                  o['input']         = ['text'];
-                  o['cost']          = { ...OCC_LEGACY_COST };
-                  o['contextWindow'] = OCC_LEGACY_CONTEXT_WINDOW;
-                  o['maxTokens']     = OCC_LEGACY_MAX_TOKENS;
-                  return true;
-                }
-                for (const v of Object.values(o)) { patchModel(v); }
-                return false;
-              };
-              patchModel(cfg);
-              fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
-            } catch { /* non-fatal — openclaw.json may not exist yet */ }
-          }
-          setTimeout(() => {
-            HomePanel.refresh();
-            if (isFree) {
-              vscode.commands.executeCommand('openclaw.openWorkspace');
+    let exitCode: number;
+    try {
+      exitCode = await this._host.execStream(
+        cliPath, args,
+        {
+          env: env as Record<string, string | undefined>,
+          timeout: 120_000,
+          ...(process.platform === 'win32' ? { shell: true, windowsHide: true } : {}),
+        },
+        (d) => wizardPost(d, false, false),
+        (d) => wizardPost(d, false, false),
+      );
+    } catch (err) {
+      wizardPost(`Error: ${String(err)}\n`, true, false);
+      return;
+    }
+
+    const ok = exitCode === 0;
+    writeLog(`=== _runSetup END code=${exitCode} ===\n`);
+    wizardPost(ok ? '\n✅ Setup complete!\n' : `\nSetup exited with code ${exitCode}.\n`, true, ok);
+
+    if (ok) {
+      if (isFree) {
+        // Write local free-tier marker (extension-host local state — always local fs).
+        try {
+          const occDir = path.join(os.homedir(), '.occ');
+          if (!fs.existsSync(occDir)) { fs.mkdirSync(occDir, { recursive: true }); }
+          fs.writeFileSync(
+            path.join(occDir, 'moltpilot-tier.json'),
+            JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
+          );
+        } catch { /* non-fatal */ }
+        // Patch openclaw.json on the active host to inject correct cost/context metadata.
+        try {
+          const cfg = await this._host.readConfig() as Record<string, unknown>;
+          const patchModel = (obj: unknown): boolean => {
+            if (!obj || typeof obj !== 'object') return false;
+            if (Array.isArray(obj)) {
+              for (const item of obj) { if (patchModel(item)) return true; }
+              return false;
             }
-            // Give the dashboard time to render, then open a new chat asking AI to start the gateway.
-            // Set flag so the sidebar auto-closes once the gateway is confirmed running.
-            setTimeout(() => {
-              this._closeSidebarOnGatewayStart = true;
-              vscode.commands.executeCommand('void.openChatWithMessage',
-                'Run `openclaw gateway start` to start the OpenClaw gateway.',
-                'agent');
-            }, 1000);
-          }, 1500);
+            const o = obj as Record<string, unknown>;
+            if (o['id'] === OCC_LEGACY_MODEL_ID) {
+              o['name']          = OCC_LEGACY_MODEL_NAME;
+              o['reasoning']     = false;
+              o['input']         = ['text'];
+              o['cost']          = { ...OCC_LEGACY_COST };
+              o['contextWindow'] = OCC_LEGACY_CONTEXT_WINDOW;
+              o['maxTokens']     = OCC_LEGACY_MAX_TOKENS;
+              return true;
+            }
+            for (const v of Object.values(o)) { patchModel(v); }
+            return false;
+          };
+          patchModel(cfg);
+          await this._host.writeConfig(cfg);
+        } catch { /* non-fatal — openclaw.json may not exist yet */ }
+      }
+      setTimeout(() => {
+        HomePanel.refresh();
+        if (isFree) {
+          vscode.commands.executeCommand('openclaw.openWorkspace');
         }
-        resolve();
-      });
-      child.on('error', err => {
-        wizardPost(`Error: ${err.message}\n`, true, false);
-        resolve();
-      });
-    });
+        setTimeout(() => {
+          this._closeSidebarOnGatewayStart = true;
+          vscode.commands.executeCommand('void.openChatWithMessage',
+            'Run `openclaw gateway start` to start the OpenClaw gateway.',
+            'agent');
+        }, 1000);
+      }, 1500);
+    }
   }
 
   // ── Uninstall ──────────────────────────────────────────────────────────────
@@ -4033,107 +4045,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
   private async _testOpenClawCli(): Promise<{ ok: boolean; output?: string; error?: string; command: string }> {
-    if (process.platform === 'win32') {
-      // ── 1. Find openclaw.mjs (checks npm prefix + version-manager paths) ──────
-      const mjs = await this._findWindowsOpenClawMjs();
-      if (mjs) {
-        // ── 2. Find node.exe (PATH-first, then nvm/Volta/scoop, then hardcoded) ──
-        const nodeExe = await this._findWindowsNodeExe();
-        if (nodeExe) {
-          return this._spawnNodeMjs(nodeExe, mjs, `"${nodeExe}" "${mjs}" --version`);
-        }
-      }
-
-      // ── 3. .cmd / .exe shim fallback (npm prefix + scoop shims) ──────────────
-      const cmdPath = await this._findWindowsOpenClawCmd();
-      if (cmdPath) {
-        return new Promise(resolve => {
-          cp.execFile(
-            'cmd.exe', ['/c', cmdPath, '--version'],
-            { timeout: 30000, windowsHide: true, maxBuffer: 1024 * 1024 },
-            (error, stdout, stderr) => {
-              if (error) {
-                const timedOut = (error as any).signal === 'SIGTERM' || error.code == null;
-                resolve({
-                  ok: false,
-                  error: timedOut ? 'Timed out' : (stderr?.toString().trim() || `Exit ${error.code}`),
-                  command: `${cmdPath} --version`,
-                });
-              } else {
-                resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cmdPath} --version` });
-              }
-            }
-          );
-        });
-      }
-
-      return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
-    }
-
-    // ── Mac / Linux ──────────────────────────────────────────────────────────────
-    // Strategy: source nvm/nvm.sh first so the nvm-managed binary takes priority
-    // over any stale system install (e.g. /usr/local/bin/openclaw). Falls back to
-    // enumerating ~/.nvm/versions/node/*/bin/openclaw (newest version first),
-    // then the existing path-based search.
-    const home = os.homedir();
-    const nvmSh = path.join(home, '.nvm', 'nvm.sh');
-
-    // 1. Try sourcing nvm so it activates the default alias / current version.
-    if (fs.existsSync(nvmSh)) {
-      const nvmCmd = `bash -c '. "${nvmSh}" 2>/dev/null && openclaw --version 2>&1'`;
-      const nvmResult = await new Promise<{ ok: boolean; output?: string; error?: string; command: string }>(resolve => {
-        cp.exec(nvmCmd, { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
-          const out = (stdout || '').toString().trim();
-          // Extract just the version line (ignores nvm banner noise)
-          const line = out.split('\n').find(l => /\d/.test(l) && !l.startsWith('nvm') && !l.startsWith('Now')) || '';
-          if (!error && line) {
-            resolve({ ok: true, output: line.trim(), command: nvmCmd });
-          } else {
-            resolve({ ok: false, error: out || error?.message || 'not found', command: nvmCmd });
-          }
-        });
-      });
-      if (nvmResult.ok) return nvmResult;
-    }
-
-    // 2. Enumerate ~/.nvm/versions/node/*/bin/openclaw — newest node version first.
-    const nvmVersionsDir = path.join(home, '.nvm', 'versions', 'node');
-    if (fs.existsSync(nvmVersionsDir)) {
-      const nodeVersions = fs.readdirSync(nvmVersionsDir)
-        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true })); // newest first
-      for (const ver of nodeVersions) {
-        const candidate = path.join(nvmVersionsDir, ver, 'bin', 'openclaw');
-        if (fs.existsSync(candidate)) {
-          const result = await new Promise<{ ok: boolean; output?: string; error?: string; command: string }>(resolve => {
-            cp.execFile(candidate, ['--version'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-              const out = (stdout || stderr || '').toString().trim();
-              if (error || !out) resolve({ ok: false, error: out || error?.message, command: `${candidate} --version` });
-              else resolve({ ok: true, output: out, command: `${candidate} --version` });
-            });
-          });
-          if (result.ok) return result;
-        }
-      }
-    }
-
-    // 3. Fall back to path-based search.
-    const cliPath = await this._findOpenClawPath();
-    if (!cliPath) {
-      return { ok: false, error: 'openclaw not found', command: 'openclaw --version' };
-    }
-    return new Promise(resolve => {
-      cp.execFile(
-        cliPath, ['--version'],
-        { timeout: 15000, maxBuffer: 1024 * 1024, env: this._buildExecEnv() },
-        (error, stdout, stderr) => {
-          if (error) {
-            resolve({ ok: false, error: stderr?.toString().trim() || error.message || `Exit ${(error as any).code}`, command: `${cliPath} --version` });
-          } else {
-            resolve({ ok: true, output: (stdout || stderr || '').toString().trim(), command: `${cliPath} --version` });
-          }
-        }
-      );
-    });
+    return this._host.testOpenClawCli();
   }
 
   /**
@@ -4290,70 +4202,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
   private async _findOpenClawPath(): Promise<string | undefined> {
-    const cfgPath = vscode.workspace.getConfiguration('openclaw').get<string>('cliPath');
-    if (cfgPath && fs.existsSync(cfgPath)) return cfgPath;
-
-    const envPath = process.env.OPENCLAW_CLI;
-    if (envPath && fs.existsSync(envPath)) return envPath;
-
-    if (process.platform === 'win32') {
-      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-      const candidates = [
-        path.join(appData, 'npm', 'openclaw.cmd'),
-        path.join(appData, 'npm', 'openclaw.exe'),
-        path.join(appData, 'npm', 'openclaw.bat'),
-        path.join(appData, 'npm', 'openclaw.ps1'),
-      ];
-      for (const candidate of candidates) {
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    }
-
-    if (process.platform === 'win32') {
-      for (const probe of ['openclaw.cmd', 'openclaw.exe', 'openclaw.bat', 'openclaw.ps1', 'openclaw']) {
-        const result = await this._runCommand(`where ${probe}`, 2000);
-        if (!result.error && !result.notFound) {
-          const out = (result.stdout || '').trim();
-          if (out) {
-            const candidates = out
-              .split(/\r?\n/)
-              .map(l => l.trim().replace(/^"+|"+$/g, ''))
-              .filter(Boolean);
-            for (const candidate of candidates) {
-              const resolved = this._resolveWindowsCliPath(candidate);
-              if (fs.existsSync(resolved)) return resolved;
-            }
-          }
-        }
-      }
-    } else {
-      const result = await this._runCommand('which openclaw', 2000);
-      if (!result.error && !result.notFound) {
-        const out = (result.stdout || '').trim();
-        if (out) {
-          const candidates = out
-            .split(/\r?\n/)
-            .map(l => l.trim().replace(/^"+|"+$/g, ''))
-            .filter(Boolean);
-          for (const candidate of candidates) {
-            const resolved = this._resolveWindowsCliPath(candidate);
-            if (fs.existsSync(resolved)) return resolved;
-          }
-        }
-      }
-    }
-
-    const npmCandidates = await this._getNpmGlobalCliCandidates();
-    for (const candidate of npmCandidates) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-
-    const fallback = this._getCandidateCliPaths();
-    for (const candidate of fallback) {
-      if (fs.existsSync(candidate)) return candidate;
-    }
-
-    return undefined;
+    return this._host.findOpenClawPath();
   }
 
   private _getCandidateCliPaths(): string[] {
@@ -4449,59 +4298,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     });
   }
 
-  private _buildExecEnv() {
-    const env = { ...process.env };
-    const basePath = env.PATH || (env as any).Path || '';
-    const extra: string[] = [];
-    if (process.platform === 'win32') {
-      const appData = env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-      if (appData) extra.push(path.join(appData, 'npm'));
-      if (env.ProgramFiles) extra.push(path.join(env.ProgramFiles, 'nodejs'));
-      if (env.LOCALAPPDATA) extra.push(path.join(env.LOCALAPPDATA, 'Programs', 'nodejs'));
-      const systemRoot = env.SystemRoot || (env as any).WINDIR;
-      if (systemRoot) extra.push(path.join(systemRoot, 'System32'));
-    } else {
-      extra.push('/usr/local/bin', '/opt/homebrew/bin');
-      extra.push(path.join(os.homedir(), '.local', 'bin'));
-      extra.push(path.join(os.homedir(), '.npm-global', 'bin'));
-      extra.push(path.join(os.homedir(), '.openclaw', 'bin'));
-
-      // Add nvm-managed Node.js paths (newest version first)
-      const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), '.nvm');
-      const nvmVersionsDir = path.join(nvmDir, 'versions', 'node');
-      if (fs.existsSync(nvmVersionsDir)) {
-        try {
-          const versions = fs.readdirSync(nvmVersionsDir)
-            .filter(e => /^v?\d+/.test(e))
-            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-          for (const v of versions.slice(0, 3)) {
-            extra.push(path.join(nvmVersionsDir, v, 'bin'));
-          }
-        } catch { /* non-fatal */ }
-      }
-
-      // Add fnm paths (popular Node version manager on macOS)
-      const fnmDir = path.join(os.homedir(), '.local', 'share', 'fnm', 'node-versions');
-      if (fs.existsSync(fnmDir)) {
-        try {
-          const versions = fs.readdirSync(fnmDir)
-            .filter(e => /^v?\d+/.test(e))
-            .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-          for (const v of versions.slice(0, 3)) {
-            extra.push(path.join(fnmDir, v, 'installation', 'bin'));
-          }
-        } catch { /* non-fatal */ }
-      }
-
-      // Homebrew Node.js (macOS)
-      if (process.platform === 'darwin') {
-        extra.push('/opt/homebrew/opt/node/bin');
-        extra.push('/usr/local/opt/node/bin');
-      }
-    }
-    const sep = process.platform === 'win32' ? ';' : ':';
-    env.PATH = [...extra, basePath].filter(Boolean).join(sep);
-    (env as any).Path = env.PATH;
-    return env;
+  private _buildExecEnv(): Record<string, string | undefined> {
+    return this._host.buildExecEnv();
   }
 }
