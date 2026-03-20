@@ -80,6 +80,18 @@
 				"when": "true"
 			}
 		],
+		"viewsContainers": {
+			"activitybar": []
+		},
+		"views": {
+			"explorer": [
+				{
+					"id": "openclaw.hosts",
+					"name": "OpenClaw Hosts",
+					"when": "true"
+				}
+			]
+		},
 		"commands": [
 			{
 				"command": "openclaw.home",
@@ -104,6 +116,18 @@
 			{
 				"command": "openclaw.runWithSudo",
 				"title": "OCC: Run Command with Sudo"
+			},
+			{
+				"command": "openclaw.pickHost",
+				"title": "OpenClaw: Switch Host"
+			},
+			{
+				"command": "openclaw.setActiveHost",
+				"title": "OpenClaw: Set Active Host"
+			},
+			{
+				"command": "openclaw.refreshHost",
+				"title": "OpenClaw: Refresh Host Status"
 			}
 		]
 	},
