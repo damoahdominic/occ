@@ -13,6 +13,8 @@ export interface ExecOpts {
 	/** Bytes to pipe to stdin before closing it */
 	stdinData?: string;
 	windowsHide?: boolean;
+	/** Run via OS shell (required for .cmd/.bat shims on Windows) */
+	shell?: boolean;
 }
 
 export interface ExecResult {

@@ -286,37 +286,11 @@ export class DefaultLocalHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`gateway restart exited ${code}`); }
 	}
 
-	async gatewayReboot(onLog: LogFn): Promise<void> {
-		const p = await this.findOpenClawPath();
-		if (p) {
-			try {
-				const code = await this.execStream(p, ['gateway', 'reboot'], {}, onLog, onLog);
-				if (code === 0) return;
-			} catch { /* fall through to OS-level reboot */ }
-		}
-		// Fallback to OS-level reboot
-		if (process.platform === 'win32') {
-			onLog('openclaw gateway reboot unavailable — falling back to OS reboot');
-			await this.execStream('shutdown', ['/r', '/t', '0'], { windowsHide: true }, onLog, onLog);
-		} else {
-			onLog('openclaw gateway reboot unavailable — falling back to sudo reboot');
-			await this.execStream('sudo', ['reboot'], {}, onLog, onLog);
-		}
-	}
-
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
 		const p = await this.findOpenClawPath();
 		if (!p) { throw new Error('CLI not installed'); }
 		const code = await this.execStream(p, ['onboard', '--provider', params.provider, '--api-key', params.apiKey, '--port', params.port], {}, onLog, onLog);
 		if (code !== 0) { throw new Error(`onboard exited ${code}`); }
-	}
-
-	gatewayHostPort(): number | undefined {
-		return undefined; // local host: no port remapping
-	}
-
-	localStateDir(): string {
-		return path.join(os.homedir(), '.openclaw');
 	}
 
 	buildExecEnv(): Record<string, string | undefined> {
