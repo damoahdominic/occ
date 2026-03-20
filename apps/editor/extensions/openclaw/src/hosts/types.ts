@@ -13,8 +13,6 @@ export interface ExecOpts {
 	/** Bytes to pipe to stdin before closing it */
 	stdinData?: string;
 	windowsHide?: boolean;
-	/** Run via OS shell (required for .cmd/.bat shims on Windows) */
-	shell?: boolean;
 }
 
 export interface ExecResult {
@@ -122,8 +120,6 @@ export interface DockerConnection {
 	dockerHost?: string;
 	shell?: string;
 	portMappings?: { gateway?: number };
-	/** Host-side directory mounted as /home/node/.openclaw inside the container (e.g. ~/Desktop/occ-state-dir). */
-	localMountPath?: string;
 }
 
 export interface SSHConnection {
@@ -256,21 +252,9 @@ export interface HostConnection extends vscode.Disposable {
 	gatewayStart(onLog: LogFn): Promise<void>;
 	gatewayStop(onLog: LogFn): Promise<void>;
 	gatewayRestart(onLog: LogFn): Promise<void>;
-	gatewayReboot(onLog: LogFn): Promise<void>;
 
 	// ── Full install+onboard ──
 	runSetup(params: SetupParams, onLog: LogFn): Promise<void>;
-
-	// ── Port override (for tunnelled connections, e.g. Docker) ──
-	/** Host-side port to poll for gateway health. Overrides the port read from openclaw.json. */
-	gatewayHostPort?(): number | undefined;
-
-	// ── Local filesystem paths ──
-	/**
-	 * Host-side path to the OpenClaw state directory.
-	 * Local: ~/.openclaw   Docker: ~/Desktop/occ-state-dir (or whatever is mounted)
-	 */
-	localStateDir?(): string;
 
 	// ── Environment ──
 	buildExecEnv(): Record<string, string | undefined>;
@@ -314,6 +298,5 @@ export interface OpenClawCoreAPI {
 
 	showHostPicker(): Promise<string | undefined>;
 	showAddHostWizard(type?: HostType): Promise<HostEntry | undefined>;
-	addHost(entry: Omit<HostEntry, 'id' | 'createdAt'>): Promise<HostEntry>;
 	refreshHost(id: string): Promise<void>;
 }
