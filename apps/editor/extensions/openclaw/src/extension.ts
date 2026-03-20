@@ -7,6 +7,11 @@ import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
 import { stopConfigProxy, getDashboardUrl } from './panels/config';
+import { HostRegistry } from './hosts/registry';
+import { HostManager } from './hosts/manager';
+import { HostStatusBarItem } from './hosts/statusbar';
+import { HostTreeProvider } from './hosts/tree';
+import type { OpenClawCoreAPI } from './hosts/types';
 
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -510,7 +515,40 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
   return () => {}; // spend is a no-op — kept so call sites don't break
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export async function activate(context: vscode.ExtensionContext): Promise<OpenClawCoreAPI> {
+  // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
+  const hostRegistry = new HostRegistry();
+  await hostRegistry.init();
+  const hostManager = new HostManager(hostRegistry);
+  context.subscriptions.push(hostRegistry, hostManager);
+
+  // Status bar: shows active host name
+  const hostStatusBar = new HostStatusBarItem(hostManager);
+  context.subscriptions.push(hostStatusBar);
+
+  // Tree view: lists all registered hosts
+  const hostTreeProvider = new HostTreeProvider(hostManager);
+  const hostTreeView = vscode.window.createTreeView('openclaw.hosts', {
+    treeDataProvider: hostTreeProvider,
+    showCollapseAll: false,
+  });
+  context.subscriptions.push(hostTreeView, hostTreeProvider);
+
+  // Host management commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openclaw.pickHost', async () => {
+      const id = await hostManager.showHostPicker();
+      if (id) { await hostManager.setActiveHost(id); }
+    }),
+    vscode.commands.registerCommand('openclaw.setActiveHost', async (id: string) => {
+      await hostManager.setActiveHost(id);
+    }),
+    vscode.commands.registerCommand('openclaw.refreshHost', async () => {
+      const activeId = hostRegistry.getActiveHostId();
+      await hostManager.refreshHost(activeId);
+    }),
+  );
+
   // Inference balance bar (shown at bottom-right, tracks $1.00 free budget).
   const spendBalance = initBalanceBar(context);
 
@@ -799,6 +837,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   setTimeout(() => {
     HomePanel.createOrShow(context.extensionUri);
   }, 500);
+
+  // Return OpenClawCoreAPI so adapter extensions can register their adapters.
+  return hostManager;
 }
 
 export function deactivate() {
