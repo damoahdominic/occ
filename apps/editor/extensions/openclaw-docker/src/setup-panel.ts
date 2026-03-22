@@ -142,6 +142,7 @@ export class DockerSetupPanel {
       this._statusController = new StatusPanelController(this._panel, this._homeUri, host);
     }
     await this._statusController.show();
+    this._panel.title = `OCC Home {Docker:${HOST_PORT}}`;
   }
 
   // ── Step 1: Docker preflight ──────────────────────────────────────────────
