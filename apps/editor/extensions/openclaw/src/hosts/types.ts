@@ -258,6 +258,10 @@ export interface HostConnection extends vscode.Disposable {
 	// ── Full install+onboard ──
 	runSetup(params: SetupParams, onLog: LogFn): Promise<void>;
 
+	// ── Port override (for tunnelled connections, e.g. Docker) ──
+	/** Host-side port to poll for gateway health. Overrides the port read from openclaw.json. */
+	gatewayHostPort?(): number | undefined;
+
 	// ── Environment ──
 	buildExecEnv(): Record<string, string | undefined>;
 }
