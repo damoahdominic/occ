@@ -4,23 +4,16 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
-import { StatusPanelController, setActiveOpenClawWorkspaceFolder } from '../../openclaw/src/panels/statusController';
-
-const IMAGE = 'ghcr.io/openclaw/openclaw:latest';
-const CONTAINER = 'occ-openclaw';
-const HOST_PORT = 18790;
-const CONTAINER_PORT = 18790;
-const STATE_DIR = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
-const VOLUME_MOUNT = `${STATE_DIR}:/home/node/.openclaw`;
+import { StatusPanelController } from '../../openclaw/src/panels/statusController';
 
 export class DockerSetupPanel {
   public static currentPanel: DockerSetupPanel | undefined;
 
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
+  private _dockerWorkspaceHostPath: string | undefined;
   private _disposables: vscode.Disposable[] = [];
   private _statusController: StatusPanelController | undefined;
-  private _disposed = false;
 
   private get _homeUri(): vscode.Uri {
     const homeExt = vscode.extensions.getExtension('openclaw.home');
@@ -66,7 +59,8 @@ export class DockerSetupPanel {
     this._panel = panel;
     this._extensionUri = extensionUri;
 
-    void this._initHtml(iconUri);
+    const webviewIconUri = panel.webview.asWebviewUri(iconUri).toString();
+    this._panel.webview.html = this._getHtml(webviewIconUri);
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
@@ -80,14 +74,18 @@ export class DockerSetupPanel {
           case 'dockerPreflightCheck':
             await this._handleDockerPreflight();
             break;
-          case 'dockerPullImage':
-            await this._handlePullImage();
+          case 'dockerFindOrCreate':
+            await this._handleDockerFindOrCreate();
             break;
-          case 'dockerOnboard':
-            await this._handleOnboard();
+          case 'dockerInstallCli':
+            await this._handleDockerInstallCli();
             break;
-          case 'dockerLaunchGateway':
-            await this._handleLaunchGateway();
+          case 'dockerRunOnboard':
+            await this._handleDockerConfigure(
+              msg.provider as string,
+              msg.apiKey as string,
+              msg.port as string,
+            );
             break;
           case 'closePanel':
             this.dispose();
@@ -105,8 +103,6 @@ export class DockerSetupPanel {
   }
 
   public dispose(): void {
-    if (this._disposed) return;
-    this._disposed = true;
     DockerSetupPanel.currentPanel = undefined;
     this._statusController?.dispose();
     this._statusController = undefined;
@@ -117,80 +113,19 @@ export class DockerSetupPanel {
     }
   }
 
-  /** On open: jump straight to status panel if the container is already set up, else show wizard. */
-  private async _initHtml(iconUri: vscode.Uri): Promise<void> {
-    const webviewIconUri = this._panel.webview.asWebviewUri(iconUri).toString();
-
-    // Quick synchronous check — is the container running at all?
-    const containerRunning = (() => {
-      try {
-        const result = cp.spawnSync(
-          'docker',
-          ['ps', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.Status}}'],
-          { timeout: 5000, windowsHide: true },
-        );
-        const st = (result.stdout?.toString() ?? '').trim();
-        return st.length > 0 && st.toLowerCase().startsWith('up');
-      } catch { return false; }
-    })();
-
-    if (containerRunning) {
-      // Health check: config file at the known path is the source of truth.
-      const configCheck = cp.spawnSync(
-        'docker',
-        ['exec', CONTAINER, 'test', '-f', '/home/node/.openclaw/openclaw.json'],
-        { timeout: 5000, windowsHide: true },
-      );
-      const isConfigured = configCheck.status === 0;
-
-      if (isConfigured) {
-        // Show a loading placeholder immediately so the panel isn't blank
-        // while the async status checks (docker exec calls) run in the background.
-        this._panel.webview.html = this._getLoadingHtml(webviewIconUri);
-        void this._showStatusPanel().catch(() => {
-          // If status panel fails to load, fall back to the wizard so the user
-          // isn't stuck looking at a blank / loading screen.
-          if (!this._disposed) {
-            this._panel.webview.html = this._getHtml(webviewIconUri);
-          }
-        });
-        return;
-      }
-
-      // Container running but config missing — it's broken. Delete it and restart.
-      cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
-    }
-
-    // Container not running (or was deleted above) — show the setup wizard.
-    this._panel.webview.html = this._getHtml(webviewIconUri);
-  }
-
   private async _showStatusPanel(): Promise<void> {
     if (!this._statusController) {
       const { DockerHostConnection } = await import('./connection');
       const host = new DockerHostConnection(
-        { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: HOST_PORT }, localMountPath: STATE_DIR },
-        CONTAINER,
+        { type: 'docker', containerLabel: 'occ-openclaw', portMappings: { gateway: 18789 } },
+        'occ-openclaw',
       );
-      this._statusController = new StatusPanelController(
-        this._panel,
-        this._homeUri,
-        host,
-        () => {
-          // Disconnect: clear binding, dispose this panel, reopen the host picker (never auto-route).
-          this.dispose();
-          void vscode.commands.executeCommand('openclaw.home.picker');
-        },
-      );
+      this._statusController = new StatusPanelController(this._panel, this._homeUri, host);
     }
     await this._statusController.show();
-    this._panel.title = `OCC Home {Docker:${HOST_PORT}}`;
-    void vscode.commands.executeCommand('occ.window.setHost', {
-      type: 'docker', hostId: `docker:${CONTAINER}`, port: HOST_PORT, label: `Docker (${CONTAINER})`,
-    });
   }
 
-  // ── Step 1: Docker preflight ──────────────────────────────────────────────
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   private async _handleDockerPreflight(): Promise<void> {
     try {
@@ -222,75 +157,172 @@ export class DockerSetupPanel {
     }
   }
 
-  // ── Step 2: Pull image + create state dir ─────────────────────────────────
-
-  private async _handlePullImage(): Promise<void> {
+  private async _handleDockerFindOrCreate(): Promise<void> {
     const log = (text: string, isErr = false) => {
       try { this._panel.webview.postMessage({ type: 'dockerLog', text, isErr }); } catch { /* ignore */ }
-    };
-    const logCmd = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'dockerLog', text, isCmd: true }); } catch { /* ignore */ }
     };
     const fail = (text: string) => {
       try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
     };
 
     try {
-      logCmd(`$ docker pull ${IMAGE}\n`);
-      log(`Pulling ${IMAGE}...\n`);
-      const pullCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', ['pull', IMAGE], { windowsHide: true });
-        proc.stdout.on('data', (d: Buffer) => log(d.toString()));
-        proc.stderr.on('data', (d: Buffer) => log(d.toString()));
-        proc.on('close', (code) => resolve(code ?? -1));
-        proc.on('error', () => resolve(-1));
-      });
-      if (pullCode !== 0) { fail(`Failed to pull ${IMAGE}. Check your internet connection.`); return; }
-      log(`\n✓ Image ready\n`);
+      // Check if container exists (running or stopped)
+      const check = cp.spawnSync('docker', ['ps', '-a', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'], { timeout: 8000, windowsHide: true });
+      const status = check.stdout?.toString().trim() ?? '';
 
-      // Ensure state directory exists on the host
-      try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch { /* ok */ }
-      log(`✓ State dir: ${STATE_DIR}\n`);
+      if (status) {
+        if (status.toLowerCase().startsWith('up')) {
+          log('✓ Found occ-openclaw — already running\n');
+        } else {
+          log('Found occ-openclaw (stopped) — starting...\n');
+          const start = cp.spawnSync('docker', ['start', 'occ-openclaw'], { timeout: 15000, windowsHide: true });
+          if (start.status !== 0) {
+            fail(`Failed to start container: ${start.stderr?.toString().trim() ?? 'unknown error'}`);
+            return;
+          }
+          log('✓ Container started\n');
+        }
+      } else {
+        // Pull image
+        log('Container not found — pulling node:22-slim...\n');
+        const pullCode = await new Promise<number>((resolve) => {
+          const proc = cp.spawn('docker', ['pull', 'node:22-slim'], { windowsHide: true });
+          proc.stdout.on('data', (d: Buffer) => log(d.toString()));
+          proc.stderr.on('data', (d: Buffer) => log(d.toString()));
+          proc.on('close', (code) => resolve(code ?? -1));
+          proc.on('error', () => resolve(-1));
+        });
+        if (pullCode !== 0) { fail('Failed to pull node:22-slim. Check your internet connection.'); return; }
 
-      try { this._panel.webview.postMessage({ type: 'dockerPullDone' }); } catch { /* ignore */ }
+        // Prepare state dir on host Desktop (mounted as entire .openclaw dir in container)
+        const wsDir = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+        try { fs.mkdirSync(wsDir, { recursive: true }); } catch { /* ok */ }
+        this._dockerWorkspaceHostPath = wsDir;
+
+        // Create container with full openclaw state dir mounted
+        log('\nCreating occ-openclaw container...\n');
+        const createCode = await new Promise<number>((resolve) => {
+          const proc = cp.spawn('docker', [
+            'run', '-d',
+            '--name', 'occ-openclaw',
+            '--restart', 'unless-stopped',
+            '-p', '18789:18789',
+            '-v', `${wsDir}:/root/.openclaw`,
+            'node:22-slim',
+            'tail', '-f', '/dev/null',
+          ], { windowsHide: true });
+          proc.stdout.on('data', (d: Buffer) => log(d.toString()));
+          proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
+          proc.on('close', (code) => resolve(code ?? -1));
+          proc.on('error', () => resolve(-1));
+        });
+        if (createCode !== 0) { fail('Failed to create occ-openclaw container.'); return; }
+        log('✓ Container created\n');
+      }
+
+      try { this._panel.webview.postMessage({ type: 'dockerContainerReady' }); } catch { /* ignore */ }
     } catch (err) {
       fail(String(err));
     }
   }
 
-  // ── Step 3: Onboard (one-shot container) ──────────────────────────────────
-
-  private async _handleOnboard(): Promise<void> {
+  private async _handleDockerInstallCli(): Promise<void> {
     const log = (text: string, isErr = false) => {
-      try { this._panel.webview.postMessage({ type: 'onboardLog', text, isErr }); } catch { /* ignore */ }
-    };
-    const logCmd = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'onboardLog', text, isCmd: true }); } catch { /* ignore */ }
+      try { this._panel.webview.postMessage({ type: 'dockerLog', text, isErr }); } catch { /* ignore */ }
     };
     const fail = (text: string) => {
       try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
     };
 
     try {
-      logCmd(`$ docker run --rm \\\n    -v ${VOLUME_MOUNT} \\\n    ${IMAGE} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${CONTAINER_PORT}\n`);
-      log('Running OpenClaw onboard in container...\n');
+      // Check if already installed
+      log('Checking for OpenClaw CLI in container...\n');
+      const check = cp.spawnSync('docker', ['exec', 'occ-openclaw', 'which', 'openclaw'], { timeout: 8000, windowsHide: true });
+      const alreadyInstalled = check.status === 0 && check.stdout.toString().trim().length > 0;
+
+      if (!alreadyInstalled) {
+        // Ensure curl is available then run installer
+        log('Installing curl and OpenClaw...\n');
+        const installCode = await new Promise<number>((resolve) => {
+          const proc = cp.spawn('docker', [
+            'exec', 'occ-openclaw',
+            'bash', '-c',
+            'apt-get update -qq 2>&1 && apt-get install -y -qq curl 2>&1 && curl -fsSL https://get.openclaw.sh | bash',
+          ], { windowsHide: true });
+          proc.stdout.on('data', (d: Buffer) => log(d.toString()));
+          proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
+          proc.on('close', (code) => resolve(code ?? -1));
+          proc.on('error', () => resolve(-1));
+        });
+        if (installCode !== 0) { fail('OpenClaw installation failed. See the log above for details.'); return; }
+        log('\n✓ OpenClaw installed\n');
+      } else {
+        log('✓ OpenClaw already installed — skipping\n');
+      }
+
+      // Register docker host and set as active
+      log('\nRegistering Docker host...\n');
+      const entry = await this._coreAPI.addHost({
+        type: 'docker',
+        label: 'Docker (occ-openclaw)',
+        connection: { type: 'docker', containerLabel: 'occ-openclaw', portMappings: { gateway: 18789 } },
+        lastStatus: 'online',
+      });
+      await this._coreAPI.setActiveHost(entry.id);
+
+      // Ensure workspace host path is set (existing container scenario)
+      if (!this._dockerWorkspaceHostPath) {
+        this._dockerWorkspaceHostPath = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+        try { fs.mkdirSync(this._dockerWorkspaceHostPath, { recursive: true }); } catch { /* ok */ }
+      }
+
+      // Open the state dir as a workspace folder
+      const wsUri = vscode.Uri.file(this._dockerWorkspaceHostPath);
+      vscode.workspace.updateWorkspaceFolders(
+        vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders.length : 0,
+        null,
+        { uri: wsUri, name: 'occ-state-dir' },
+      );
+
+      log('✓ Done — loading setup...\n');
+      try { this._panel.webview.postMessage({ type: 'dockerInstallDone' }); } catch { /* ignore */ }
+    } catch (err) {
+      fail(String(err));
+    }
+  }
+
+  private async _handleDockerConfigure(provider: string, apiKey: string, port: string): Promise<void> {
+    const log = (text: string, isErr = false) => {
+      try { this._panel.webview.postMessage({ type: 'configureLog', text, isErr }); } catch { /* ignore */ }
+    };
+    const fail = (text: string) => {
+      try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
+    };
+
+    const providerFlags: Record<string, string[]> = {
+      anthropic:  ['--auth-choice', 'apiKey',             '--anthropic-api-key',   apiKey],
+      openai:     ['--auth-choice', 'openai-api-key',     '--openai-api-key',      apiKey],
+      openrouter: ['--auth-choice', 'openrouter-api-key', '--openrouter-api-key',  apiKey],
+      gemini:     ['--auth-choice', 'gemini-api-key',     '--gemini-api-key',      apiKey],
+    };
+    const flags = providerFlags[provider];
+    if (!flags) { fail(`Unknown provider: ${provider}`); return; }
+
+    const gwPort = /^\d+$/.test(port) ? port : '18789';
+    const args = [
+      'onboard',
+      '--non-interactive', '--accept-risk',
+      '--flow', 'quickstart',
+      '--gateway-auth', 'token',
+      '--gateway-port', gwPort,
+      '--skip-channels', '--skip-skills', '--skip-health',
+      ...flags,
+    ];
+
+    try {
+      log('Configuring OpenClaw...\n');
       const code = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', [
-          'run', '--rm',
-          '-v', VOLUME_MOUNT,
-          IMAGE,
-          'openclaw', 'onboard',
-          '--non-interactive', '--accept-risk',
-          '--flow', 'quickstart',
-          '--auth-choice', 'custom-api-key',
-          '--custom-base-url', 'https://occ.mba.sh/v1',
-          '--custom-api-key', '',
-          '--custom-model-id', 'occ-legacy',
-          '--custom-compatibility', 'openai',
-          '--gateway-auth', 'token',
-          '--gateway-port', String(CONTAINER_PORT),
-          '--skip-channels', '--skip-skills', '--skip-health',
-        ], { windowsHide: true });
+        const proc = cp.spawn('docker', ['exec', 'occ-openclaw', 'openclaw', ...args], { windowsHide: true });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
         proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
         proc.on('close', (c) => resolve(c ?? -1));
@@ -298,120 +330,12 @@ export class DockerSetupPanel {
       });
 
       if (code !== 0) {
-        fail('Onboard failed. See the log above for details.');
+        fail('Setup failed. See the log above for details.');
         return;
       }
 
-      // Patch occ-legacy model metadata in the config written to STATE_DIR
-      log('\nPatching model config...\n');
-      try {
-        const cfgPath = path.join(STATE_DIR, 'openclaw.json');
-        if (fs.existsSync(cfgPath)) {
-          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
-          const OCC_LEGACY_COST = { input: 0.0000006, output: 0.000003, cacheRead: 0.0000001, cacheWrite: 0 };
-          const patchModel = (obj: unknown): void => {
-            if (!obj || typeof obj !== 'object') return;
-            if (Array.isArray(obj)) { obj.forEach(patchModel); return; }
-            const o = obj as Record<string, unknown>;
-            if (o['id'] === 'occ-legacy') {
-              o['name']          = 'occ-legacy';
-              o['reasoning']     = false;
-              o['input']         = ['text'];
-              o['cost']          = { ...OCC_LEGACY_COST };
-              o['contextWindow'] = 262144;
-              o['maxTokens']     = 262144;
-              return;
-            }
-            Object.values(o).forEach(patchModel);
-          };
-          patchModel(cfg);
-          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
-        }
-      } catch { /* non-fatal */ }
-
-      // Write moltpilot-tier.json into the state dir
-      try {
-        fs.writeFileSync(
-          path.join(STATE_DIR, 'moltpilot-tier.json'),
-          JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
-        );
-      } catch { /* non-fatal */ }
-
-      log('\n✓ Onboard complete!\n');
-      try { this._panel.webview.postMessage({ type: 'onboardDone' }); } catch { /* ignore */ }
-    } catch (err) {
-      fail(String(err));
-    }
-  }
-
-  // ── Step 4: Launch persistent gateway container ───────────────────────────
-
-  private async _handleLaunchGateway(): Promise<void> {
-    const log = (text: string, isErr = false) => {
-      try { this._panel.webview.postMessage({ type: 'launchLog', text, isErr }); } catch { /* ignore */ }
-    };
-    const logCmd = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'launchLog', text, isCmd: true }); } catch { /* ignore */ }
-    };
-    const fail = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
-    };
-
-    try {
-      // Remove any existing stopped container with this name
-      const existing = cp.spawnSync('docker', ['ps', '-a', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.Status}}'], { timeout: 8000, windowsHide: true });
-      const existingStatus = existing.stdout?.toString().trim() ?? '';
-
-      if (existingStatus) {
-        if (existingStatus.toLowerCase().startsWith('up')) {
-          // Health check: config file must exist before we consider the container healthy.
-          const configCheck = cp.spawnSync(
-            'docker',
-            ['exec', CONTAINER, 'test', '-f', '/home/node/.openclaw/openclaw.json'],
-            { timeout: 5000, windowsHide: true },
-          );
-          if (configCheck.status === 0) {
-            log(`✓ Container ${CONTAINER} is already running and configured\n`);
-            try { this._panel.webview.postMessage({ type: 'launchDone' }); } catch { /* ignore */ }
-            setTimeout(() => void this._showStatusPanel(), 1200);
-            return;
-          }
-          // Running but not configured — delete and restart from Step 2.
-          log(`Container is running but not configured — removing and restarting setup...\n`);
-          cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
-          try { this._panel.webview.postMessage({ type: 'dockerContainerBroken' }); } catch { /* ignore */ }
-          return;
-        }
-        log(`Removing existing stopped container...\n`);
-        cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
-      }
-
-      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${HOST_PORT}:${CONTAINER_PORT} \\\n    -v ${VOLUME_MOUNT} \\\n    ${IMAGE} \\\n    tail -f /dev/null\n`);
-      log(`Starting ${CONTAINER} container (port ${HOST_PORT}:${CONTAINER_PORT})...\n`);
-      const launchCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', [
-          'run', '-d',
-          '--name', CONTAINER,
-          '--restart', 'unless-stopped',
-          '-p', `${HOST_PORT}:${CONTAINER_PORT}`,
-          '-v', VOLUME_MOUNT,
-          IMAGE,
-          'tail', '-f', '/dev/null',
-        ], { windowsHide: true });
-        proc.stdout.on('data', (d: Buffer) => log(d.toString()));
-        proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
-        proc.on('close', (c) => resolve(c ?? -1));
-        proc.on('error', () => resolve(-1));
-      });
-
-      if (launchCode !== 0) { fail('Failed to launch gateway container.'); return; }
-      log(`✓ Container started\n`);
-
-      // Swap workspace folder to show STATE_DIR only (removes ~/.openclaw if present)
-      try { setActiveOpenClawWorkspaceFolder(STATE_DIR); } catch { /* non-fatal */ }
-
-      log('\n✓ Setup complete!\n');
-      try { this._panel.webview.postMessage({ type: 'launchDone' }); } catch { /* ignore */ }
+      log('\n\u2713 Setup complete!\n');
+      try { this._panel.webview.postMessage({ type: 'configureDone' }); } catch { /* ignore */ }
       setTimeout(() => void this._showStatusPanel(), 1800);
     } catch (err) {
       fail(String(err));
@@ -419,40 +343,6 @@ export class DockerSetupPanel {
   }
 
   // ── HTML ───────────────────────────────────────────────────────────────────
-
-  private _getLoadingHtml(iconUri: string): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-      background: #1a1a1a; color: #888;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-height: 100vh; gap: 16px;
-    }
-    .logo { width: 44px; height: 44px; opacity: 0.5; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner {
-      width: 20px; height: 20px;
-      border: 2px solid rgba(255,255,255,0.1);
-      border-top-color: rgba(220,40,40,0.6);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    p { font-size: 12px; color: #555; }
-  </style>
-</head>
-<body>
-  <img class="logo" src="${iconUri}" alt="OpenClaw" />
-  <div class="spinner"></div>
-  <p>Connecting to Docker container&hellip;</p>
-</body>
-</html>`;
-  }
 
   private _getHtml(iconUri: string): string {
     return `<!DOCTYPE html>
@@ -503,14 +393,13 @@ export class DockerSetupPanel {
     .log-wrap.visible { display: block; }
     .log-box {
       background: #0d0d0d; border: 1px solid #222; border-radius: 8px;
-      padding: 12px 14px; height: 200px; overflow-y: auto;
+      padding: 12px 14px; height: 180px; overflow-y: auto;
       font-family: 'SF Mono', 'Fira Mono', 'Consolas', monospace;
       font-size: 11px; line-height: 1.6; text-align: left; color: #888;
     }
     .log-line { white-space: pre-wrap; word-break: break-all; }
     .log-line.ok { color: #4ade80; }
     .log-line.err { color: #f87171; }
-    .log-line.cmd { color: #60a5fa; opacity: 0.75; margin-bottom: 2px; }
 
     /* Spinner */
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -534,11 +423,45 @@ export class DockerSetupPanel {
     }
     .btn-retry:hover { background: #b91c1c; }
     .done-msg { font-size: 13px; color: #4ade80; font-weight: 600; }
+
+    /* Step 4: Configure AI */
+    .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; width: 100%; }
+    .prov-card {
+      background: rgba(255,255,255,0.03); border: 1px solid #2b2b2b;
+      border-radius: 8px; padding: 12px 10px; cursor: pointer;
+      text-align: left; transition: border-color 0.15s, background 0.15s;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .prov-card:hover { border-color: #444; background: rgba(255,255,255,0.05); }
+    .prov-card.selected { border-color: #dc2828; background: rgba(220,40,40,0.08); }
+    .prov-label { font-size: 12px; font-weight: 600; color: #e0e0e0; }
+    .prov-hint { font-size: 10px; color: #666; }
+    .field-label { font-size: 11px; color: #888; margin-bottom: 5px; text-align: left; width: 100%; }
+    .key-input {
+      width: 100%; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
+      color: #e0e0e0; font-size: 13px; padding: 9px 12px; outline: none;
+      box-sizing: border-box; font-family: monospace; margin-bottom: 10px;
+    }
+    .key-input:focus { border-color: #dc2828; }
+    .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; width: 100%; }
+    .port-label { font-size: 12px; color: #888; white-space: nowrap; }
+    .port-input {
+      width: 90px; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
+      color: #e0e0e0; font-size: 13px; padding: 7px 10px; outline: none;
+    }
+    .port-input:focus { border-color: #dc2828; }
+    .btn-primary {
+      width: 100%; background: #dc2828; border: none; color: #fff;
+      font-size: 14px; font-weight: 600; padding: 11px; border-radius: 8px;
+      cursor: pointer; transition: background 0.15s; font-family: inherit;
+    }
+    .btn-primary:hover { background: #b91c1c; }
+    .btn-primary:disabled { background: #7a1515; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
-  <div class="title">Docker Setup</div>
+  <div class="title">Docker Installation</div>
   <div class="sub">Setting up OpenClaw in a Docker container</div>
 
   <!-- Step timeline -->
@@ -549,15 +472,15 @@ export class DockerSetupPanel {
     </div>
     <div class="step-item pending" id="s2">
       <div class="step-dot">2</div>
-      <div class="step-label">Pull<br>Image</div>
+      <div class="step-label">Container<br>Setup</div>
     </div>
     <div class="step-item pending" id="s3">
       <div class="step-dot">3</div>
-      <div class="step-label">Onboard<br>Config</div>
+      <div class="step-label">Install<br>CLI</div>
     </div>
     <div class="step-item pending" id="s4">
       <div class="step-dot">4</div>
-      <div class="step-label">Launch<br>Gateway</div>
+      <div class="step-label">Configure<br>AI</div>
     </div>
   </div>
 
@@ -571,36 +494,65 @@ export class DockerSetupPanel {
       </div>
     </div>
 
-    <!-- Step 2: pull image -->
-    <div id="view-pull" style="display:none;width:100%;">
-      <div class="status-row" id="pull-status">
+    <!-- Step 2: container -->
+    <div id="view-container" style="display:none;width:100%;">
+      <div class="status-row" id="container-status">
         <div class="spinner"></div>
-        <span>Pulling ${IMAGE}...</span>
+        <span>Looking for occ-openclaw container...</span>
       </div>
-      <div class="log-wrap" id="pull-log-wrap">
-        <div class="log-box" id="pull-log"></div>
+      <div class="log-wrap" id="container-log-wrap">
+        <div class="log-box" id="container-log"></div>
       </div>
     </div>
 
-    <!-- Step 3: onboard -->
-    <div id="view-onboard" style="display:none;width:100%;">
-      <div class="status-row" id="onboard-status">
+    <!-- Step 3: install -->
+    <div id="view-install" style="display:none;width:100%;">
+      <div class="status-row" id="install-status">
         <div class="spinner"></div>
-        <span>Running OpenClaw onboard...</span>
+        <span>Installing OpenClaw...</span>
       </div>
-      <div class="log-wrap" id="onboard-log-wrap">
-        <div class="log-box" id="onboard-log"></div>
+      <div class="log-wrap" id="install-log-wrap">
+        <div class="log-box" id="install-log"></div>
       </div>
     </div>
 
-    <!-- Step 4: launch gateway -->
-    <div id="view-launch" style="display:none;width:100%;">
-      <div class="status-row" id="launch-status">
-        <div class="spinner"></div>
-        <span>Launching gateway container...</span>
+    <!-- Step 4: configure AI -->
+    <div id="view-configure" style="display:none;width:100%;flex-direction:column;align-items:flex-start;gap:0;">
+      <div class="prov-grid">
+        <button class="prov-card" data-id="anthropic" data-placeholder="sk-ant-..." onclick="pickProvider(this)">
+          <span class="prov-label">Anthropic Claude</span>
+          <span class="prov-hint">console.anthropic.com</span>
+        </button>
+        <button class="prov-card" data-id="openai" data-placeholder="sk-..." onclick="pickProvider(this)">
+          <span class="prov-label">OpenAI</span>
+          <span class="prov-hint">platform.openai.com</span>
+        </button>
+        <button class="prov-card" data-id="openrouter" data-placeholder="sk-or-..." onclick="pickProvider(this)">
+          <span class="prov-label">OpenRouter</span>
+          <span class="prov-hint">openrouter.ai</span>
+        </button>
+        <button class="prov-card" data-id="gemini" data-placeholder="AIza..." onclick="pickProvider(this)">
+          <span class="prov-label">Google Gemini</span>
+          <span class="prov-hint">aistudio.google.com</span>
+        </button>
       </div>
-      <div class="log-wrap" id="launch-log-wrap">
-        <div class="log-box" id="launch-log"></div>
+      <div class="field-label">API Key</div>
+      <input id="api-key" class="key-input" type="password" placeholder="Select a provider above" disabled autocomplete="off" oninput="validateForm()" />
+      <div class="port-row">
+        <span class="port-label">Gateway port</span>
+        <input id="gw-port" class="port-input" type="text" value="18789" />
+      </div>
+      <button class="btn-primary" id="btn-configure" onclick="runConfigure()" disabled>Set Up OpenClaw</button>
+    </div>
+
+    <!-- Configure log (shown during onboard) -->
+    <div id="view-configure-log" style="display:none;width:100%;">
+      <div class="status-row" id="configure-status">
+        <div class="spinner"></div>
+        <span>Configuring OpenClaw...</span>
+      </div>
+      <div class="log-wrap" id="configure-log-wrap">
+        <div class="log-box" id="configure-log"></div>
       </div>
     </div>
 
@@ -621,6 +573,7 @@ export class DockerSetupPanel {
   <script>
     const vscode = acquireVsCodeApi();
     let currentStep = 1;
+    let selectedProvider = null;
 
     function goBack() {
       vscode.postMessage({ command: 'closePanel' });
@@ -629,26 +582,26 @@ export class DockerSetupPanel {
     function retry() {
       document.getElementById('view-error').style.display = 'none';
       if (currentStep === 1) startPreflight();
-      else if (currentStep === 2) startPull();
-      else if (currentStep === 3) startOnboard();
-      else if (currentStep === 4) startLaunch();
+      else if (currentStep === 2) startContainer();
+      else if (currentStep === 3) startInstall();
+      else if (currentStep === 4) showConfigureForm();
     }
 
     function markDone(n) {
-      var el = document.getElementById('s' + n);
+      const el = document.getElementById('s' + n);
       if (!el) return;
       el.className = 'step-item done';
       el.querySelector('.step-dot').textContent = '\u2713';
     }
     function markActive(n) {
-      var el = document.getElementById('s' + n);
+      const el = document.getElementById('s' + n);
       if (!el) return;
       el.className = 'step-item active';
       el.querySelector('.step-dot').textContent = String(n);
     }
 
     function hideAll() {
-      ['preflight','pull','onboard','launch','error','done'].forEach(function(id) {
+      ['preflight','container','install','configure','configure-log','error','done'].forEach(function(id) {
         var el = document.getElementById('view-' + id);
         if (el) el.style.display = 'none';
       });
@@ -661,13 +614,13 @@ export class DockerSetupPanel {
       document.getElementById('error-text').textContent = text;
     }
 
-    function appendLog(boxId, wrapId, text, isErr, isCmd) {
+    function appendLog(boxId, wrapId, text, isErr) {
       var wrap = document.getElementById(wrapId);
       if (wrap) wrap.className = 'log-wrap visible';
       var box = document.getElementById(boxId);
       if (!box) return;
       var line = document.createElement('div');
-      line.className = 'log-line' + (isCmd ? ' cmd' : isErr ? ' err' : '');
+      line.className = 'log-line' + (isErr ? ' err' : '');
       line.textContent = text;
       box.appendChild(line);
       box.scrollTop = box.scrollHeight;
@@ -683,55 +636,74 @@ export class DockerSetupPanel {
       vscode.postMessage({ command: 'dockerPreflightCheck' });
     }
 
-    function startPull() {
+    function startContainer() {
       currentStep = 2;
       markDone(1); markActive(2);
       hideAll();
-      document.getElementById('view-pull').style.display = '';
-      vscode.postMessage({ command: 'dockerPullImage' });
+      document.getElementById('view-container').style.display = '';
+      vscode.postMessage({ command: 'dockerFindOrCreate' });
     }
 
-    function startOnboard() {
+    function startInstall() {
       currentStep = 3;
       markDone(2); markActive(3);
       hideAll();
-      document.getElementById('view-onboard').style.display = '';
-      document.getElementById('btn-back').style.display = 'none';
-      vscode.postMessage({ command: 'dockerOnboard' });
+      document.getElementById('view-install').style.display = '';
+      vscode.postMessage({ command: 'dockerInstallCli' });
     }
 
-    function startLaunch() {
+    function showConfigureForm() {
       currentStep = 4;
       markDone(3); markActive(4);
       hideAll();
-      document.getElementById('view-launch').style.display = '';
-      vscode.postMessage({ command: 'dockerLaunchGateway' });
+      document.getElementById('view-configure').style.display = 'flex';
+      document.getElementById('btn-back').style.display = 'none';
+    }
+
+    function pickProvider(btn) {
+      document.querySelectorAll('.prov-card').forEach(function(c) { c.classList.remove('selected'); });
+      btn.classList.add('selected');
+      selectedProvider = btn.dataset.id;
+      var keyInput = document.getElementById('api-key');
+      keyInput.disabled = false;
+      keyInput.placeholder = btn.dataset.placeholder || 'Enter API key';
+      keyInput.value = '';
+      validateForm();
+    }
+
+    function validateForm() {
+      var key = document.getElementById('api-key').value.trim();
+      document.getElementById('btn-configure').disabled = !(selectedProvider && key.length > 0);
+    }
+
+    function runConfigure() {
+      var apiKey = document.getElementById('api-key').value.trim();
+      var port = document.getElementById('gw-port').value.trim() || '18789';
+      if (!selectedProvider || !apiKey) return;
+      hideAll();
+      document.getElementById('view-configure-log').style.display = '';
+      vscode.postMessage({ command: 'dockerRunOnboard', provider: selectedProvider, apiKey: apiKey, port: port });
     }
 
     window.addEventListener('message', function(e) {
       var msg = e.data;
       if (msg.type === 'dockerPreflightResult') {
-        if (msg.ok) { startPull(); }
+        if (msg.ok) { startContainer(); }
         else { document.getElementById('preflight-spinner').style.display = 'none'; showError(msg.error || 'Docker check failed.'); }
       } else if (msg.type === 'dockerLog') {
-        if (currentStep === 2) { document.getElementById('pull-status').style.display = 'none'; appendLog('pull-log', 'pull-log-wrap', msg.text, !!msg.isErr, !!msg.isCmd); }
-      } else if (msg.type === 'dockerPullDone') {
-        startOnboard();
-      } else if (msg.type === 'onboardLog') {
-        document.getElementById('onboard-status').style.display = 'none';
-        appendLog('onboard-log', 'onboard-log-wrap', msg.text, !!msg.isErr, !!msg.isCmd);
-      } else if (msg.type === 'onboardDone') {
-        startLaunch();
-      } else if (msg.type === 'launchLog') {
-        document.getElementById('launch-status').style.display = 'none';
-        appendLog('launch-log', 'launch-log-wrap', msg.text, !!msg.isErr, !!msg.isCmd);
-      } else if (msg.type === 'launchDone') {
+        if (currentStep === 2) { document.getElementById('container-status').style.display = 'none'; appendLog('container-log', 'container-log-wrap', msg.text, !!msg.isErr); }
+        else if (currentStep === 3) { document.getElementById('install-status').style.display = 'none'; appendLog('install-log', 'install-log-wrap', msg.text, !!msg.isErr); }
+      } else if (msg.type === 'dockerContainerReady') {
+        startInstall();
+      } else if (msg.type === 'dockerInstallDone') {
+        showConfigureForm();
+      } else if (msg.type === 'configureLog') {
+        document.getElementById('configure-status').style.display = 'none';
+        appendLog('configure-log', 'configure-log-wrap', msg.text, !!msg.isErr);
+      } else if (msg.type === 'configureDone') {
         markDone(4);
         hideAll();
         document.getElementById('view-done').style.display = '';
-      } else if (msg.type === 'dockerContainerBroken') {
-        // Container was running but had no config — deleted it, restart from Pull Image.
-        startPull();
       } else if (msg.type === 'dockerError') {
         showError(msg.text || 'An error occurred.');
       }

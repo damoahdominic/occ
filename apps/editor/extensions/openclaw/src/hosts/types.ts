@@ -300,5 +300,6 @@ export interface OpenClawCoreAPI {
 
 	showHostPicker(): Promise<string | undefined>;
 	showAddHostWizard(type?: HostType): Promise<HostEntry | undefined>;
+	addHost(entry: Omit<HostEntry, 'id' | 'createdAt'>): Promise<HostEntry>;
 	refreshHost(id: string): Promise<void>;
 }

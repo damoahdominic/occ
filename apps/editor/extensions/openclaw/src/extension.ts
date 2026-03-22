@@ -628,12 +628,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       spendBalance();
     }),
     vscode.commands.registerCommand('openclaw.install', () => {
-      void HomePanel.runInstall(
-        context.extensionUri,
-        process.platform,
-        process.arch,
-        process.env.SHELL ?? '',
-      );
+      // Delegate to LocalSetupPanel via the host setup command
+      void vscode.commands.executeCommand('openclaw.host.setup.local');
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();

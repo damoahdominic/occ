@@ -1,7 +1,5 @@
 import * as cp from 'child_process';
-import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -217,105 +215,8 @@ export class LocalSetupPanel {
       await this._statusController._update();
       return;
     }
-    this._statusController = new StatusPanelController(
-      this._panel,
-      this._homeUri,
-      this._host,
-      () => {
-        // Disconnect: clear binding, dispose this panel, reopen the host picker (never auto-route).
-        this.dispose();
-        void vscode.commands.executeCommand('openclaw.home.picker');
-      },
-    );
+    this._statusController = new StatusPanelController(this._panel, this._homeUri, this._host);
     await this._statusController.show();
-    // Update tab title and set window-level host binding.
-    try {
-      const cfg = await this._host.readConfig();
-      const gw = cfg['gateway'] as Record<string, unknown> | undefined;
-      const p = gw?.['port'] ?? cfg['gateway_port'] ?? 18789;
-      const port = typeof p === 'number' ? p : parseInt(String(p), 10) || 18789;
-      this._panel.title = `OCC Home {Local:${port}}`;
-      void vscode.commands.executeCommand('occ.window.setHost', {
-        type: 'local', hostId: 'local', port, label: 'Local',
-      });
-    } catch {
-      this._panel.title = 'OCC Home {Local}';
-      void vscode.commands.executeCommand('occ.window.setHost', {
-        type: 'local', hostId: 'local', port: 18789, label: 'Local',
-      });
-    }
-  }
-
-  /**
-   * Fetches openclaw package metadata from npm, downloads the tarball,
-   * verifies its SHA-512 integrity, and returns the path to the verified file.
-   * Throws if the download fails or the hash doesn't match.
-   */
-  private async _downloadAndVerifyOpenClaw(tee: (s: string) => void): Promise<string> {
-    tee('Fetching package metadata from npm registry...\n');
-
-    // 1. Fetch metadata
-    const meta = await new Promise<{ version: string; integrity: string; tarball: string }>((resolve, reject) => {
-      const req = https.get(
-        { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
-        res => {
-          let raw = '';
-          res.on('data', (c: Buffer) => { raw += c.toString(); });
-          res.on('end', () => {
-            try {
-              const d = JSON.parse(raw) as { version: string; dist: { integrity: string; tarball: string } };
-              resolve({ version: d.version, integrity: d.dist.integrity, tarball: d.dist.tarball });
-            } catch (e) { reject(new Error(`Failed to parse npm metadata: ${e}`)); }
-          });
-        }
-      );
-      req.on('error', reject);
-      req.setTimeout(15000, () => { req.destroy(); reject(new Error('npm registry request timed out')); });
-    });
-
-    tee(`  ✓ Latest version: ${meta.version}\n`);
-    tee(`Downloading openclaw@${meta.version}...\n`);
-
-    // 2. Download tarball
-    const tmpFile = path.join(os.tmpdir(), `openclaw-${meta.version}-${Date.now()}.tgz`);
-    await new Promise<void>((resolve, reject) => {
-      const follow = (url: string) => {
-        https.get(url, res => {
-          if (res.statusCode === 301 || res.statusCode === 302) {
-            follow(res.headers.location!); return;
-          }
-          if (res.statusCode !== 200) { reject(new Error(`Download failed: HTTP ${res.statusCode}`)); return; }
-          const out = fs.createWriteStream(tmpFile);
-          res.pipe(out);
-          out.on('finish', () => { out.close(); resolve(); });
-          out.on('error', reject);
-          res.on('error', reject);
-        }).on('error', reject);
-      };
-      follow(meta.tarball);
-    });
-
-    tee('  ✓ Download complete\n');
-    tee('Verifying package integrity...\n');
-
-    // 3. Verify SHA-512 (SRI format: "sha512-<base64>")
-    const [algo, expectedB64] = meta.integrity.split('-');
-    if (algo !== 'sha512' || !expectedB64) {
-      throw new Error(`Unsupported integrity algorithm: ${algo}. Expected sha512.`);
-    }
-    const fileBuffer = fs.readFileSync(tmpFile);
-    const actualHash = crypto.createHash('sha512').update(fileBuffer).digest('base64');
-    if (actualHash !== expectedB64) {
-      try { fs.unlinkSync(tmpFile); } catch {}
-      throw new Error(
-        `⚠ Security check failed — package integrity mismatch for openclaw@${meta.version}.\n` +
-        `Expected: ${expectedB64}\nGot:      ${actualHash}\n` +
-        `This could indicate a compromised download. Installation aborted.`
-      );
-    }
-
-    tee('  ✓ Integrity verified (SHA-512 match)\n');
-    return tmpFile;
   }
 
   private async _runInstall(): Promise<void> {
@@ -551,22 +452,12 @@ export class LocalSetupPanel {
     tee('\n');
 
     if (npmOk) {
-      // Download and verify before installing
-      let verifiedTgz: string | null = null;
-      try {
-        verifiedTgz = await this._downloadAndVerifyOpenClaw(tee);
-      } catch (e) {
-        tee(`\n${(e as Error).message}\n`);
-        await fail(); return;
-      }
-
-      tee('Installing openclaw...\n');
+      tee('Installing openclaw via npm...\n');
       const spawnOpts: cp.SpawnOptions = platform === 'win32' ? { shell: true, windowsHide: true } : {};
-      const npmArgs = ['install', '-g', verifiedTgz];
+      const npmArgs = ['install', '-g', 'openclaw'];
       const r1 = sudoCached
         ? await runCaptured('sudo', ['-E', 'npm', ...npmArgs])
         : await runCaptured('npm', npmArgs, spawnOpts);
-      try { fs.unlinkSync(verifiedTgz); } catch {}
       if (r1.code === 0) {
         if (sudoCached) await fixOpenclawPermissions();
         await succeed(); return;
@@ -577,16 +468,7 @@ export class LocalSetupPanel {
         if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
         sudoCached = true;
         tee('Retrying with elevated permissions...\n');
-        // Re-download and re-verify for the sudo retry
-        let retryTgz: string | null = null;
-        try {
-          retryTgz = await this._downloadAndVerifyOpenClaw(tee);
-        } catch (e) {
-          tee(`\n${(e as Error).message}\n`);
-          await fail(); return;
-        }
-        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', retryTgz]);
-        try { fs.unlinkSync(retryTgz); } catch {}
+        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
         if (r2.code === 0) {
           await fixOpenclawPermissions();
           await succeed(); return;
@@ -598,17 +480,9 @@ export class LocalSetupPanel {
       const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
       if (fs.existsSync(nvmSh)) {
         tee('nvm detected — installing Node.js LTS...\n');
-        let nvmTgz: string | null = null;
-        try {
-          nvmTgz = await this._downloadAndVerifyOpenClaw(tee);
-        } catch (e) {
-          tee(`\n${(e as Error).message}\n`);
-          await fail(); return;
-        }
         const nvmR = await runCaptured('bash', ['-c',
-          `. "${nvmSh}" && nvm install --lts && nvm use --lts && npm install -g '${nvmTgz}'`
+          `. "${nvmSh}" && nvm install --lts && nvm use --lts && npm install -g openclaw`
         ]);
-        try { fs.unlinkSync(nvmTgz); } catch {}
         if (nvmR.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
         tee('nvm install failed — falling back to system install...\n');
       }

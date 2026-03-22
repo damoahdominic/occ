@@ -130,6 +130,15 @@ export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 		return undefined;
 	}
 
+	async addHost(entry: Omit<HostEntry, 'id' | 'createdAt'>): Promise<HostEntry> {
+		const id = `${entry.type}-${Date.now()}`;
+		const full: HostEntry = { ...entry, id, createdAt: new Date().toISOString() };
+		this.registry.addHost(full);
+		this._onDidAddHost.fire(full);
+		await this._ensureConnected(id).catch(() => { /* ignore — caller handles */ });
+		return full;
+	}
+
 	async refreshHost(id: string): Promise<void> {
 		const conn = this._connections.get(id);
 		if (!conn) {
