@@ -30,14 +30,50 @@ function getConfiguredGatewayPort(): number {
   }
 }
 
+// ── Window host binding ─────────────────────────────────────────────────────
+
+/** Describes which host this VS Code window is currently bound to. */
+export interface WindowHostBinding {
+  type: 'local' | 'docker' | 'ssh';
+  hostId: string;
+  port: number;
+  label: string;
+}
+
+const WINDOW_HOST_KEY = 'occ.windowHost';
+
+function registerWindowHostCommands(context: vscode.ExtensionContext): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('occ.window.setHost', (binding: WindowHostBinding) => {
+      void context.workspaceState.update(WINDOW_HOST_KEY, binding);
+    }),
+    vscode.commands.registerCommand('occ.window.clearHost', () => {
+      void context.workspaceState.update(WINDOW_HOST_KEY, undefined);
+    }),
+    /** Returns the current WindowHostBinding for this window, or null. */
+    vscode.commands.registerCommand('occ.window.getHost', () => {
+      return context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
+    }),
+  );
+}
+
 /**
  * Smart routing for the "OCC Home" command.
- * - Neither installed  → HomePanel (install wizard / host type picker)
- * - Only Local         → LocalSetupPanel directly
- * - Only Docker        → DockerSetupPanel directly
- * - Both               → HomePanel (hosts overview with live status)
+ * Priority: stored window binding → detected state → install wizard.
  */
-function routeHome(extensionUri: vscode.Uri): void {
+function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext): void {
+  // 1. If this window already has a binding, honour it.
+  const binding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
+  if (binding?.type === 'local') {
+    void vscode.commands.executeCommand('openclaw.host.setup.local');
+    return;
+  }
+  if (binding?.type === 'docker') {
+    void vscode.commands.executeCommand('openclaw.host.setup.docker');
+    return;
+  }
+
+  // 2. No binding — detect installed hosts and route.
   const isLocalInstalled = fs.existsSync(
     path.join(os.homedir(), '.openclaw', 'openclaw.json')
   );
@@ -54,7 +90,7 @@ function routeHome(extensionUri: vscode.Uri): void {
   } catch { /* docker not available */ }
 
   if (isLocalInstalled && isDockerRunning) {
-    HomePanel.createOrShow(extensionUri);          // hosts overview
+    HomePanel.createOrShow(extensionUri);          // hosts overview — user picks
   } else if (isLocalInstalled) {
     void vscode.commands.executeCommand('openclaw.host.setup.local');
   } else if (isDockerRunning) {
@@ -620,9 +656,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     }),
   );
 
+  registerWindowHostCommands(context);
+
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      routeHome(context.extensionUri);
+      routeHome(context.extensionUri, context);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const reachable = await isWebServerReachable();
@@ -866,7 +904,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
   // Auto-show OCC Home on startup (after activation settles).
   setTimeout(() => {
-    routeHome(context.extensionUri);
+    routeHome(context.extensionUri, context);
   }, 500);
 
   // Return OpenClawCoreAPI so adapter extensions can register their adapters.
