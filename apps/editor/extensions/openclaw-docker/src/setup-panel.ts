@@ -291,7 +291,7 @@ export class DockerSetupPanel {
     }
   }
 
-  private async _handleDockerConfigure(provider: string, apiKey: string, port: string): Promise<void> {
+  private async _handleDockerConfigure(provider: string, _apiKey: string, port: string): Promise<void> {
     const log = (text: string, isErr = false) => {
       try { this._panel.webview.postMessage({ type: 'configureLog', text, isErr }); } catch { /* ignore */ }
     };
@@ -299,15 +299,7 @@ export class DockerSetupPanel {
       try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
     };
 
-    const providerFlags: Record<string, string[]> = {
-      anthropic:  ['--auth-choice', 'apiKey',             '--anthropic-api-key',   apiKey],
-      openai:     ['--auth-choice', 'openai-api-key',     '--openai-api-key',      apiKey],
-      openrouter: ['--auth-choice', 'openrouter-api-key', '--openrouter-api-key',  apiKey],
-      gemini:     ['--auth-choice', 'gemini-api-key',     '--gemini-api-key',      apiKey],
-    };
-    const flags = providerFlags[provider];
-    if (!flags) { fail(`Unknown provider: ${provider}`); return; }
-
+    // Always use OCC free tier (occ-legacy) — user can reconfigure later via the status panel.
     const gwPort = /^\d+$/.test(port) ? port : '18789';
     const args = [
       'onboard',
@@ -316,11 +308,15 @@ export class DockerSetupPanel {
       '--gateway-auth', 'token',
       '--gateway-port', gwPort,
       '--skip-channels', '--skip-skills', '--skip-health',
-      ...flags,
+      '--auth-choice', 'custom-api-key',
+      '--custom-base-url', 'https://occ.mba.sh/v1',
+      '--custom-api-key', '',
+      '--custom-model-id', 'occ-legacy',
+      '--custom-compatibility', 'openai',
     ];
 
     try {
-      log('Configuring OpenClaw...\n');
+      log('Configuring OpenClaw with OCC free tier...\n');
       const code = await new Promise<number>((resolve) => {
         const proc = cp.spawn('docker', ['exec', 'occ-openclaw', 'openclaw', ...args], { windowsHide: true });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
@@ -333,6 +329,41 @@ export class DockerSetupPanel {
         fail('Setup failed. See the log above for details.');
         return;
       }
+
+      // Patch openclaw.json inside the container to set correct occ-legacy model metadata.
+      log('Patching model config...\n');
+      try {
+        const cfgRaw = cp.execSync('docker exec occ-openclaw cat /root/.openclaw/openclaw.json', { timeout: 5000 }).toString();
+        const cfg = JSON.parse(cfgRaw) as Record<string, unknown>;
+        const OCC_LEGACY_COST = { input: 0.0000006, output: 0.000003, cacheRead: 0.0000001, cacheWrite: 0 };
+        const patchModel = (obj: unknown): void => {
+          if (!obj || typeof obj !== 'object') return;
+          if (Array.isArray(obj)) { obj.forEach(patchModel); return; }
+          const o = obj as Record<string, unknown>;
+          if (o['id'] === 'occ-legacy') {
+            o['name']          = 'occ-legacy';
+            o['reasoning']     = false;
+            o['input']         = ['text'];
+            o['cost']          = { ...OCC_LEGACY_COST };
+            o['contextWindow'] = 262144;
+            o['maxTokens']     = 262144;
+            return;
+          }
+          Object.values(o).forEach(patchModel);
+        };
+        patchModel(cfg);
+        const patched = JSON.stringify(cfg, null, 2);
+        cp.execFileSync('docker', ['exec', '-i', 'occ-openclaw', 'sh', '-c', 'cat > /root/.openclaw/openclaw.json'], { input: patched, timeout: 5000 });
+      } catch { /* non-fatal — model metadata patch is best-effort */ }
+
+      // Write moltpilot-tier.json on the host (the state dir is mounted from the host).
+      try {
+        const wsDir = this._dockerWorkspaceHostPath ?? path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+        fs.writeFileSync(
+          path.join(wsDir, 'moltpilot-tier.json'),
+          JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
+        );
+      } catch { /* non-fatal */ }
 
       log('\n\u2713 Setup complete!\n');
       try { this._panel.webview.postMessage({ type: 'configureDone' }); } catch { /* ignore */ }
@@ -424,39 +455,6 @@ export class DockerSetupPanel {
     .btn-retry:hover { background: #b91c1c; }
     .done-msg { font-size: 13px; color: #4ade80; font-weight: 600; }
 
-    /* Step 4: Configure AI */
-    .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; width: 100%; }
-    .prov-card {
-      background: rgba(255,255,255,0.03); border: 1px solid #2b2b2b;
-      border-radius: 8px; padding: 12px 10px; cursor: pointer;
-      text-align: left; transition: border-color 0.15s, background 0.15s;
-      display: flex; flex-direction: column; gap: 3px;
-    }
-    .prov-card:hover { border-color: #444; background: rgba(255,255,255,0.05); }
-    .prov-card.selected { border-color: #dc2828; background: rgba(220,40,40,0.08); }
-    .prov-label { font-size: 12px; font-weight: 600; color: #e0e0e0; }
-    .prov-hint { font-size: 10px; color: #666; }
-    .field-label { font-size: 11px; color: #888; margin-bottom: 5px; text-align: left; width: 100%; }
-    .key-input {
-      width: 100%; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
-      color: #e0e0e0; font-size: 13px; padding: 9px 12px; outline: none;
-      box-sizing: border-box; font-family: monospace; margin-bottom: 10px;
-    }
-    .key-input:focus { border-color: #dc2828; }
-    .port-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; width: 100%; }
-    .port-label { font-size: 12px; color: #888; white-space: nowrap; }
-    .port-input {
-      width: 90px; background: #111; border: 1px solid #2b2b2b; border-radius: 6px;
-      color: #e0e0e0; font-size: 13px; padding: 7px 10px; outline: none;
-    }
-    .port-input:focus { border-color: #dc2828; }
-    .btn-primary {
-      width: 100%; background: #dc2828; border: none; color: #fff;
-      font-size: 14px; font-weight: 600; padding: 11px; border-radius: 8px;
-      cursor: pointer; transition: background 0.15s; font-family: inherit;
-    }
-    .btn-primary:hover { background: #b91c1c; }
-    .btn-primary:disabled { background: #7a1515; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -516,35 +514,6 @@ export class DockerSetupPanel {
       </div>
     </div>
 
-    <!-- Step 4: configure AI -->
-    <div id="view-configure" style="display:none;width:100%;flex-direction:column;align-items:flex-start;gap:0;">
-      <div class="prov-grid">
-        <button class="prov-card" data-id="anthropic" data-placeholder="sk-ant-..." onclick="pickProvider(this)">
-          <span class="prov-label">Anthropic Claude</span>
-          <span class="prov-hint">console.anthropic.com</span>
-        </button>
-        <button class="prov-card" data-id="openai" data-placeholder="sk-..." onclick="pickProvider(this)">
-          <span class="prov-label">OpenAI</span>
-          <span class="prov-hint">platform.openai.com</span>
-        </button>
-        <button class="prov-card" data-id="openrouter" data-placeholder="sk-or-..." onclick="pickProvider(this)">
-          <span class="prov-label">OpenRouter</span>
-          <span class="prov-hint">openrouter.ai</span>
-        </button>
-        <button class="prov-card" data-id="gemini" data-placeholder="AIza..." onclick="pickProvider(this)">
-          <span class="prov-label">Google Gemini</span>
-          <span class="prov-hint">aistudio.google.com</span>
-        </button>
-      </div>
-      <div class="field-label">API Key</div>
-      <input id="api-key" class="key-input" type="password" placeholder="Select a provider above" disabled autocomplete="off" oninput="validateForm()" />
-      <div class="port-row">
-        <span class="port-label">Gateway port</span>
-        <input id="gw-port" class="port-input" type="text" value="18789" />
-      </div>
-      <button class="btn-primary" id="btn-configure" onclick="runConfigure()" disabled>Set Up OpenClaw</button>
-    </div>
-
     <!-- Configure log (shown during onboard) -->
     <div id="view-configure-log" style="display:none;width:100%;">
       <div class="status-row" id="configure-status">
@@ -573,7 +542,6 @@ export class DockerSetupPanel {
   <script>
     const vscode = acquireVsCodeApi();
     let currentStep = 1;
-    let selectedProvider = null;
 
     function goBack() {
       vscode.postMessage({ command: 'closePanel' });
@@ -584,7 +552,7 @@ export class DockerSetupPanel {
       if (currentStep === 1) startPreflight();
       else if (currentStep === 2) startContainer();
       else if (currentStep === 3) startInstall();
-      else if (currentStep === 4) showConfigureForm();
+      else if (currentStep === 4) startAutoOnboard();
     }
 
     function markDone(n) {
@@ -652,37 +620,13 @@ export class DockerSetupPanel {
       vscode.postMessage({ command: 'dockerInstallCli' });
     }
 
-    function showConfigureForm() {
+    function startAutoOnboard() {
       currentStep = 4;
       markDone(3); markActive(4);
       hideAll();
-      document.getElementById('view-configure').style.display = 'flex';
-      document.getElementById('btn-back').style.display = 'none';
-    }
-
-    function pickProvider(btn) {
-      document.querySelectorAll('.prov-card').forEach(function(c) { c.classList.remove('selected'); });
-      btn.classList.add('selected');
-      selectedProvider = btn.dataset.id;
-      var keyInput = document.getElementById('api-key');
-      keyInput.disabled = false;
-      keyInput.placeholder = btn.dataset.placeholder || 'Enter API key';
-      keyInput.value = '';
-      validateForm();
-    }
-
-    function validateForm() {
-      var key = document.getElementById('api-key').value.trim();
-      document.getElementById('btn-configure').disabled = !(selectedProvider && key.length > 0);
-    }
-
-    function runConfigure() {
-      var apiKey = document.getElementById('api-key').value.trim();
-      var port = document.getElementById('gw-port').value.trim() || '18789';
-      if (!selectedProvider || !apiKey) return;
-      hideAll();
       document.getElementById('view-configure-log').style.display = '';
-      vscode.postMessage({ command: 'dockerRunOnboard', provider: selectedProvider, apiKey: apiKey, port: port });
+      document.getElementById('btn-back').style.display = 'none';
+      vscode.postMessage({ command: 'dockerRunOnboard', provider: 'free', apiKey: '', port: '18789' });
     }
 
     window.addEventListener('message', function(e) {
@@ -696,7 +640,7 @@ export class DockerSetupPanel {
       } else if (msg.type === 'dockerContainerReady') {
         startInstall();
       } else if (msg.type === 'dockerInstallDone') {
-        showConfigureForm();
+        startAutoOnboard();
       } else if (msg.type === 'configureLog') {
         document.getElementById('configure-status').style.display = 'none';
         appendLog('configure-log', 'configure-log-wrap', msg.text, !!msg.isErr);
