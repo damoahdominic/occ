@@ -227,7 +227,11 @@ export class DockerHostConnection implements HostConnection {
 	// ── OpenClaw config ───────────────────────
 
 	async getConfigPath(): Promise<string> {
-		return '/root/.openclaw/openclaw.json'; // containers typically run as root
+		return '/home/node/.openclaw/openclaw.json'; // official image runs as user 'node' (uid 1000)
+	}
+
+	gatewayHostPort(): number | undefined {
+		return this._config.portMappings?.gateway;
 	}
 
 	async readConfig(): Promise<OpenClawConfig> {
