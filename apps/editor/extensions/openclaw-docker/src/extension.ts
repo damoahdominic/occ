@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
 import { DockerHostAdapter } from './adapter';
+import { DockerSetupPanel } from './setup-panel';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
@@ -21,6 +22,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const adapter = new DockerHostAdapter();
 	const disposable = coreAPI.registerHostAdapter(adapter);
 	context.subscriptions.push(disposable);
+
+	const setupCmd = vscode.commands.registerCommand('openclaw.host.setup.docker', () => {
+		DockerSetupPanel.createOrShow(context.extensionUri, coreAPI);
+	});
+	context.subscriptions.push(setupCmd);
 
 	console.log('[openclaw-docker] DockerHostAdapter registered');
 }

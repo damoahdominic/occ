@@ -10,7 +10,9 @@
 	"categories": ["Other"],
 	"activationEvents": ["onStartupFinished"],
 	"main": "./out/openclaw-docker/src/extension",
-	"contributes": {},
+	"contributes": {
+		"commands": [{ "command": "openclaw.host.setup.docker", "title": "OpenClaw: Set up Docker" }]
+	},
 	"scripts": {
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./"
