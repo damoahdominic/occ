@@ -261,6 +261,8 @@ export class HomePanel {
         } else if (t === 'ssh') {
           void vscode.commands.executeCommand('openclaw.host.setup.ssh');
         }
+      } else if (msg.command === 'checkHostsStatus') {
+        void this._handleCheckHostsStatus();
       } else if (msg.command) {
         vscode.commands.executeCommand(msg.command);
       }
@@ -362,6 +364,25 @@ export class HomePanel {
         });
         if (r.ok) occUser = await r.json() as { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null };
       } catch { /* network error — leave null */ }
+    }
+
+    // Check whether the Docker occ-openclaw container is also running.
+    let isDockerRunning = false;
+    try {
+      const dc = cp.spawnSync(
+        'docker',
+        ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+        { timeout: 3000, windowsHide: true },
+      );
+      const st = (dc.stdout?.toString() ?? '').trim();
+      isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+    } catch { /* docker not available */ }
+
+    // Both hosts active → show the hosts overview (live status picker).
+    if (isConfigured && isDockerRunning) {
+      this._stopPolling();
+      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), this._cachedGatewayPort);
+      return;
     }
 
     // Show unified setup view when OpenClaw is not fully configured yet.
@@ -682,6 +703,143 @@ export class HomePanel {
         'agent',
       );
     } catch { /* best-effort */ }
+  }
+
+  private _checkPort(port: number): Promise<'running' | 'stopped'> {
+    return new Promise(resolve => {
+      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+        res.resume();
+        resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'stopped');
+      });
+      req.on('error', () => resolve('stopped'));
+      req.on('timeout', () => { req.destroy(); resolve('stopped'); });
+    });
+  }
+
+  private async _handleCheckHostsStatus(): Promise<void> {
+    const localPort = this._cachedGatewayPort;
+    const [localStatus, dockerStatus] = await Promise.all([
+      this._checkPort(localPort),
+      this._checkPort(18790),
+    ]);
+    try {
+      this._panel.webview.postMessage({ type: 'hostsStatus', local: localStatus, docker: dockerStatus });
+    } catch { /* ignore */ }
+  }
+
+  private _getHostsOverviewHtml(iconUri: string, localPort: number): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      background: #1a1a1a; color: #e0e0e0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 32px 20px 48px; text-align: center;
+    }
+    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 12px; }
+    h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    h1 .accent { color: #dc2828; }
+    .tagline { color: #666; font-size: 12px; margin-bottom: 32px; }
+    .cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 600px; }
+    .card {
+      flex: 1 1 200px; max-width: 240px;
+      background: #1e1e1e; border: 1.5px solid rgba(255,255,255,0.08);
+      border-radius: 16px; padding: 24px 20px; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, transform 0.12s;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+      text-align: left; position: relative;
+    }
+    .card:hover { border-color: rgba(220,40,40,0.45); background: #222; transform: translateY(-2px); }
+    .card:active { transform: translateY(0); }
+    .card-header { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+    .card-icon { font-size: 28px; line-height: 1; }
+    .status-pill {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 20px;
+      background: rgba(255,255,255,0.05); color: #555; border: 1px solid rgba(255,255,255,0.07);
+      transition: background 0.3s, color 0.3s;
+    }
+    .status-pill.running { background: rgba(74,222,128,0.1); color: #4ade80; border-color: rgba(74,222,128,0.2); }
+    .status-pill.stopped { background: rgba(255,255,255,0.04); color: #555; border-color: rgba(255,255,255,0.07); }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .status-pill.checking .status-dot { animation: pulse-dot 1s ease-in-out infinite; color: #888; }
+    .card-title { font-size: 16px; font-weight: 700; color: #fff; }
+    .card-meta { font-size: 11px; color: #555; }
+    .card-port { font-size: 11px; color: #444; margin-top: 2px; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <h1>OCC <span class="accent">Home</span></h1>
+  <p class="tagline">Choose a host to open</p>
+
+  <div class="cards">
+    <button class="card" onclick="pick('local')">
+      <div class="card-header">
+        <span class="card-icon">💻</span>
+        <span class="status-pill checking" id="pill-local">
+          <span class="status-dot"></span>
+          <span id="pill-local-text">checking</span>
+        </span>
+      </div>
+      <div class="card-title">Local</div>
+      <div class="card-meta">This machine</div>
+      <div class="card-port">localhost:${localPort}</div>
+    </button>
+
+    <button class="card" onclick="pick('docker')">
+      <div class="card-header">
+        <span class="card-icon">🐳</span>
+        <span class="status-pill checking" id="pill-docker">
+          <span class="status-dot"></span>
+          <span id="pill-docker-text">checking</span>
+        </span>
+      </div>
+      <div class="card-title">Docker</div>
+      <div class="card-meta">occ-openclaw container</div>
+      <div class="card-port">localhost:18790</div>
+    </button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    function pick(hostType) {
+      vscode.postMessage({ command: 'chooseHostType', hostType });
+    }
+    function applyStatus(pill, textEl, status) {
+      pill.className = 'status-pill ' + status;
+      textEl.textContent = status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'checking';
+    }
+    function poll() {
+      vscode.postMessage({ command: 'checkHostsStatus' });
+    }
+    window.addEventListener('message', function(e) {
+      var msg = e.data;
+      if (msg.type === 'hostsStatus') {
+        applyStatus(
+          document.getElementById('pill-local'),
+          document.getElementById('pill-local-text'),
+          msg.local,
+        );
+        applyStatus(
+          document.getElementById('pill-docker'),
+          document.getElementById('pill-docker-text'),
+          msg.docker,
+        );
+      }
+    });
+    poll();
+    setInterval(poll, 5000);
+  </script>
+</body>
+</html>`;
   }
 
   private _getHostTypeSelectionHtml(iconUri: string): string {

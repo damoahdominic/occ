@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -26,6 +27,40 @@ function getConfiguredGatewayPort(): number {
     return Number.isFinite(n) && n > 0 && n < 65536 ? n : DEFAULT_GATEWAY_PORT;
   } catch {
     return DEFAULT_GATEWAY_PORT;
+  }
+}
+
+/**
+ * Smart routing for the "OCC Home" command.
+ * - Neither installed  → HomePanel (install wizard / host type picker)
+ * - Only Local         → LocalSetupPanel directly
+ * - Only Docker        → DockerSetupPanel directly
+ * - Both               → HomePanel (hosts overview with live status)
+ */
+function routeHome(extensionUri: vscode.Uri): void {
+  const isLocalInstalled = fs.existsSync(
+    path.join(os.homedir(), '.openclaw', 'openclaw.json')
+  );
+
+  let isDockerRunning = false;
+  try {
+    const result = cp.spawnSync(
+      'docker',
+      ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+      { timeout: 3000, windowsHide: true },
+    );
+    const st = (result.stdout?.toString() ?? '').trim();
+    isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+  } catch { /* docker not available */ }
+
+  if (isLocalInstalled && isDockerRunning) {
+    HomePanel.createOrShow(extensionUri);          // hosts overview
+  } else if (isLocalInstalled) {
+    void vscode.commands.executeCommand('openclaw.host.setup.local');
+  } else if (isDockerRunning) {
+    void vscode.commands.executeCommand('openclaw.host.setup.docker');
+  } else {
+    HomePanel.createOrShow(extensionUri);          // install wizard
   }
 }
 
@@ -587,7 +622,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      HomePanel.createOrShow(context.extensionUri);
+      routeHome(context.extensionUri);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const reachable = await isWebServerReachable();
@@ -831,7 +866,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
   // Auto-show OCC Home on startup (after activation settles).
   setTimeout(() => {
-    HomePanel.createOrShow(context.extensionUri);
+    routeHome(context.extensionUri);
   }, 500);
 
   // Return OpenClawCoreAPI so adapter extensions can register their adapters.
