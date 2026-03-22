@@ -217,6 +217,16 @@ export class LocalSetupPanel {
     }
     this._statusController = new StatusPanelController(this._panel, this._homeUri, this._host);
     await this._statusController.show();
+    // Update the tab title to reflect host + port
+    try {
+      const cfg = await this._host.readConfig();
+      const gw = cfg['gateway'] as Record<string, unknown> | undefined;
+      const p = gw?.['port'] ?? cfg['gateway_port'] ?? 18789;
+      const port = typeof p === 'number' ? p : parseInt(String(p), 10) || 18789;
+      this._panel.title = `OCC Home {Local:${port}}`;
+    } catch {
+      this._panel.title = 'OCC Home {Local}';
+    }
   }
 
   private async _runInstall(): Promise<void> {
