@@ -65,8 +65,7 @@ export class DockerSetupPanel {
     this._panel = panel;
     this._extensionUri = extensionUri;
 
-    const webviewIconUri = panel.webview.asWebviewUri(iconUri).toString();
-    this._panel.webview.html = this._getHtml(webviewIconUri);
+    void this._initHtml(iconUri);
 
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
@@ -113,6 +112,46 @@ export class DockerSetupPanel {
       const d = this._disposables.pop();
       if (d) { d.dispose(); }
     }
+  }
+
+  /** On open: jump straight to status panel if the container is already set up, else show wizard. */
+  private async _initHtml(iconUri: vscode.Uri): Promise<void> {
+    const webviewIconUri = this._panel.webview.asWebviewUri(iconUri).toString();
+
+    // Quick synchronous check — is the container running at all?
+    const containerRunning = (() => {
+      try {
+        const result = cp.spawnSync(
+          'docker',
+          ['ps', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.Status}}'],
+          { timeout: 5000, windowsHide: true },
+        );
+        const st = (result.stdout?.toString() ?? '').trim();
+        return st.length > 0 && st.toLowerCase().startsWith('up');
+      } catch { return false; }
+    })();
+
+    if (containerRunning) {
+      // Check whether openclaw is configured inside the container.
+      const { DockerHostConnection } = await import('./connection');
+      const host = new DockerHostConnection(
+        { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: HOST_PORT } },
+        CONTAINER,
+      );
+      const configPath = await host.getConfigPath();
+      const isConfigured = await host.exists(configPath).catch(() => false);
+      const cliOk = isConfigured ? true
+        : await host.isCliInstalled().catch(() => false);
+
+      if (isConfigured || cliOk) {
+        // Already set up — skip wizard and show status panel directly.
+        await this._showStatusPanel();
+        return;
+      }
+    }
+
+    // Container not running or not configured — show the setup wizard.
+    this._panel.webview.html = this._getHtml(webviewIconUri);
   }
 
   private async _showStatusPanel(): Promise<void> {

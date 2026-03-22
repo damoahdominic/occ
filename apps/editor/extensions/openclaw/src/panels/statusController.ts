@@ -107,9 +107,13 @@ export class StatusPanelController {
       } catch { /* non-fatal */ }
     }
 
+    // For local hosts: check ~/.openclaw on disk and fix ownership if needed.
+    // For non-local hosts (docker/ssh): the "dir" is on the remote; use isConfigured as proxy.
     const openclawDir = path.join(os.homedir(), '.openclaw');
-    const dirExists = fs.existsSync(openclawDir);
-    if (dirExists && process.platform !== 'win32') {
+    const dirExists = this._host.type === 'local'
+      ? fs.existsSync(openclawDir)
+      : isConfigured; // container config file present ≡ dir exists
+    if (this._host.type === 'local' && dirExists && process.platform !== 'win32') {
       try {
         const stat = fs.statSync(openclawDir);
         if (stat.uid !== process.getuid!()) {
@@ -121,7 +125,9 @@ export class StatusPanelController {
 
     const cliCheck = await this._host.testOpenClawCli();
     writeLog(`[cli-check] ok=${cliCheck.ok} cmd="${cliCheck.command}" output="${(cliCheck.output ?? '').trim()}"\n`);
-    const isInstalled = isConfigured || (this._host.type !== 'local' && cliCheck.ok);
+    // For non-local hosts the StatusPanelController is only opened after setup completes,
+    // so the host being reachable is sufficient to consider openclaw "installed".
+    const isInstalled = isConfigured || cliCheck.ok || this._host.type !== 'local';
     this._lastInstalledState = isInstalled;
     this._lastInstalledVersion = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
 
