@@ -9,8 +9,10 @@
 	"extensionDependencies": ["openclaw.home"],
 	"categories": ["Other"],
 	"activationEvents": ["onStartupFinished"],
-	"main": "./out/extension",
-	"contributes": {},
+	"main": "./out/openclaw-ssh/src/extension",
+	"contributes": {
+		"commands": [{ "command": "openclaw.host.setup.ssh", "title": "OpenClaw: Set up SSH" }]
+	},
 	"scripts": {
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./"

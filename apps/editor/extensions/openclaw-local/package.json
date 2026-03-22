@@ -10,7 +10,9 @@
 	"categories": ["Other"],
 	"activationEvents": ["onStartupFinished"],
 	"main": "./out/openclaw-local/src/extension",
-	"contributes": {},
+	"contributes": {
+		"commands": [{ "command": "openclaw.host.setup.local", "title": "OpenClaw: Set up Local" }]
+	},
 	"scripts": {
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./"
