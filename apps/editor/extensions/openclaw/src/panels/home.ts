@@ -254,6 +254,8 @@ export class HomePanel {
         }
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
+        // Close the picker — the adapter panel takes over as the sole OCC Home tab.
+        this.dispose();
         if (t === 'local') {
           void vscode.commands.executeCommand('openclaw.host.setup.local');
         } else if (t === 'docker') {
