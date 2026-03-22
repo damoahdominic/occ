@@ -215,17 +215,32 @@ export class LocalSetupPanel {
       await this._statusController._update();
       return;
     }
-    this._statusController = new StatusPanelController(this._panel, this._homeUri, this._host);
+    this._statusController = new StatusPanelController(
+      this._panel,
+      this._homeUri,
+      this._host,
+      () => {
+        // Disconnect: clear binding, dispose this panel, reopen the host picker.
+        this.dispose();
+        void vscode.commands.executeCommand('openclaw.home');
+      },
+    );
     await this._statusController.show();
-    // Update the tab title to reflect host + port
+    // Update tab title and set window-level host binding.
     try {
       const cfg = await this._host.readConfig();
       const gw = cfg['gateway'] as Record<string, unknown> | undefined;
       const p = gw?.['port'] ?? cfg['gateway_port'] ?? 18789;
       const port = typeof p === 'number' ? p : parseInt(String(p), 10) || 18789;
       this._panel.title = `OCC Home {Local:${port}}`;
+      void vscode.commands.executeCommand('occ.window.setHost', {
+        type: 'local', hostId: 'local', port, label: 'Local',
+      });
     } catch {
       this._panel.title = 'OCC Home {Local}';
+      void vscode.commands.executeCommand('occ.window.setHost', {
+        type: 'local', hostId: 'local', port: 18789, label: 'Local',
+      });
     }
   }
 

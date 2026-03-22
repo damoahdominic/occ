@@ -76,6 +76,8 @@ export class StatusPanelController {
     private readonly _panel: vscode.WebviewPanel,
     private readonly _extensionUri: vscode.Uri,
     private readonly _host: HostConnection,
+    /** Called when the user clicks "Disconnect host" in the status panel. */
+    private readonly _onDisconnect?: () => void,
   ) {
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
   }
@@ -266,6 +268,9 @@ export class StatusPanelController {
       void this._runUninstall();
     } else if (msg.command === 'openclaw.setupBetterMemory') {
       void this._runCassSetup();
+    } else if (msg.command === 'disconnectHost') {
+      void vscode.commands.executeCommand('occ.window.clearHost');
+      this._onDisconnect?.();
     } else if (msg.command === 'void.openChatWithMessage') {
       const args = msg.args as string[];
       if (args && args.length > 0) {

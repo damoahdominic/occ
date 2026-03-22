@@ -178,10 +178,22 @@ export class DockerSetupPanel {
         { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: HOST_PORT } },
         CONTAINER,
       );
-      this._statusController = new StatusPanelController(this._panel, this._homeUri, host);
+      this._statusController = new StatusPanelController(
+        this._panel,
+        this._homeUri,
+        host,
+        () => {
+          // Disconnect: clear binding, dispose this panel, reopen the host picker.
+          this.dispose();
+          void vscode.commands.executeCommand('openclaw.home');
+        },
+      );
     }
     await this._statusController.show();
     this._panel.title = `OCC Home {Docker:${HOST_PORT}}`;
+    void vscode.commands.executeCommand('occ.window.setHost', {
+      type: 'docker', hostId: `docker:${CONTAINER}`, port: HOST_PORT, label: `Docker (${CONTAINER})`,
+    });
   }
 
   // ── Step 1: Docker preflight ──────────────────────────────────────────────
