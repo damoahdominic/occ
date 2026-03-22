@@ -91,7 +91,11 @@ export class StatusPanelController {
     const configFile = await this._host.getConfigPath();
     const isConfigured = await this._host.exists(configFile);
 
-    if (isConfigured) {
+    // Prefer the host-side port override (e.g. Docker maps container 18789 → host 18790)
+    const hostPortOverride = this._host.gatewayHostPort?.();
+    if (hostPortOverride !== undefined && Number.isFinite(hostPortOverride) && hostPortOverride > 0) {
+      this._cachedGatewayPort = hostPortOverride;
+    } else if (isConfigured) {
       try {
         const cfg = await this._host.readConfig();
         const gateway = cfg['gateway'] as Record<string, unknown> | undefined;

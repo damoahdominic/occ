@@ -293,6 +293,10 @@ export class DefaultLocalHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`onboard exited ${code}`); }
 	}
 
+	gatewayHostPort(): number | undefined {
+		return undefined; // local host: no port remapping
+	}
+
 	buildExecEnv(): Record<string, string | undefined> {
 		return buildLocalEnv();
 	}
