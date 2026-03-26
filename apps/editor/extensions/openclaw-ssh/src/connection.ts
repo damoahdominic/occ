@@ -95,6 +95,8 @@ export class SSHHostConnection implements HostConnection {
 	}
 
 	async writeFile(filePath: string, content: string): Promise<void> {
+		if (/\0/.test(filePath)) { throw new Error('Invalid file path: null byte'); }
+		if (!/^[/~]/.test(filePath)) { throw new Error('Invalid file path: must be absolute or home-relative'); }
 		const dir = path.posix.dirname(filePath);
 		await this.exec('mkdir', ['-p', dir]);
 		await new Promise<void>((resolve, reject) => {
