@@ -451,7 +451,7 @@ export class ConfigPanel {
 <html style="margin:0;padding:0;height:100%;overflow:hidden;">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *;">
+  <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline'; frame-src *;">
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1a1a; display: flex; flex-direction: column; }

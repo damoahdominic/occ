@@ -592,6 +592,10 @@ export class StatusPanelController {
     });
   }
 
+  private _escHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   private async _checkLatestVersion(): Promise<void> {
     const post = (html: string) => {
       try { this._panel.webview.postMessage({ type: 'versionResult', html }); } catch {}
@@ -605,23 +609,25 @@ export class StatusPanelController {
       return;
     }
     const installed = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
+    const safeLatest = this._escHtml(latest);
     if (!installed) {
       const notDetectedLabel = this._host.type === 'local' ? 'not detected locally' : 'not detected in container';
-      post(`<span style="color:#60a5fa">Latest: <strong>${latest}</strong> — OpenClaw CLI ${notDetectedLabel}.</span>`);
+      post(`<span style="color:#60a5fa">Latest: <strong>${safeLatest}</strong> — OpenClaw CLI ${notDetectedLabel}.</span>`);
       return;
     }
+    const safeInstalled = this._escHtml(installed);
     const norm = (v: string) => {
       const match = v.match(/\d+\.\d+(?:\.\d+)*/);
       return match ? match[0] : v.replace(/^v/i, '').split(/[-+(]/)[0].trim();
     };
     if (norm(installed) === norm(latest)) {
-      post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${installed}</strong></span>`);
+      post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${safeInstalled}</strong></span>`);
     } else {
       post(
-        `<span style="color:#fbbf24">Update available: <strong>${latest}</strong> &mdash; you have <strong>${installed}</strong>.</span>` +
+        `<span style="color:#fbbf24">Update available: <strong>${safeLatest}</strong> &mdash; you have <strong>${safeInstalled}</strong>.</span>` +
         `<button onclick="runUpdate()" style="margin-top:10px;display:flex;align-items:center;gap:6px;background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%;justify-content:center;" ` +
         `onmouseover="this.style.background='#fbbf24'" onmouseout="this.style.background='#f59e0b'">` +
-        `⬆ Update to ${latest} →</button>`,
+        `⬆ Update to ${safeLatest} →</button>`,
       );
     }
   }
