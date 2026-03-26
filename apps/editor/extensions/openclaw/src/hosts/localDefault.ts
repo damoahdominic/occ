@@ -297,6 +297,10 @@ export class DefaultLocalHostConnection implements HostConnection {
 		return undefined; // local host: no port remapping
 	}
 
+	localStateDir(): string {
+		return path.join(os.homedir(), '.openclaw');
+	}
+
 	buildExecEnv(): Record<string, string | undefined> {
 		return buildLocalEnv();
 	}

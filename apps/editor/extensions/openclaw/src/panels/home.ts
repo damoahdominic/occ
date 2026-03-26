@@ -8,6 +8,7 @@ import * as path from 'path';
 import type { HostConnection, OpenClawCoreAPI } from '../hosts/types';
 import { DefaultLocalHostConnection } from '../hosts/localDefault';
 import { renderStatusHtml } from './statusHtml';
+import { setActiveOpenClawWorkspaceFolder, closeFilesFromDir } from './statusController';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
@@ -107,8 +108,11 @@ export class HomePanel {
   private _cachedGatewayPort = 18789;
   /** Core extension API — used to register docker hosts after wizard completes. */
   private _coreAPI: OpenClawCoreAPI | undefined;
+  /** When true, always show the host picker — never auto-route to a single installed host. */
+  private _forcePicker = false;
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
+    this._forcePicker = forcePicker;
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
@@ -254,7 +258,10 @@ export class HomePanel {
         }
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
-        // Close the picker — the adapter panel takes over as the sole OCC Home tab.
+        // Best-effort: close files from the other host's dir (non-blocking).
+        if (t === 'local') { void closeFilesFromDir(path.join(os.homedir(), 'Desktop', 'occ-state-dir')); }
+        else if (t === 'docker') { void closeFilesFromDir(path.join(os.homedir(), '.openclaw')); }
+        // Close the picker immediately — the adapter panel takes over as the sole OCC Home tab.
         this.dispose();
         if (t === 'local') {
           void vscode.commands.executeCommand('openclaw.host.setup.local');
@@ -271,9 +278,11 @@ export class HomePanel {
     }, null, this._disposables);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri) {
+  public static createOrShow(extensionUri: vscode.Uri, forcePicker = false) {
     if (HomePanel.currentPanel) {
+      if (forcePicker) { HomePanel.currentPanel._forcePicker = true; }
       HomePanel.currentPanel._panel.reveal();
+      if (forcePicker) { void HomePanel.currentPanel._update(); }
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -282,7 +291,7 @@ export class HomePanel {
         vscode.Uri.joinPath(extensionUri, 'media'),
       ] }
     );
-    HomePanel.currentPanel = new HomePanel(panel, extensionUri);
+    HomePanel.currentPanel = new HomePanel(panel, extensionUri, forcePicker);
   }
 
   /** Push a live balance update to the webview popover — called from extension.ts balance poller. */
@@ -381,9 +390,21 @@ export class HomePanel {
     } catch { /* docker not available */ }
 
     // Both hosts active → show the hosts overview (live status picker).
-    if (isConfigured && isDockerRunning) {
+    // Also always show it when forcePicker is set (e.g. after disconnect).
+    if ((isConfigured && isDockerRunning) || this._forcePicker) {
       this._stopPolling();
-      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), this._cachedGatewayPort);
+      // Always read the local port directly from disk — _cachedGatewayPort may reflect
+      // the Docker host port (18790) if Docker was the last active host.
+      let localPort = 18789;
+      try {
+        const raw = fs.readFileSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'), 'utf-8');
+        const cfg = JSON.parse(raw) as Record<string, unknown>;
+        const gateway = cfg['gateway'] as Record<string, unknown> | undefined;
+        const p = gateway?.['port'] ?? cfg['port'] ?? cfg['gateway_port'] ?? cfg['gatewayPort'];
+        const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
+        if (Number.isFinite(n) && n > 0 && n < 65536) { localPort = n; }
+      } catch { /* use default */ }
+      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort);
       return;
     }
 
@@ -392,6 +413,10 @@ export class HomePanel {
       this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
       this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
+      // Local is configured and Docker is not running — show local status.
+      // Ensure workspace explorer shows only ~/.openclaw (not occ-state-dir from a previous Docker session).
+      setActiveOpenClawWorkspaceFolder(path.join(os.homedir(), '.openclaw'));
+
       const emojiBaseUri = this._panel.webview.asWebviewUri(
         vscode.Uri.joinPath(this._extensionUri, 'media', 'emojis')
       ).toString();
@@ -719,11 +744,25 @@ export class HomePanel {
   }
 
   private async _handleCheckHostsStatus(): Promise<void> {
-    const localPort = this._cachedGatewayPort;
-    const [localStatus, dockerStatus] = await Promise.all([
-      this._checkPort(localPort),
-      this._checkPort(18790),
-    ]);
+    // Local: "running" = config file exists (OpenClaw is installed & configured).
+    // Gateway port check is unreliable because the gateway may not be auto-started.
+    const localConfigured = fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
+    const localStatus: 'running' | 'stopped' = localConfigured ? 'running' : 'stopped';
+
+    // Docker: "running" = container is up (regardless of whether gateway is started inside it).
+    const dockerContainerRunning = await new Promise<boolean>(resolve => {
+      try {
+        const result = cp.spawnSync(
+          'docker',
+          ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+          { timeout: 3000, windowsHide: true },
+        );
+        const st = (result.stdout?.toString() ?? '').trim();
+        resolve(st.length > 0 && st.toLowerCase().startsWith('up'));
+      } catch { resolve(false); }
+    });
+    const dockerStatus: 'running' | 'stopped' = dockerContainerRunning ? 'running' : 'stopped';
+
     try {
       this._panel.webview.postMessage({ type: 'hostsStatus', local: localStatus, docker: dockerStatus });
     } catch { /* ignore */ }
@@ -747,9 +786,9 @@ export class HomePanel {
     h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
     h1 .accent { color: #dc2828; }
     .tagline { color: #666; font-size: 12px; margin-bottom: 32px; }
-    .cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 600px; }
+    .cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 640px; }
     .card {
-      flex: 1 1 200px; max-width: 240px;
+      flex: 1 1 220px; max-width: 300px;
       background: #1e1e1e; border: 1.5px solid rgba(255,255,255,0.08);
       border-radius: 16px; padding: 24px 20px; cursor: pointer;
       transition: border-color 0.15s, background 0.15s, transform 0.12s;
@@ -760,6 +799,11 @@ export class HomePanel {
     .card:active { transform: translateY(0); }
     .card-header { display: flex; align-items: center; justify-content: space-between; width: 100%; }
     .card-icon { font-size: 28px; line-height: 1; }
+    .badge-recommended {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 20px;
+      background: rgba(220,40,40,0.15); color: #dc2828; border: 1px solid rgba(220,40,40,0.3);
+    }
     .status-pill {
       display: flex; align-items: center; gap: 5px;
       font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
@@ -773,8 +817,11 @@ export class HomePanel {
     @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
     .status-pill.checking .status-dot { animation: pulse-dot 1s ease-in-out infinite; color: #888; }
     .card-title { font-size: 16px; font-weight: 700; color: #fff; }
-    .card-meta { font-size: 11px; color: #555; }
-    .card-port { font-size: 11px; color: #444; margin-top: 2px; font-family: monospace; }
+    .card-port { font-size: 11px; color: #444; font-family: monospace; }
+    .best-if { font-size: 11px; color: #555; margin-top: 2px; }
+    .best-if strong { color: #666; font-weight: 600; }
+    .best-if ul { padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+    .best-if li { color: #555; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -785,28 +832,45 @@ export class HomePanel {
   <div class="cards">
     <button class="card" onclick="pick('local')">
       <div class="card-header">
-        <span class="card-icon">💻</span>
+        <span class="card-icon">&#x1F4BB;</span>
         <span class="status-pill checking" id="pill-local">
           <span class="status-dot"></span>
           <span id="pill-local-text">checking</span>
         </span>
       </div>
       <div class="card-title">Local</div>
-      <div class="card-meta">This machine</div>
       <div class="card-port">localhost:${localPort}</div>
+      <div class="best-if">
+        <strong>Best if:</strong>
+        <ul>
+          <li>Dedicated device (Mac mini, home server)</li>
+          <li>No personal data on the machine</li>
+          <li>You want direct, unrestricted access</li>
+        </ul>
+      </div>
     </button>
 
     <button class="card" onclick="pick('docker')">
       <div class="card-header">
-        <span class="card-icon">🐳</span>
-        <span class="status-pill checking" id="pill-docker">
-          <span class="status-dot"></span>
-          <span id="pill-docker-text">checking</span>
-        </span>
+        <span class="card-icon">&#x1F433;</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="badge-recommended">Recommended</span>
+          <span class="status-pill checking" id="pill-docker">
+            <span class="status-dot"></span>
+            <span id="pill-docker-text">checking</span>
+          </span>
+        </div>
       </div>
       <div class="card-title">Docker</div>
-      <div class="card-meta">occ-openclaw container</div>
       <div class="card-port">localhost:18790</div>
+      <div class="best-if">
+        <strong>Best if:</strong>
+        <ul>
+          <li>This is your personal computer</li>
+          <li>You want a contained, isolated environment</li>
+          <li>Easy to reset or wipe without affecting your system</li>
+        </ul>
+      </div>
     </button>
   </div>
 
@@ -860,56 +924,99 @@ export class HomePanel {
       min-height: 100vh; padding: clamp(16px,5vw,48px) clamp(12px,4vw,32px); text-align: center;
     }
     .logo {
-      width: clamp(48px,12vw,80px); height: clamp(48px,12vw,80px);
-      margin-bottom: clamp(12px,3vw,20px);
+      width: clamp(44px,10vw,68px); height: clamp(44px,10vw,68px);
+      margin-bottom: clamp(10px,2.5vw,16px);
       filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); flex-shrink: 0;
     }
-    h1 { font-size: clamp(18px,4.5vw,28px); font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.2; }
+    h1 { font-size: clamp(17px,4vw,26px); font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.2; }
     h1 .accent { color: #dc2828; }
-    .tagline { color: #888; font-size: clamp(11px,2.5vw,14px); margin-bottom: clamp(28px,6vw,44px); max-width: 40ch; line-height: 1.5; }
-    .cards { display: flex; gap: clamp(10px,2.5vw,18px); flex-wrap: wrap; justify-content: center; width: 100%; max-width: 680px; }
+    .tagline { color: #666; font-size: clamp(11px,2.5vw,13px); margin-bottom: clamp(24px,5vw,40px); max-width: 44ch; line-height: 1.5; }
+    .cards { display: flex; gap: clamp(12px,2.5vw,20px); flex-wrap: wrap; justify-content: center; width: 100%; max-width: 760px; }
     .card {
-      flex: 1 1 160px; max-width: 200px;
+      flex: 1 1 240px; max-width: 300px;
       background: #1e1e1e; border: 1.5px solid rgba(255,255,255,0.08);
-      border-radius: 14px; padding: clamp(18px,4vw,28px) clamp(14px,3vw,22px);
+      border-radius: 16px; padding: 24px 22px 22px;
       cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.12s;
-      display: flex; flex-direction: column; align-items: center; gap: 10px;
-      text-align: center;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 0;
+      text-align: left; position: relative;
     }
-    .card:hover { border-color: rgba(220,40,40,0.5); background: #222; transform: translateY(-2px); }
+    .card:hover { border-color: rgba(220,40,40,0.45); background: #222; transform: translateY(-2px); }
     .card:active { transform: translateY(0); }
-    .card-icon { font-size: clamp(28px,6vw,40px); line-height: 1; }
-    .card-title { font-size: clamp(13px,2.5vw,15px); font-weight: 700; color: #fff; }
-    .card-desc { font-size: clamp(10px,2vw,12px); color: #888; line-height: 1.4; }
-    .card.disabled { opacity: 0.45; cursor: not-allowed; }
+    .card.disabled { opacity: 0.4; cursor: not-allowed; }
     .card.disabled:hover { border-color: rgba(255,255,255,0.08); background: #1e1e1e; transform: none; }
-    .badge {
-      font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-      background: rgba(220,40,40,0.12); color: #dc2828;
-      border: 1px solid rgba(220,40,40,0.2); border-radius: 4px; padding: 2px 5px;
+    .card-header { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 10px; }
+    .card-icon { font-size: 30px; line-height: 1; }
+    .badge-rec {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      background: rgba(74,222,128,0.1); color: #4ade80;
+      border: 1px solid rgba(74,222,128,0.25); border-radius: 4px; padding: 3px 7px;
     }
+    .badge-soon {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      background: rgba(220,40,40,0.1); color: #dc2828;
+      border: 1px solid rgba(220,40,40,0.2); border-radius: 4px; padding: 3px 7px;
+    }
+    .card-title { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .card-subtitle { font-size: 11px; color: #555; margin-bottom: 14px; }
+    .card-divider { width: 100%; height: 1px; background: rgba(255,255,255,0.06); margin-bottom: 14px; }
+    .card-bestfor { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #444; margin-bottom: 8px; }
+    .card-bullets { list-style: none; display: flex; flex-direction: column; gap: 5px; width: 100%; }
+    .card-bullets li { font-size: 11.5px; color: #777; line-height: 1.45; display: flex; align-items: flex-start; gap: 7px; }
+    .card-bullets li::before { content: '·'; color: #444; font-size: 16px; line-height: 1.1; flex-shrink: 0; }
   </style>
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <h1>Welcome to <span class="accent">OpenClaw</span></h1>
-  <p class="tagline">Where do you want to run OpenClaw?</p>
+  <p class="tagline">Choose where OpenClaw runs. You can always switch later.</p>
   <div class="cards">
+
     <button class="card" onclick="pick('local')">
-      <span class="card-icon">💻</span>
-      <span class="card-title">Local</span>
-      <span class="card-desc">Run OpenClaw on this machine</span>
+      <div class="card-header">
+        <span class="card-icon">💻</span>
+      </div>
+      <div class="card-title">Local</div>
+      <div class="card-subtitle">Runs natively on this machine</div>
+      <div class="card-divider"></div>
+      <div class="card-bestfor">Best if</div>
+      <ul class="card-bullets">
+        <li>You have a dedicated device — a Mac mini, spare laptop, or home server with no personal data on it</li>
+        <li>You want maximum performance with zero container overhead</li>
+        <li>You're comfortable giving the AI direct access to the machine</li>
+      </ul>
     </button>
+
     <button class="card" onclick="pick('docker')">
-      <span class="card-icon">🐳</span>
-      <span class="card-title">Docker</span>
-      <span class="card-desc">Run OpenClaw inside a Docker container</span>
+      <div class="card-header">
+        <span class="card-icon">🐳</span>
+        <span class="badge-rec">Recommended</span>
+      </div>
+      <div class="card-title">Docker</div>
+      <div class="card-subtitle">Runs inside an isolated container</div>
+      <div class="card-divider"></div>
+      <div class="card-bestfor">Best if</div>
+      <ul class="card-bullets">
+        <li>This is your personal computer — MacBook, work laptop — with files you want to keep private</li>
+        <li>You want the AI sandboxed so it can only access what you explicitly mount</li>
+        <li>You're not sure which to pick — Docker is the safer default</li>
+      </ul>
     </button>
+
     <button class="card disabled" title="Coming soon" onclick="return false">
-      <span class="card-icon">🌐</span>
-      <span class="card-title">SSH <span class="badge">Soon</span></span>
-      <span class="card-desc">Connect to a remote server via SSH</span>
+      <div class="card-header">
+        <span class="card-icon">🌐</span>
+        <span class="badge-soon">Soon</span>
+      </div>
+      <div class="card-title">SSH</div>
+      <div class="card-subtitle">Connect to a remote server</div>
+      <div class="card-divider"></div>
+      <div class="card-bestfor">Best if</div>
+      <ul class="card-bullets">
+        <li>You have a remote Linux server or VPS you want OpenClaw to run on</li>
+        <li>You prefer keeping everything off your local machine entirely</li>
+      </ul>
     </button>
+
   </div>
   <script>
     const vscode = acquireVsCodeApi();

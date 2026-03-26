@@ -122,6 +122,8 @@ export interface DockerConnection {
 	dockerHost?: string;
 	shell?: string;
 	portMappings?: { gateway?: number };
+	/** Host-side directory mounted as /home/node/.openclaw inside the container (e.g. ~/Desktop/occ-state-dir). */
+	localMountPath?: string;
 }
 
 export interface SSHConnection {
@@ -261,6 +263,13 @@ export interface HostConnection extends vscode.Disposable {
 	// ── Port override (for tunnelled connections, e.g. Docker) ──
 	/** Host-side port to poll for gateway health. Overrides the port read from openclaw.json. */
 	gatewayHostPort?(): number | undefined;
+
+	// ── Local filesystem paths ──
+	/**
+	 * Host-side path to the OpenClaw state directory.
+	 * Local: ~/.openclaw   Docker: ~/Desktop/occ-state-dir (or whatever is mounted)
+	 */
+	localStateDir?(): string;
 
 	// ── Environment ──
 	buildExecEnv(): Record<string, string | undefined>;

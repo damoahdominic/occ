@@ -7,6 +7,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
+import { setActiveOpenClawWorkspaceFolder } from './panels/statusController';
 import { stopConfigProxy, getDashboardUrl } from './panels/config';
 import { HostRegistry } from './hosts/registry';
 import { HostManager } from './hosts/manager';
@@ -61,7 +62,13 @@ function registerWindowHostCommands(context: vscode.ExtensionContext): void {
  * Smart routing for the "OCC Home" command.
  * Priority: stored window binding → detected state → install wizard.
  */
-function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext): void {
+function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext, forcePicker = false): void {
+  // When forcePicker is set (e.g. after disconnect) always show the host picker — never auto-route.
+  if (forcePicker) {
+    HomePanel.createOrShow(extensionUri, true);
+    return;
+  }
+
   // 1. If this window already has a binding, honour it.
   const binding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
   if (binding?.type === 'local') {
@@ -101,8 +108,8 @@ function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext): 
 }
 
 /** Returns true if the OpenClaw web server is reachable. */
-function isWebServerReachable(): Promise<boolean> {
-  const port = getConfiguredGatewayPort();
+function isWebServerReachable(portOverride?: number): Promise<boolean> {
+  const port = portOverride ?? getConfiguredGatewayPort();
   const url = `http://localhost:${port}/`;
   return new Promise(resolve => {
     const req = http.get(url, { timeout: 3000 }, res => {
@@ -206,7 +213,7 @@ async function hideActivityBarItems(
  */
 const WORKSPACE_FILENAME = 'My OpenClaw Workspace.code-workspace';
 
-async function openOpenClawFolder(): Promise<void> {
+async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<void> {
   // Ensure ~/.occ exists — OCcode's internal state directory.
   const occPath = path.join(os.homedir(), '.occ');
   if (!fs.existsSync(occPath)) {
@@ -253,9 +260,15 @@ async function openOpenClawFolder(): Promise<void> {
     );
   }
 
-  // If we're already inside this workspace, nothing more to do.
+  // If we're already inside this workspace, nothing more to do — except ensure
+  // the workspace folder reflects the current host (not a stale Docker folder).
   const workspaceFileUri = vscode.Uri.file(workspaceFilePath);
   if (vscode.workspace.workspaceFile?.fsPath === workspaceFileUri.fsPath) {
+    const binding = context?.workspaceState.get<{ type: string }>(WINDOW_HOST_KEY);
+    if (binding?.type !== 'docker') {
+      // Not bound to Docker — ensure ~/.openclaw is shown, not occ-state-dir.
+      setActiveOpenClawWorkspaceFolder(openclawPath);
+    }
     return;
   }
 
@@ -593,17 +606,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
   const hostManager = new HostManager(hostRegistry);
   context.subscriptions.push(hostRegistry, hostManager);
 
-  // Status bar: shows active host name
-  const hostStatusBar = new HostStatusBarItem(hostManager);
-  context.subscriptions.push(hostStatusBar);
-
-  // Tree view: lists all registered hosts
-  const hostTreeProvider = new HostTreeProvider(hostManager);
-  const hostTreeView = vscode.window.createTreeView('openclaw.hosts', {
-    treeDataProvider: hostTreeProvider,
-    showCollapseAll: false,
-  });
-  context.subscriptions.push(hostTreeView, hostTreeProvider);
+  // (OPENCLAW HOSTS tree view and status bar removed — window-level binding used instead)
 
   // Host management commands
   context.subscriptions.push(
@@ -627,7 +630,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
   await hideActivityBarItems(context);
 
   // Open ~/.openclaw as "My OpenClaw Workspace" (may reload the window once).
-  await openOpenClawFolder();
+  await openOpenClawFolder(context);
 
   // Close the Explorer sidebar on startup — the user opens it explicitly when needed.
   // Use a short delay so the workbench has finished restoring its layout first.
@@ -662,16 +665,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     vscode.commands.registerCommand('openclaw.home', () => {
       routeHome(context.extensionUri, context);
     }),
+    // Always shows the host picker regardless of what is installed — used after disconnect.
+    vscode.commands.registerCommand('openclaw.home.picker', () => {
+      routeHome(context.extensionUri, context, true);
+    }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
-      const reachable = await isWebServerReachable();
+      const windowHostBinding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
+
+      // ── Docker path ───────────────────────────────────────────────────────
+      if (windowHostBinding?.type === 'docker') {
+        const container = windowHostBinding.hostId.replace(/^docker:/, '') || 'occ-openclaw';
+        const hostPort = windowHostBinding.port; // e.g. 18790
+        const containerPort = 18789;
+
+        // 1. Start the gateway inside the container (detached — safe if already running)
+        cp.spawn('docker', ['exec', '-d', container, 'openclaw', 'gateway', 'run'], {
+          windowsHide: true,
+          detached: true,
+        }).unref();
+
+        // 2. Give it a moment to start, then get the tokenized dashboard URL
+        await new Promise<void>(r => setTimeout(r, 2000));
+
+        const dashResult = cp.spawnSync(
+          'docker',
+          ['exec', container, 'openclaw', 'dashboard', '--no-open'],
+          { timeout: 10000, windowsHide: true, encoding: 'utf-8' },
+        );
+        let rawUrl = (dashResult.stdout as string ?? '').trim();
+
+        if (rawUrl) {
+          // Rewrite the internal container port to the host-mapped port
+          const url = rawUrl
+            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
+            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+          await vscode.env.openExternal(vscode.Uri.parse(url));
+        } else {
+          // dashboard command failed — open plain URL as fallback
+          await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${hostPort}/`));
+        }
+        return;
+      }
+
+      // ── Local / SSH path ──────────────────────────────────────────────────
+      const effectivePort = windowHostBinding ? windowHostBinding.port : getConfiguredGatewayPort();
+      const reachable = await isWebServerReachable(effectivePort);
       if (reachable) {
-        const dashInfo = getDashboardUrl();
-        const url = dashInfo?.url ?? `http://localhost:${getConfiguredGatewayPort()}/`;
+        const url = getDashboardUrl()?.url ?? `http://localhost:${effectivePort}/`;
         await vscode.env.openExternal(vscode.Uri.parse(url));
       } else {
-        // Web server not running — ask the AI to start it
-        const port = getConfiguredGatewayPort();
-        const configUrl = `http://localhost:${port}/`;
+        const configUrl = `http://localhost:${effectivePort}/`;
         const message =
           `The OpenClaw web configuration server is not running at ${configUrl}.\n\n` +
           `Please start it now by running the OpenClaw gateway in the terminal:\n` +
@@ -792,7 +835,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       hasAiModel: boolean;
       hasChannels: boolean;
       channelNames: string[];
+      hostType: 'local' | 'docker' | 'ssh' | null;
+      containerName: string | null;
+      gatewayPort: number;
     }> => {
+      // Resolve window-level host binding first
+      const windowHost = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
       const homedir = os.homedir();
       const configPath = path.join(homedir, '.openclaw', 'openclaw.json');
       const installed = fs.existsSync(configPath);
@@ -802,8 +850,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
         try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
       }
 
-      // Determine gateway port
+      // Determine gateway port — for Docker/SSH hosts use the window binding's port directly
       const port = (() => {
+        if (windowHost?.type === 'docker' || windowHost?.type === 'ssh') {
+          return windowHost.port;
+        }
         const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
         if (p === undefined) return 18789;
         const n = Number(p);
@@ -865,7 +916,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       } catch {}
       const hasAgents = agentNames.length > 0;
 
-      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames };
+      const hostType = windowHost?.type ?? 'local';
+      const containerName = (windowHost?.type === 'docker' || windowHost?.type === 'ssh')
+        ? (windowHost.hostId ?? null)
+        : null;
+
+      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames, hostType, containerName, gatewayPort: port };
     }),
   );
 
