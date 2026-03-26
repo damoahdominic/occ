@@ -451,7 +451,7 @@ const systemToolsXMLPrompt = (chatMode: ChatMode, mcpTools: InternalToolInfo[] |
 // ======================================================== chat (normal, gather, agent) ========================================================
 
 
-export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions, occStatus }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, occStatus?: { installed: boolean; gatewayRunning: boolean; hasAgents: boolean; agentNames: string[]; hasAiModel: boolean; hasChannels: boolean; channelNames: string[] } | null }) => {
+export const chat_systemMessage = ({ workspaceFolders, openedURIs, activeURI, persistentTerminalIDs, directoryStr, chatMode: mode, mcpTools, includeXMLToolDefinitions, occStatus }: { workspaceFolders: string[], directoryStr: string, openedURIs: string[], activeURI: string | undefined, persistentTerminalIDs: string[], chatMode: ChatMode, mcpTools: InternalToolInfo[] | undefined, includeXMLToolDefinitions: boolean, occStatus?: { installed: boolean; gatewayRunning: boolean; hasAgents: boolean; agentNames: string[]; hasAiModel: boolean; hasChannels: boolean; channelNames: string[]; hostType?: 'local' | 'docker' | 'ssh' | null; containerName?: string | null; gatewayPort?: number } | null }) => {
 	const header = (`You are an expert coding ${mode === 'agent' ? 'agent' : 'assistant'} whose job is \
 ${mode === 'agent' ? `to help the user develop, run, and make changes to their codebase.`
 			: mode === 'gather' ? `to search, understand, and reference files in the user's codebase.`
@@ -491,6 +491,17 @@ ${directoryStr}
 	let occStatusSection: string | null = null
 	if (occStatus != null) {
 		const lines: string[] = []
+		const isDocker = occStatus.hostType === 'docker'
+		const isSsh = occStatus.hostType === 'ssh'
+		const containerName = occStatus.containerName ?? 'occ-openclaw'
+		if (isDocker) {
+			lines.push(`- Host type: DOCKER CONTAINER (${containerName})`)
+			lines.push(`- Gateway port: ${occStatus.gatewayPort ?? 18790} (mapped to container port 18789)`)
+		} else if (isSsh) {
+			lines.push(`- Host type: SSH (${containerName})`)
+		} else {
+			lines.push(`- Host type: LOCAL`)
+		}
 		lines.push(`- OpenClaw CLI: ${occStatus.installed ? 'INSTALLED' : 'NOT INSTALLED'}`)
 		lines.push(`- OpenClaw gateway: ${occStatus.gatewayRunning ? 'RUNNING' : 'NOT RUNNING'}`)
 		lines.push(`- AI provider/model: ${occStatus.hasAiModel ? 'CONFIGURED' : 'NOT CONFIGURED'}`)
@@ -569,8 +580,15 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 
 	if (occStatus != null) {
 		details.push(`You have access to the user's current OpenClaw setup status in the <openclaw_status> block above. When suggesting next steps or recommending what to set up, ONLY suggest items that are NOT already done. If OpenClaw is already installed, do NOT tell them to install it. If an AI model is already configured, do NOT tell them to set one up. If agents are already configured, do NOT tell them to create one. If channels are connected, do NOT tell them to connect channels. Only surface what is actually missing.`)
-		details.push(`If a skill or tool call fails because it cannot be found, your FIRST recovery step is to use the terminal tool to run it via the OpenClaw CLI: \`openclaw run <skill-name>\`. The CLI knows about all installed skills and agents — use it to locate and execute the skill rather than giving up. Only if the CLI itself is unavailable (OpenClaw NOT INSTALLED or gateway NOT RUNNING per the <openclaw_status> block) should you stop and guide the user to fix the setup via the OCC Home panel.`)
-		details.push(`CRITICAL — OpenClaw CLI commands are ALWAYS non-interactive. NEVER run \`openclaw doctor\` or any other openclaw command that prompts for user input — these are interactive and will hang indefinitely in a non-TTY context. For status/diagnostics use only: \`openclaw --version\`, \`openclaw status\`, or direct file reads (e.g. ~/.openclaw/openclaw.json). If you need to check the gateway, use an HTTP request instead.`)
+		if (occStatus.hostType === 'docker') {
+			const cn = occStatus.containerName ?? 'occ-openclaw'
+			details.push(`CRITICAL — This window is connected to a Docker container named "${cn}". ALL shell commands that interact with OpenClaw, the filesystem inside the container, or the OpenClaw gateway MUST be run via \`docker exec ${cn} <command>\`. For example: \`docker exec ${cn} openclaw --version\`, \`docker exec ${cn} cat /home/node/.openclaw/openclaw.json\`. Do NOT run openclaw commands directly in the local terminal — they must always be prefixed with \`docker exec ${cn}\`. The gateway is accessible at localhost:${occStatus.gatewayPort ?? 18790} on the host machine (mapped from container port 18789).`)
+		} else if (occStatus.hostType === 'ssh') {
+			const host = occStatus.containerName ?? 'remote'
+			details.push(`CRITICAL — This window is connected to an SSH host (${host}). ALL shell commands that interact with OpenClaw or the remote filesystem MUST be run on the remote host via SSH. Use the terminal tool with ssh prefixes or the configured remote context.`)
+		}
+		details.push(`If a skill or tool call fails because it cannot be found, your FIRST recovery step is to use the terminal tool to run it via the OpenClaw CLI: \`openclaw run <skill-name>\`${occStatus.hostType === 'docker' ? ` (prefix with \`docker exec ${occStatus.containerName ?? 'occ-openclaw'}\`)` : ''}. The CLI knows about all installed skills and agents — use it to locate and execute the skill rather than giving up. Only if the CLI itself is unavailable (OpenClaw NOT INSTALLED or gateway NOT RUNNING per the <openclaw_status> block) should you stop and guide the user to fix the setup via the OCC Home panel.`)
+		details.push(`CRITICAL — OpenClaw CLI commands are ALWAYS non-interactive. NEVER run \`openclaw doctor\` or any other openclaw command that prompts for user input — these are interactive and will hang indefinitely in a non-TTY context. For status/diagnostics use only: \`openclaw --version\`, \`openclaw status\`, or direct file reads. If you need to check the gateway, use an HTTP request instead.`)
 	}
 
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
