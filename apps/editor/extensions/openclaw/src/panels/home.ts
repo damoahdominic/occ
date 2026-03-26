@@ -1734,7 +1734,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div class="panel-title" style="margin-bottom:2px;">OpenClaw Data Directory</div>
     <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">Where should OpenClaw store its data on your machine? This folder will be mounted into the Docker container.</div>
     <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
-      <input type="text" id="docker-path-input" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:13px;padding:10px 14px;font-family:monospace;outline:none;" placeholder="~/.openclaw" />
+      <input type="text" id="docker-path-input" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:13px;padding:10px 14px;font-family:monospace;outline:none;" placeholder="~/Desktop/occ/.openclaw" />
       <div style="font-size:11px;color:#555;text-align:center;">A shortcut will also be created at <code style="color:#888;">~/Desktop/occ</code></div>
     </div>
     <button class="btn-primary" onclick="confirmDockerPath()">
@@ -2821,17 +2821,19 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
   // ── Docker Bootstrap ──────────────────────────────────────────────────────────
 
-  /** Returns the default ~/.openclaw data directory for the current OS. */
+  /**
+   * Returns the default .openclaw data directory: ~/Desktop/occ/.openclaw
+   * This keeps OpenClaw data co-located with the OCC workspace on the Desktop,
+   * making it easy to find and back up. Consistent across all platforms.
+   */
   public static getDefaultOpenClawDataPath(): string {
-    const platform = process.platform;
-    if (platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'openclaw');
-    }
-    return path.join(os.homedir(), '.openclaw');
+    return path.join(os.homedir(), 'Desktop', 'occ', '.openclaw');
   }
 
   /**
-   * Creates a shortcut/symlink at ~/Desktop/occ → dataPath.
+   * Creates a shortcut/symlink at ~/Desktop/occ → dataPath for non-default paths.
+   * If dataPath is already inside ~/Desktop/occ/ (the default), this is a no-op
+   * since the data is already in the right place.
    * On Windows creates a .lnk shortcut via PowerShell. On unix creates a symlink.
    * Non-fatal: logs errors but never throws.
    */
@@ -2840,18 +2842,24 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       const desktopDir = path.join(os.homedir(), 'Desktop');
       if (!fs.existsSync(desktopDir)) return; // No Desktop folder (headless/server)
       const occDir = path.join(desktopDir, 'occ');
+      // If dataPath is already inside ~/Desktop/occ/, the folder exists naturally — no symlink needed.
+      const resolvedData = dataPath.startsWith('~/')
+        ? path.join(os.homedir(), dataPath.slice(2))
+        : dataPath;
+      if (resolvedData.startsWith(occDir + path.sep) || resolvedData === occDir) {
+        writeLog(`[docker-bootstrap] Data dir is inside ~/Desktop/occ — no shortcut needed\n`);
+        return;
+      }
       if (process.platform === 'win32') {
         // Create a Windows shortcut via PowerShell
-        const script = `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${occDir}.lnk'); $s.TargetPath = '${dataPath}'; $s.Save()`;
+        const script = `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${occDir}.lnk'); $s.TargetPath = '${resolvedData}'; $s.Save()`;
         await new Promise<void>(resolve => cp.exec(`powershell -NoProfile -Command "${script}"`, () => resolve()));
       } else {
-        // Unix symlink
-        if (fs.existsSync(occDir) || fs.lstatSync(occDir).isSymbolicLink()) {
-          fs.unlinkSync(occDir);
-        }
-        fs.symlinkSync(dataPath, occDir, 'dir');
+        // Unix symlink — remove existing entry first (whether dir, file, or symlink)
+        try { fs.unlinkSync(occDir); } catch { /* may not exist or may be a real dir */ }
+        fs.symlinkSync(resolvedData, occDir, 'dir');
       }
-      writeLog(`[docker-bootstrap] Desktop shortcut created: ${occDir} → ${dataPath}\n`);
+      writeLog(`[docker-bootstrap] Desktop shortcut created: ${occDir} → ${resolvedData}\n`);
     } catch (e) {
       writeLog(`[docker-bootstrap] Desktop shortcut creation skipped: ${e}\n`);
     }
