@@ -182,8 +182,8 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 				: providerName === 'vLLM' ? defaultProviderSettings.vLLM.endpoint
 					: providerName === 'openAICompatible' ? 'https://my-website.com/v1'
 						: providerName === 'lmStudio' ? defaultProviderSettings.lmStudio.endpoint
-							: providerName === 'liteLLM' ? 'http://localhost:4000'
-								: providerName === 'awsBedrock' ? 'http://localhost:4000/v1'
+							: providerName === 'liteLLM' ? 'https://occ.mba.sh'
+								: providerName === 'awsBedrock' ? 'https://occ.mba.sh/v1'
 									: providerName === 'ocFreeModel' ? 'https://api.openclawcode.org/v1'
 										: '(never)',
 

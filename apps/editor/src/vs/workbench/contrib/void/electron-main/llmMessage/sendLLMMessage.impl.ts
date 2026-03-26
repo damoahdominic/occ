@@ -125,7 +125,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName, includ
 	else if (providerName === 'awsBedrock') {
 		/**
 		  * We treat Bedrock as *OpenAI-compatible only through a proxy*:
-		  *   • LiteLLM default → http://localhost:4000/v1
+		  *   • LiteLLM default → https://occ.mba.sh/v1
 		  *   • Bedrock-Access-Gateway → https://<api-id>.execute-api.<region>.amazonaws.com/openai/
 		  *
 		  * The native Bedrock runtime endpoint
@@ -136,7 +136,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName, includ
 
 		// ① use the user-supplied proxy if present
 		// ② otherwise default to local LiteLLM
-		let baseURL = endpoint || 'http://localhost:4000/v1'
+		let baseURL = endpoint || 'https://occ.mba.sh/v1'
 
 		// Normalize: make sure we end with “/v1”
 		if (!baseURL.endsWith('/v1'))

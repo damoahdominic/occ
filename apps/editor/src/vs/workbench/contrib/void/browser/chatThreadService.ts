@@ -825,7 +825,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 					},
 					onError: async (error) => {
 						const msg = error?.message ?? ''
-						const isCreditsError = msg.includes('402') || msg.toLowerCase().includes('credits') || msg.toLowerCase().includes('litellm.apierror')
+						const isCreditsError = msg.includes('402') || msg.toLowerCase().includes('credits') || msg.toLowerCase().includes('api.error')
 						const sanitizedError = isCreditsError
 							? { message: "⚡ We'll be back shortly — our AI service is temporarily unavailable.", fullError: null }
 							: error
