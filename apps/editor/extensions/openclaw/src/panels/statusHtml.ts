@@ -1129,7 +1129,9 @@ export function renderStatusHtml(
       const el = document.getElementById('app-wip-maintainer');
       if (el) {
         if (maintainerName) {
-          el.innerHTML = 'Maintained by <a href="#" data-url="' + maintainerUrl + '" onclick="return openMaintainerLink(this);">' + maintainerName + '</a>';
+          var safeName = maintainerName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          var safeUrl = maintainerUrl.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          el.innerHTML = 'Maintained by <a href="#" data-url="' + safeUrl + '" onclick="return openMaintainerLink(this);">' + safeName + '</a>';
         } else {
           el.innerHTML = 'Interested in maintaining this app? <a href="#" data-url="mailto:team@mba.sh" onclick="return openMaintainerLink(this);">team@mba.sh</a>';
         }

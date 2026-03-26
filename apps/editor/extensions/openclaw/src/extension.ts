@@ -535,8 +535,8 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
             log(`    Status: 200 OK`);
             log(`    Email:        ${d.email ?? '(not returned)'}`);
             log(`    Balance:      $${balanceBefore.toFixed(6)}`);
-            log(`    MoltpilotKey: ${moltpilotKey ? 'OK ' + moltpilotKey.substring(0, 12) + '...' : 'MISSING'}`);
-            log(`    OccKey:       ${occKey ? 'OK ' + occKey.substring(0, 12) + '...' : 'MISSING'}`);
+            log(`    MoltpilotKey: ${moltpilotKey ? 'OK [redacted]' : 'MISSING'}`);
+            log(`    OccKey:       ${occKey ? 'OK [redacted]' : 'MISSING'}`);
           } else {
             log(`    HTTP ${r.status} -- JWT may be expired`);
           }
@@ -785,7 +785,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       if (!password) return { result: 'User cancelled the password prompt.', exitCode: 1 };
 
       return new Promise(resolve => {
-        const child = require('child_process').spawn('sudo', ['-S', 'bash', '-c', command], {
+        const child = cp.spawn('sudo', ['-S', 'bash', '-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.stdin?.write(password + '\n');
