@@ -234,6 +234,10 @@ export class DockerHostConnection implements HostConnection {
 		return this._config.portMappings?.gateway;
 	}
 
+	localStateDir(): string {
+		return this._config.localMountPath ?? path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+	}
+
 	async readConfig(): Promise<OpenClawConfig> {
 		const cfgPath = await this.getConfigPath();
 		if (!(await this.exists(cfgPath))) { return {}; }

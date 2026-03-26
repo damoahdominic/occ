@@ -220,9 +220,9 @@ export class LocalSetupPanel {
       this._homeUri,
       this._host,
       () => {
-        // Disconnect: clear binding, dispose this panel, reopen the host picker.
+        // Disconnect: clear binding, dispose this panel, reopen the host picker (never auto-route).
         this.dispose();
-        void vscode.commands.executeCommand('openclaw.home');
+        void vscode.commands.executeCommand('openclaw.home.picker');
       },
     );
     await this._statusController.show();

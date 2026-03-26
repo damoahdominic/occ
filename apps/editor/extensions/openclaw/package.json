@@ -83,15 +83,7 @@
 		"viewsContainers": {
 			"activitybar": []
 		},
-		"views": {
-			"explorer": [
-				{
-					"id": "openclaw.hosts",
-					"name": "OpenClaw Hosts",
-					"when": "true"
-				}
-			]
-		},
+		"views": {},
 		"commands": [
 			{
 				"command": "openclaw.home",

@@ -17,6 +17,94 @@ import { renderStatusHtml } from './statusHtml';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
 
+// ── Workspace folder management ───────────────────────────────────────────────
+
+/** Known OpenClaw state dirs that we manage as workspace folders. */
+const KNOWN_STATE_DIRS = [
+  path.join(os.homedir(), '.openclaw'),
+  path.join(os.homedir(), 'Desktop', 'occ-state-dir'),
+];
+
+/**
+ * Closes all open editor tabs whose files live under `dirPath`.
+ * Best-effort — never throws. Resolves immediately if the API is unavailable.
+ */
+export async function closeFilesFromDir(dirPath: string): Promise<void> {
+  try {
+    const sep = path.sep;
+    const normalizedDir = dirPath.endsWith(sep) ? dirPath : dirPath + sep;
+    // tabGroups may be unavailable in older VS Code forks — guard defensively.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tabGroups = (vscode.window as any).tabGroups as { all: { tabs: { input: unknown }[] }[]; close(tabs: unknown[], preserveFocus?: boolean): Promise<void> } | undefined;
+    if (!tabGroups?.all) return;
+    const allTabs = tabGroups.all.flatMap(g => g.tabs);
+    const toClose = allTabs.filter(tab => {
+      try {
+        const input = tab.input as { uri?: { fsPath?: string } } | null;
+        return typeof input?.uri?.fsPath === 'string' && input.uri.fsPath.startsWith(normalizedDir);
+      } catch { return false; }
+    });
+    if (toClose.length > 0) {
+      await tabGroups.close(toClose, true);
+    }
+  } catch { /* non-fatal */ }
+}
+
+/**
+ * Ensures `targetPath` is the only OpenClaw state dir in the current workspace.
+ * Removes any other known state dirs, adds targetPath if not already present.
+ *
+ * Debounced: rapid successive calls within 300 ms are coalesced into one write
+ * so we never trigger concurrent `updateWorkspaceFolders` → "File Modified Since"
+ * race conditions on the .code-workspace file.
+ */
+let _wsUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+let _wsUpdateTarget: string | undefined;
+
+export function setActiveOpenClawWorkspaceFolder(targetPath: string): void {
+  // Always record the latest desired target; last caller wins.
+  _wsUpdateTarget = targetPath;
+  if (_wsUpdateTimer !== undefined) return; // already scheduled — coalesce
+  _wsUpdateTimer = setTimeout(() => {
+    _wsUpdateTimer = undefined;
+    const target = _wsUpdateTarget;
+    _wsUpdateTarget = undefined;
+    if (target !== undefined) { _applyActiveOpenClawWorkspaceFolder(target); }
+  }, 300);
+}
+
+function _applyActiveOpenClawWorkspaceFolder(targetPath: string): void {
+  try {
+    const targetUri = vscode.Uri.file(targetPath);
+    const folders = vscode.workspace.workspaceFolders ?? [];
+
+    const toRemove: number[] = [];
+    let targetFound = false;
+    for (const f of folders) {
+      if (f.uri.fsPath === targetUri.fsPath) {
+        targetFound = true;
+      } else if (KNOWN_STATE_DIRS.some(d => f.uri.fsPath === d)) {
+        toRemove.push(f.index);
+      }
+    }
+
+    if (targetFound && toRemove.length === 0) return; // already correct
+
+    // Remove stale dirs in descending index order so indices stay valid
+    for (const idx of [...toRemove].sort((a, b) => b - a)) {
+      vscode.workspace.updateWorkspaceFolders(idx, 1);
+    }
+
+    if (!targetFound) {
+      const count = vscode.workspace.workspaceFolders?.length ?? 0;
+      vscode.workspace.updateWorkspaceFolders(count, null, {
+        uri: targetUri,
+        name: path.basename(targetPath),
+      });
+    }
+  } catch { /* non-fatal */ }
+}
+
 // ── Persistent diagnostics log ────────────────────────────────────────────────
 const LOG_PATH = path.join(os.homedir(), '.openclaw', 'occ-home.log');
 const LOG_MAX_BYTES = 512 * 1024;
@@ -40,21 +128,6 @@ function writeLog(text: string): void {
   } catch { /* non-fatal */ }
 }
 
-function getOpenClawWorkspaceDir(): string {
-  const fallback = path.join(os.homedir(), '.openclaw', 'workspace');
-  try {
-    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw) as Record<string, unknown>;
-    const ws = config['workspace'];
-    if (typeof ws === 'string' && ws.trim()) {
-      return ws.startsWith('~')
-        ? path.join(os.homedir(), ws.slice(1))
-        : ws;
-    }
-  } catch { /* openclaw.json missing or unreadable */ }
-  return fallback;
-}
 
 export class StatusPanelController {
   private _disposed = false;
@@ -82,8 +155,40 @@ export class StatusPanelController {
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
   }
 
+  // ── Host-aware path helpers ───────────────────────────────────────────────
+
+  /** Host-side state directory: ~/.openclaw (local) or ~/Desktop/occ-state-dir (docker). */
+  private _getStateDir(): string {
+    return this._host.localStateDir?.() ?? path.join(os.homedir(), '.openclaw');
+  }
+
+  /** Host-side config file path. */
+  private _getConfigFilePath(): string {
+    return path.join(this._getStateDir(), 'openclaw.json');
+  }
+
+  /** Host-side workspace directory, reading config's `workspace` field if present. */
+  private _getWorkspaceDir(): string {
+    const stateDir = this._getStateDir();
+    const fallback = path.join(stateDir, 'workspace');
+    try {
+      const raw = fs.readFileSync(this._getConfigFilePath(), 'utf-8');
+      const config = JSON.parse(raw) as Record<string, unknown>;
+      const ws = config['workspace'];
+      if (typeof ws === 'string' && ws.trim()) {
+        return ws.startsWith('~') ? path.join(os.homedir(), ws.slice(1)) : ws;
+      }
+    } catch { /* openclaw.json missing or unreadable */ }
+    return fallback;
+  }
+
   /** Render the full status panel HTML and start polling. */
   public async show(): Promise<void> {
+    // Ensure the workspace explorer shows only this host's state directory.
+    const stateDir = this._getStateDir();
+    if (fs.existsSync(stateDir) || this._host.type !== 'local') {
+      setActiveOpenClawWorkspaceFolder(stateDir);
+    }
     await this._update();
   }
 
@@ -171,7 +276,7 @@ export class StatusPanelController {
     } catch { /* openclaw.json unreadable */ }
 
     if (this._disposed) return;
-    this._panel.webview.html = renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
+    this._panel.webview.html = renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName, this._host.type);
 
     if (!this._autoUpdateTriggered) {
       this._autoUpdateTriggered = true;
@@ -218,7 +323,7 @@ export class StatusPanelController {
     } else if (msg.command === 'openUrl') {
       vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
     } else if (msg.command === 'openConfigFile') {
-      const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+      const configPath = this._getConfigFilePath();
       vscode.commands.executeCommand('vscode.open', vscode.Uri.file(configPath));
     } else if (msg.command === 'openLogs') {
       if (!fs.existsSync(LOG_PATH)) {
@@ -230,7 +335,7 @@ export class StatusPanelController {
       const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'SOUL.md', 'HEARTBEAT.md']);
       const file = msg.file as string;
       if (!allowed.has(file)) return true;
-      const workspaceDir = getOpenClawWorkspaceDir();
+      const workspaceDir = this._getWorkspaceDir();
       const filePath = path.join(workspaceDir, file);
       if (!fs.existsSync(filePath)) {
         if (file === 'MEMORY.md') {
@@ -269,6 +374,8 @@ export class StatusPanelController {
     } else if (msg.command === 'openclaw.setupBetterMemory') {
       void this._runCassSetup();
     } else if (msg.command === 'disconnectHost') {
+      // Close workspace files best-effort (non-blocking) then navigate away.
+      void closeFilesFromDir(this._getStateDir());
       void vscode.commands.executeCommand('occ.window.clearHost');
       this._onDisconnect?.();
     } else if (msg.command === 'void.openChatWithMessage') {
@@ -413,12 +520,17 @@ export class StatusPanelController {
     const portCheckCmd = process.platform === 'win32'
       ? `netstat -ano | findstr :${port}`
       : `lsof -iTCP:${port} -sTCP:LISTEN -n -P 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port}`;
+    const isDocker = this._host.type === 'docker';
+    const containerName = isDocker ? (this._host.label || 'occ-openclaw') : '';
+    const gatewayCmd = isDocker
+      ? `docker exec ${containerName} openclaw gateway ${action}`
+      : `openclaw gateway ${action}`;
     const aiMessage = [
       `Please ${verb} the OpenClaw gateway.`,
       '',
       `Run the following command in your terminal:`,
       '```',
-      `openclaw gateway ${action}`,
+      gatewayCmd,
       '```',
       '',
       `Environment: ${osInfo}`,
@@ -494,7 +606,8 @@ export class StatusPanelController {
     }
     const installed = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
     if (!installed) {
-      post(`<span style="color:#60a5fa">Latest: <strong>${latest}</strong> — OpenClaw CLI not detected locally.</span>`);
+      const notDetectedLabel = this._host.type === 'local' ? 'not detected locally' : 'not detected in container';
+      post(`<span style="color:#60a5fa">Latest: <strong>${latest}</strong> — OpenClaw CLI ${notDetectedLabel}.</span>`);
       return;
     }
     const norm = (v: string) => {
@@ -565,13 +678,14 @@ export class StatusPanelController {
   private async _runUninstall(): Promise<void> {
     const post = (msg: object) => { try { this._panel.webview.postMessage(msg); } catch {} };
     post({ type: 'uninstallLog', text: 'Handing off to AI for uninstall…\n', done: true, ok: true });
+    const isDocker = this._host.type === 'docker';
+    const containerName = isDocker ? (this._host.label || 'occ-openclaw') : '';
+    const uninstallMsg = isDocker
+      ? `Uninstall OpenClaw from Docker container "${containerName}".\n1. docker exec ${containerName} pkill -9 -f openclaw || true\n2. docker exec ${containerName} openclaw uninstall --all --yes --non-interactive\n3. docker rm -f ${containerName}\nConfirm each step ran OK, then tell the user it's done.`
+      : 'Uninstall OpenClaw. No sudo.\n1. cd $HOME\n2. pkill -9 -f openclaw\n3. openclaw uninstall --all --yes --non-interactive\nConfirm each step ran OK, then tell the user it\'s done.';
     setTimeout(() => {
       post({ type: 'uninstallDone' });
-      vscode.commands.executeCommand(
-        'void.openChatWithMessage',
-        'Uninstall OpenClaw. No sudo.\n1. cd $HOME\n2. pkill -9 -f openclaw\n3. openclaw uninstall --all --yes --non-interactive\nConfirm each step ran OK, then tell the user it\'s done.',
-        'agent',
-      );
+      vscode.commands.executeCommand('void.openChatWithMessage', uninstallMsg, 'agent');
       this._schedulePostUninstallClose();
     }, 1200);
   }

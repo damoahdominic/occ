@@ -16,7 +16,8 @@ export function renderStatusHtml(
     occJwt: string = '',
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
     emojiBaseUri: string = '',
-    aiModelName = ''
+    aiModelName = '',
+    hostType: 'local' | 'docker' | 'ssh' | 'cloud' = 'local'
 ): string {
     // Render user area statically (avoids JS innerHTML escaping / runtime errors)
     let userAreaHtml: string;
@@ -72,6 +73,11 @@ export function renderStatusHtml(
     const statusClass = isInstalled ? 'detected' : 'not-found';
     const buttonLabel = isInstalled ? 'Open Web Control' : 'Install OpenClaw';
     const buttonCommand = isInstalled ? 'openclaw.configure' : 'openclaw.install';
+    const configLabel = hostType === 'docker'
+      ? 'Config (container: /home/node/.openclaw/openclaw.json)'
+      : hostType === 'local'
+      ? 'Config (~/.openclaw/openclaw.json)'
+      : 'Config (remote: openclaw.json)';
     const dirText = dirExists ? 'found' : 'missing';
     const dirClass = dirExists ? 'ok' : 'warn';
     const cliText = cliCheck.ok ? (cliCheck.output || 'ok') : (cliCheck.output || cliCheck.error || 'not found');
@@ -993,7 +999,7 @@ export function renderStatusHtml(
   <div class="checks">
     <div class="check-row ${dirClass === 'ok' ? 'check-row-clickable' : ''}" ${dirClass === 'ok' ? 'onclick="cmd(\'openConfigFile\')" title="Open openclaw.json"' : ''}>
       <span class="row-icon">${icFolder}</span>
-      <span class="label">Config (~/.openclaw/openclaw.json)</span>
+      <span class="label">${configLabel}</span>
       <span class="value ${dirClass}">${dirText}</span>
     </div>
     <div class="check-row">
