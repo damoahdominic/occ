@@ -1,0 +1,176 @@
+version: '3.8'
+
+# Docker Compose test environments for OCcode Node version detection
+# 
+# Services:
+#   - test-fnm:       Fast Node Manager test scenario
+#   - test-nvm:       Node Version Manager test scenario  
+#   - test-node-only: System Node only (no version manager)
+#   - test-node-setup: Auto-install/setup from base OS (Ubuntu)
+#   - test-runner:    Orchestrator to run all tests sequentially
+#
+# Usage:
+#   docker-compose -f docker-compose.test.yml up test-runner
+#   docker-compose -f docker-compose.test.yml run test-fnm
+#   docker-compose -f docker-compose.test.yml run test-nvm
+#   docker-compose -f docker-compose.test.yml run test-node-only
+#   docker-compose -f docker-compose.test.yml run test-node-setup
+
+services:
+  # Test fnm scenario
+  test-fnm:
+    image: node:22
+    container_name: occ-test-fnm
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules_fnm:/app/node_modules
+    command: >
+      bash -c "
+        curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /usr/local &&
+        export PATH=/root/.local/bin:$$PATH &&
+        npm ci --ignore-scripts &&
+        cd apps/editor &&
+        npm ci &&
+        cd /app &&
+        source ./scripts/activate_env.sh &&
+        ./launch-editor.sh --version-check
+      "
+    environment:
+      NODE_ENV: test
+    networks:
+      - test-network
+
+  # Test nvm scenario
+  test-nvm:
+    image: node:22
+    container_name: occ-test-nvm
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules_nvm:/app/node_modules
+      - nvm_cache:/root/.nvm
+    command: >
+      bash -c "
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
+        export NVM_DIR=/root/.nvm &&
+        echo 'export NVM_DIR=\"$$HOME/.nvm\"' >> ~/.bashrc &&
+        echo '[ -s \"$$NVM_DIR/nvm.sh\" ] && source \"$$NVM_DIR/nvm.sh\"' >> ~/.bashrc &&
+        npm ci --ignore-scripts &&
+        cd apps/editor &&
+        npm ci &&
+        cd /app &&
+        . ~/.bashrc &&
+        source ./scripts/activate_env.sh &&
+        ./launch-editor.sh --version-check
+      "
+    environment:
+      NVM_DIR: /root/.nvm
+      NODE_ENV: test
+    networks:
+      - test-network
+
+  # Test system Node only scenario
+  test-node-only:
+    image: node:22
+    container_name: occ-test-node-only
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules_node_only:/app/node_modules
+    command: >
+      bash -c "
+        npm ci --ignore-scripts &&
+        cd apps/editor &&
+        npm ci &&
+        cd /app &&
+        source ./scripts/activate_env.sh &&
+        ./launch-editor.sh --version-check
+      "
+    environment:
+      NODE_ENV: test
+    networks:
+      - test-network
+
+  # Test auto-install scenario (starts from base OS)
+  test-node-setup:
+    image: ubuntu:22.04
+    container_name: occ-test-node-setup
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules_setup:/app/node_modules
+      - nvm_cache:/root/.nvm
+    command: >
+      bash -c "
+        apt-get update &&
+        apt-get install -y curl wget git &&
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
+        export NVM_DIR=/root/.nvm &&
+        echo 'export NVM_DIR=\"$$HOME/.nvm\"' >> ~/.bashrc &&
+        echo '[ -s \"$$NVM_DIR/nvm.sh\" ] && source \"$$NVM_DIR/nvm.sh\"' >> ~/.bashrc &&
+        npm ci --ignore-scripts &&
+        cd apps/editor &&
+        npm ci &&
+        cd /app &&
+        . ~/.bashrc &&
+        source ./scripts/activate_env.sh &&
+        ./launch-editor.sh --setup-and-run
+      "
+    environment:
+      NVM_DIR: /root/.nvm
+      NODE_ENV: test
+    networks:
+      - test-network
+
+volumes:
+  node_modules_fnm:
+    driver: local
+  node_modules_nvm:
+    driver: local
+  node_modules_node_only:
+    driver: local
+  node_modules_setup:
+    driver: local
+  nvm_cache:
+    driver: local
+
+  # Test orchestrator service - runs all tests sequentially
+  test-runner:
+    image: docker:latest
+    depends_on:
+      - test-fnm
+      - test-nvm
+      - test-node-only
+      - test-node-setup
+    working_dir: /app
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app
+    command: >
+      sh -c "
+        echo '========================================' &&
+        echo 'Running OCcode Test Suite' &&
+        echo '========================================' &&
+        echo '' &&
+        echo '[1/4] Testing FNM scenario...' &&
+        docker-compose -f docker-compose.test.yml run --rm test-fnm &&
+        echo '' &&
+        echo '[2/4] Testing NVM scenario...' &&
+        docker-compose -f docker-compose.test.yml run --rm test-nvm &&
+        echo '' &&
+        echo '[3/4] Testing Node-only scenario...' &&
+        docker-compose -f docker-compose.test.yml run --rm test-node-only &&
+        echo '' &&
+        echo '[4/4] Testing Node-setup scenario...' &&
+        docker-compose -f docker-compose.test.yml run --rm test-node-setup &&
+        echo '' &&
+        echo '========================================' &&
+        echo 'All tests completed!' &&
+        echo '========================================'"
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
