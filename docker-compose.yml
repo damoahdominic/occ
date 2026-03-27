@@ -28,10 +28,43 @@ services:
     networks:
       - dev-network
 
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: occ-web:latest
+    container_name: occ-web-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules_web:/app/apps/web/node_modules
+      - node_modules_root_web:/app/node_modules
+    ports:
+      - "3002:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        npm ci --ignore-scripts &&
+        cd apps/web &&
+        npm ci &&
+        npm run dev
+    depends_on:
+      - editor
+    networks:
+      - dev-network
+
 volumes:
   node_modules:
     driver: local
   node_modules_editor:
+    driver: local
+  node_modules_web:
+    driver: local
+  node_modules_root_web:
     driver: local
 
 networks:
