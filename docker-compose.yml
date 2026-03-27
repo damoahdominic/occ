@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  editor:
+    image: openclaw/editor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/editor:/apps/editor
+      - node_modules:/apps/editor/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+    extends:
+      file: docker-compose.test.yml
+      service: test-node-only
+    command: >
+      bash -c "
+        npm ci --ignore-scripts &&
+        npm run dev
+      "
+
+volumes:
+  node_modules:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
