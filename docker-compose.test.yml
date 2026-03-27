@@ -123,18 +123,6 @@ services:
     networks:
       - test-network
 
-volumes:
-  node_modules_fnm:
-    driver: local
-  node_modules_nvm:
-    driver: local
-  node_modules_node_only:
-    driver: local
-  node_modules_setup:
-    driver: local
-  nvm_cache:
-    driver: local
-
   # Test orchestrator service - runs all tests sequentially
   test-runner:
     image: docker:latest
@@ -170,6 +158,18 @@ volumes:
         echo '========================================'"
     networks:
       - test-network
+
+volumes:
+  node_modules_fnm:
+    driver: local
+  node_modules_nvm:
+    driver: local
+  node_modules_node_only:
+    driver: local
+  node_modules_setup:
+    driver: local
+  nvm_cache:
+    driver: local
 
 networks:
   test-network:
