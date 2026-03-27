@@ -2,16 +2,11 @@ version: '3.9'
 
 services:
   editor:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    extends:
+      file: docker-compose.test.yml
+      service: test-nvm
     image: occ-editor:latest
     container_name: occ-editor-dev
-    working_dir: /app
-    volumes:
-      - .:/app
-      - node_modules:/app/node_modules
-      - node_modules_editor:/app/apps/editor/node_modules
     ports:
       - "3001:3000"
     environment:
@@ -19,26 +14,17 @@ services:
     entrypoint: sh
     command:
       - -c
-      - |
-        npm ci --ignore-scripts &&
-        cd apps/editor &&
-        npm ci &&
-        cd /app &&
-        npm run dev
+      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; npm ci --ignore-scripts && cd apps/editor && npm ci && cd /app && npm run dev"
     networks:
-      - dev-network
+      dev-network: null
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    extends:
+      file: docker-compose.test.yml
+      service: test-nvm
     image: occ-web:latest
     container_name: occ-web-dev
     working_dir: /app
-    volumes:
-      - .:/app
-      - node_modules_web:/app/apps/web/node_modules
-      - node_modules_root_web:/app/node_modules
     ports:
       - "3002:3000"
     environment:
@@ -47,15 +33,11 @@ services:
     entrypoint: sh
     command:
       - -c
-      - |
-        npm ci --ignore-scripts &&
-        cd apps/web &&
-        npm ci &&
-        npm run dev
+      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; npm ci --ignore-scripts && cd apps/web && npm ci && npm run dev"
     depends_on:
       - editor
     networks:
-      - dev-network
+      dev-network: null
 
 volumes:
   node_modules:
@@ -66,7 +48,13 @@ volumes:
     driver: local
   node_modules_root_web:
     driver: local
+  node_modules_nvm:
+    driver: local
+  nvm_cache:
+    driver: local
 
 networks:
   dev-network:
+    driver: bridge
+  test-network:
     driver: bridge
