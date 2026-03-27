@@ -19,7 +19,10 @@ version: '3.8'
 services:
   # Test fnm scenario
   test-fnm:
-    image: node:22
+    build:
+      context: .
+      dockerfile: docker/test-fnm.Dockerfile
+    image: occ-test-fnm:latest
     container_name: occ-test-fnm
     working_dir: /app
     volumes:
@@ -43,7 +46,10 @@ services:
 
   # Test nvm scenario
   test-nvm:
-    image: node:22
+    build:
+      context: .
+      dockerfile: docker/test-nvm.Dockerfile
+    image: occ-test-nvm:latest
     container_name: occ-test-nvm
     working_dir: /app
     volumes:
@@ -72,7 +78,10 @@ services:
 
   # Test system Node only scenario
   test-node-only:
-    image: node:22
+    build:
+      context: .
+      dockerfile: docker/test-node-only.Dockerfile
+    image: occ-test-node-only:latest
     container_name: occ-test-node-only
     working_dir: /app
     volumes:
@@ -94,7 +103,10 @@ services:
 
   # Test auto-install scenario (starts from base OS)
   test-node-setup:
-    image: ubuntu:22.04
+    build:
+      context: .
+      dockerfile: docker/test-node-setup.Dockerfile
+    image: occ-test-node-setup:latest
     container_name: occ-test-node-setup
     working_dir: /app
     volumes:
