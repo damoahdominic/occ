@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -6,7 +7,13 @@ import * as http from 'http';
 import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
+import { setActiveOpenClawWorkspaceFolder } from './panels/statusController';
 import { stopConfigProxy, getDashboardUrl } from './panels/config';
+import { HostRegistry } from './hosts/registry';
+import { HostManager } from './hosts/manager';
+import { HostStatusBarItem } from './hosts/statusbar';
+import { HostTreeProvider } from './hosts/tree';
+import type { OpenClawCoreAPI } from './hosts/types';
 
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -24,9 +31,85 @@ function getConfiguredGatewayPort(): number {
   }
 }
 
+// ── Window host binding ─────────────────────────────────────────────────────
+
+/** Describes which host this VS Code window is currently bound to. */
+export interface WindowHostBinding {
+  type: 'local' | 'docker' | 'ssh';
+  hostId: string;
+  port: number;
+  label: string;
+}
+
+const WINDOW_HOST_KEY = 'occ.windowHost';
+
+function registerWindowHostCommands(context: vscode.ExtensionContext): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('occ.window.setHost', (binding: WindowHostBinding) => {
+      void context.workspaceState.update(WINDOW_HOST_KEY, binding);
+    }),
+    vscode.commands.registerCommand('occ.window.clearHost', () => {
+      void context.workspaceState.update(WINDOW_HOST_KEY, undefined);
+    }),
+    /** Returns the current WindowHostBinding for this window, or null. */
+    vscode.commands.registerCommand('occ.window.getHost', () => {
+      return context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
+    }),
+  );
+}
+
+/**
+ * Smart routing for the "OCC Home" command.
+ * Priority: stored window binding → detected state → install wizard.
+ */
+function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext, forcePicker = false): void {
+  // When forcePicker is set (e.g. after disconnect) always show the host picker — never auto-route.
+  if (forcePicker) {
+    HomePanel.createOrShow(extensionUri, true);
+    return;
+  }
+
+  // 1. If this window already has a binding, honour it.
+  const binding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
+  if (binding?.type === 'local') {
+    void vscode.commands.executeCommand('openclaw.host.setup.local');
+    return;
+  }
+  if (binding?.type === 'docker') {
+    void vscode.commands.executeCommand('openclaw.host.setup.docker');
+    return;
+  }
+
+  // 2. No binding — detect installed hosts and route.
+  const isLocalInstalled = fs.existsSync(
+    path.join(os.homedir(), '.openclaw', 'openclaw.json')
+  );
+
+  let isDockerRunning = false;
+  try {
+    const result = cp.spawnSync(
+      'docker',
+      ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+      { timeout: 3000, windowsHide: true },
+    );
+    const st = (result.stdout?.toString() ?? '').trim();
+    isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+  } catch { /* docker not available */ }
+
+  if (isLocalInstalled && isDockerRunning) {
+    HomePanel.createOrShow(extensionUri);          // hosts overview — user picks
+  } else if (isLocalInstalled) {
+    void vscode.commands.executeCommand('openclaw.host.setup.local');
+  } else if (isDockerRunning) {
+    void vscode.commands.executeCommand('openclaw.host.setup.docker');
+  } else {
+    HomePanel.createOrShow(extensionUri);          // install wizard
+  }
+}
+
 /** Returns true if the OpenClaw web server is reachable. */
-function isWebServerReachable(): Promise<boolean> {
-  const port = getConfiguredGatewayPort();
+function isWebServerReachable(portOverride?: number): Promise<boolean> {
+  const port = portOverride ?? getConfiguredGatewayPort();
   const url = `http://localhost:${port}/`;
   return new Promise(resolve => {
     const req = http.get(url, { timeout: 3000 }, res => {
@@ -130,7 +213,7 @@ async function hideActivityBarItems(
  */
 const WORKSPACE_FILENAME = 'My OpenClaw Workspace.code-workspace';
 
-async function openOpenClawFolder(): Promise<void> {
+async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<void> {
   // Ensure ~/.occ exists — OCcode's internal state directory.
   const occPath = path.join(os.homedir(), '.occ');
   if (!fs.existsSync(occPath)) {
@@ -177,9 +260,15 @@ async function openOpenClawFolder(): Promise<void> {
     );
   }
 
-  // If we're already inside this workspace, nothing more to do.
+  // If we're already inside this workspace, nothing more to do — except ensure
+  // the workspace folder reflects the current host (not a stale Docker folder).
   const workspaceFileUri = vscode.Uri.file(workspaceFilePath);
   if (vscode.workspace.workspaceFile?.fsPath === workspaceFileUri.fsPath) {
+    const binding = context?.workspaceState.get<{ type: string }>(WINDOW_HOST_KEY);
+    if (binding?.type !== 'docker') {
+      // Not bound to Docker — ensure ~/.openclaw is shown, not occ-state-dir.
+      setActiveOpenClawWorkspaceFolder(openclawPath);
+    }
     return;
   }
 
@@ -190,7 +279,7 @@ async function openOpenClawFolder(): Promise<void> {
 
 // ── Inference balance status bar ──────────────────────────────────────────────
 const BACKEND_BALANCE_KEY = 'occBackendBalanceV1'; // cached backend balance — persists across restarts
-const OCC_JWT_KEY = 'occJwtV1'; // JWT stored directly in extension storage — no renderer IPC needed
+const OCC_JWT_KEY = 'occJwtV1'; // JWT stored in SecretStorage (OS keychain) — encrypted at rest
 
 function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => void {
   // Restore cached backend balance so status bar shows the correct value immediately on startup
@@ -284,13 +373,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       // FALLBACK: if extension globalState has no JWT (e.g. user signed in before this session
       // synced, or the extension was reloaded), read from occLegacyJwt in VS Code settings and
       // backfill extension globalState so future reads work without IPC.
-      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
       if (!jwt) {
         try {
           const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
           if (legacyJwt) {
             jwt = legacyJwt;
-            await context.globalState.update(OCC_JWT_KEY, jwt);
+            await context.secrets.store(OCC_JWT_KEY, jwt);
           }
         } catch { /* renderer not ready yet — will retry on next poll */ }
       }
@@ -316,7 +405,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
         // Guard: only sync back if the JWT wasn't cleared while the fetch was in-flight.
         // Without this check, an in-flight poll completing after sign-out would re-log the user in.
-        const currentJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+        const currentJwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
         if (currentJwt !== jwt) { return; }
         // Sync JWT + keys to renderer settings so ocFreeModel works
         vscode.commands.executeCommand('occ.auth.setLegacyJwt', jwt);
@@ -347,7 +436,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         }
       } else if (r.status === 401) {
         // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
-        void context.globalState.update(OCC_JWT_KEY, '');
+        void context.secrets.delete(OCC_JWT_KEY);
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
         stopCountdown();
@@ -400,7 +489,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     // Called from the renderer (sidebarActions.ts occ.auth.setLegacyJwt) to sync the JWT
     // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
     vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
-      await context.globalState.update(OCC_JWT_KEY, token ?? '');
+      if (token) { await context.secrets.store(OCC_JWT_KEY, token); } else { await context.secrets.delete(OCC_JWT_KEY); }
       // Stop polling immediately on sign-out so no more in-flight fetches can re-set the JWT
       if (!token && backendPollTimer) {
         clearInterval(backendPollTimer);
@@ -420,13 +509,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       log('');
 
       // 1. JWT
-      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
-      log(`[1] JWT in extension globalState (occJwtV1): ${jwt ? 'OK present (' + jwt.substring(0, 20) + '...)' : 'MISSING'}`);
+      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
+      log(`[1] JWT in SecretStorage (occJwtV1): ${jwt ? 'OK present [redacted]' : 'MISSING'}`);
       // Check what the renderer has for occLegacyJwt — this is what voidSettingsService reads
       try {
         const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
-        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present (' + legacyJwt.substring(0, 20) + '...)' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
-        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.globalState.update(OCC_JWT_KEY, jwt); }
+        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present [redacted]' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
+        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.secrets.store(OCC_JWT_KEY, jwt); }
       } catch { log('    occLegacyJwt check: renderer not ready'); }
 
       if (!jwt) { lines.push('\nNot signed in — cannot proceed.'); }
@@ -446,8 +535,8 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
             log(`    Status: 200 OK`);
             log(`    Email:        ${d.email ?? '(not returned)'}`);
             log(`    Balance:      $${balanceBefore.toFixed(6)}`);
-            log(`    MoltpilotKey: ${moltpilotKey ? 'OK ' + moltpilotKey.substring(0, 12) + '...' : 'MISSING'}`);
-            log(`    OccKey:       ${occKey ? 'OK ' + occKey.substring(0, 12) + '...' : 'MISSING'}`);
+            log(`    MoltpilotKey: ${moltpilotKey ? 'OK [redacted]' : 'MISSING'}`);
+            log(`    OccKey:       ${occKey ? 'OK [redacted]' : 'MISSING'}`);
           } else {
             log(`    HTTP ${r.status} -- JWT may be expired`);
           }
@@ -510,7 +599,37 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
   return () => {}; // spend is a no-op — kept so call sites don't break
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export async function activate(context: vscode.ExtensionContext): Promise<OpenClawCoreAPI> {
+  // ── One-time migration: move JWT from globalState → SecretStorage ────────────
+  const legacyJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+  if (legacyJwt) {
+    await context.secrets.store(OCC_JWT_KEY, legacyJwt);
+    await context.globalState.update(OCC_JWT_KEY, undefined);
+  }
+
+  // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
+  const hostRegistry = new HostRegistry();
+  await hostRegistry.init();
+  const hostManager = new HostManager(hostRegistry);
+  context.subscriptions.push(hostRegistry, hostManager);
+
+  // (OPENCLAW HOSTS tree view and status bar removed — window-level binding used instead)
+
+  // Host management commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openclaw.pickHost', async () => {
+      const id = await hostManager.showHostPicker();
+      if (id) { await hostManager.setActiveHost(id); }
+    }),
+    vscode.commands.registerCommand('openclaw.setActiveHost', async (id: string) => {
+      await hostManager.setActiveHost(id);
+    }),
+    vscode.commands.registerCommand('openclaw.refreshHost', async () => {
+      const activeId = hostRegistry.getActiveHostId();
+      await hostManager.refreshHost(activeId);
+    }),
+  );
+
   // Inference balance bar (shown at bottom-right, tracks $1.00 free budget).
   const spendBalance = initBalanceBar(context);
 
@@ -518,7 +637,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await hideActivityBarItems(context);
 
   // Open ~/.openclaw as "My OpenClaw Workspace" (may reload the window once).
-  await openOpenClawFolder();
+  await openOpenClawFolder(context);
 
   // Close the Explorer sidebar on startup — the user opens it explicitly when needed.
   // Use a short delay so the workbench has finished restoring its layout first.
@@ -536,8 +655,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           const params = new URLSearchParams(uri.query);
           const token = params.get('token');
           if (token) {
-            // Store JWT in extension-host storage immediately (no renderer IPC needed).
-            void context.globalState.update(OCC_JWT_KEY, token).then(() => {
+            // Store JWT in SecretStorage (OS keychain) — encrypted at rest.
+            void context.secrets.store(OCC_JWT_KEY, token).then(() => {
               // Also sync to renderer settings service (for chat / other renderer consumers).
               vscode.commands.executeCommand('occ.auth.setLegacyJwt', token);
             });
@@ -547,20 +666,62 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
+  registerWindowHostCommands(context);
+
   context.subscriptions.push(
     vscode.commands.registerCommand('openclaw.home', () => {
-      HomePanel.createOrShow(context.extensionUri);
+      routeHome(context.extensionUri, context);
+    }),
+    // Always shows the host picker regardless of what is installed — used after disconnect.
+    vscode.commands.registerCommand('openclaw.home.picker', () => {
+      routeHome(context.extensionUri, context, true);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
-      const reachable = await isWebServerReachable();
+      const windowHostBinding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
+
+      // ── Docker path ───────────────────────────────────────────────────────
+      if (windowHostBinding?.type === 'docker') {
+        const container = windowHostBinding.hostId.replace(/^docker:/, '') || 'occ-openclaw';
+        const hostPort = windowHostBinding.port; // e.g. 18790
+        const containerPort = 18789;
+
+        // 1. Start the gateway inside the container (detached — safe if already running)
+        cp.spawn('docker', ['exec', '-d', container, 'openclaw', 'gateway', 'run'], {
+          windowsHide: true,
+          detached: true,
+        }).unref();
+
+        // 2. Give it a moment to start, then get the tokenized dashboard URL
+        await new Promise<void>(r => setTimeout(r, 2000));
+
+        const dashResult = cp.spawnSync(
+          'docker',
+          ['exec', container, 'openclaw', 'dashboard', '--no-open'],
+          { timeout: 10000, windowsHide: true, encoding: 'utf-8' },
+        );
+        let rawUrl = (dashResult.stdout as string ?? '').trim();
+
+        if (rawUrl) {
+          // Rewrite the internal container port to the host-mapped port
+          const url = rawUrl
+            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
+            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+          await vscode.env.openExternal(vscode.Uri.parse(url));
+        } else {
+          // dashboard command failed — open plain URL as fallback
+          await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${hostPort}/`));
+        }
+        return;
+      }
+
+      // ── Local / SSH path ──────────────────────────────────────────────────
+      const effectivePort = windowHostBinding ? windowHostBinding.port : getConfiguredGatewayPort();
+      const reachable = await isWebServerReachable(effectivePort);
       if (reachable) {
-        const dashInfo = getDashboardUrl();
-        const url = dashInfo?.url ?? `http://localhost:${getConfiguredGatewayPort()}/`;
+        const url = getDashboardUrl()?.url ?? `http://localhost:${effectivePort}/`;
         await vscode.env.openExternal(vscode.Uri.parse(url));
       } else {
-        // Web server not running — ask the AI to start it
-        const port = getConfiguredGatewayPort();
-        const configUrl = `http://localhost:${port}/`;
+        const configUrl = `http://localhost:${effectivePort}/`;
         const message =
           `The OpenClaw web configuration server is not running at ${configUrl}.\n\n` +
           `Please start it now by running the OpenClaw gateway in the terminal:\n` +
@@ -590,12 +751,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       spendBalance();
     }),
     vscode.commands.registerCommand('openclaw.install', () => {
-      void HomePanel.runInstall(
-        context.extensionUri,
-        process.platform,
-        process.arch,
-        process.env.SHELL ?? '',
-      );
+      // Delegate to LocalSetupPanel via the host setup command
+      void vscode.commands.executeCommand('openclaw.host.setup.local');
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();
@@ -635,7 +792,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (!password) return { result: 'User cancelled the password prompt.', exitCode: 1 };
 
       return new Promise(resolve => {
-        const child = require('child_process').spawn('sudo', ['-S', 'bash', '-c', command], {
+        const child = cp.spawn('sudo', ['-S', 'bash', '-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.stdin?.write(password + '\n');
@@ -685,7 +842,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       hasAiModel: boolean;
       hasChannels: boolean;
       channelNames: string[];
+      hostType: 'local' | 'docker' | 'ssh' | null;
+      containerName: string | null;
+      gatewayPort: number;
     }> => {
+      // Resolve window-level host binding first
+      const windowHost = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY) ?? null;
       const homedir = os.homedir();
       const configPath = path.join(homedir, '.openclaw', 'openclaw.json');
       const installed = fs.existsSync(configPath);
@@ -695,8 +857,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         try { config = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch {}
       }
 
-      // Determine gateway port
+      // Determine gateway port — for Docker/SSH hosts use the window binding's port directly
       const port = (() => {
+        if (windowHost?.type === 'docker' || windowHost?.type === 'ssh') {
+          return windowHost.port;
+        }
         const p = config['port'] ?? config['gateway_port'] ?? config['gatewayPort'];
         if (p === undefined) return 18789;
         const n = Number(p);
@@ -758,7 +923,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       } catch {}
       const hasAgents = agentNames.length > 0;
 
-      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames };
+      const hostType = windowHost?.type ?? 'local';
+      const containerName = (windowHost?.type === 'docker' || windowHost?.type === 'ssh')
+        ? (windowHost.hostId ?? null)
+        : null;
+
+      return { installed, gatewayRunning, hasAgents, agentNames, hasAiModel, hasChannels, channelNames, hostType, containerName, gatewayPort: port };
     }),
   );
 
@@ -797,8 +967,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Auto-show OCC Home on startup (after activation settles).
   setTimeout(() => {
-    HomePanel.createOrShow(context.extensionUri);
+    routeHome(context.extensionUri, context);
   }, 500);
+
+  // Return OpenClawCoreAPI so adapter extensions can register their adapters.
+  return hostManager;
 }
 
 export function deactivate() {

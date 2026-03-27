@@ -1,0 +1,25 @@
+{
+	"name": "openclaw-local",
+	"displayName": "OpenClaw Local",
+	"description": "Manage OpenClaw on your local machine",
+	"version": "1.0.0",
+	"publisher": "openclaw",
+	"license": "MIT",
+	"engines": { "vscode": "^1.85.0" },
+	"extensionDependencies": ["openclaw.home"],
+	"categories": ["Other"],
+	"activationEvents": ["onStartupFinished"],
+	"main": "./out/openclaw-local/src/extension",
+	"contributes": {
+		"commands": [{ "command": "openclaw.host.setup.local", "title": "OpenClaw: Set up Local" }]
+	},
+	"scripts": {
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./"
+	},
+	"devDependencies": {
+		"@types/node": "^20.0.0",
+		"@types/vscode": "^1.85.0",
+		"typescript": "^5.3.0"
+	}
+}

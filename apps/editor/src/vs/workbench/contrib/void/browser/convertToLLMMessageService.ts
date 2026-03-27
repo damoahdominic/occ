@@ -604,6 +604,9 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 			hasAiModel: boolean;
 			hasChannels: boolean;
 			channelNames: string[];
+			hostType: 'local' | 'docker' | 'ssh' | null;
+			containerName: string | null;
+			gatewayPort: number;
 		}>('openclaw.getSystemStatus').then(r => r ?? null, () => null)
 
 		const systemMessage = chat_systemMessage({ workspaceFolders, openedURIs, directoryStr, activeURI, persistentTerminalIDs, chatMode, mcpTools, includeXMLToolDefinitions, occStatus })
