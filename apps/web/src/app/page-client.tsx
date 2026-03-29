@@ -300,6 +300,92 @@ async function fetchDownloadUrls(): Promise<DownloadUrls> {
   }
 }
 
+
+function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setStatus("loading");
+    try {
+      const res = await fetch("https://occ.mba.sh/api/v1/early-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (res.ok) {
+        setStatus("success");
+        setMessage("You\u2019re on the list! We\u2019ll be in touch soon.");
+        setEmail("");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setStatus("error");
+        setMessage(data.error || "Something went wrong. Please try again.");
+      }
+    } catch {
+      setStatus("error");
+      setMessage("Something went wrong. Please try again.");
+    }
+  };
+
+  if (status === "success") {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <div className="inline-flex items-center gap-2 text-green-400 font-medium">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          {message}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className={`flex flex-col items-center gap-3 ${compact ? "" : "w-full max-w-md mx-auto"}`}>
+      <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setStatus("idle"); }}
+          placeholder="Enter your email"
+          required
+          className="flex-1 w-full sm:w-auto bg-white/5 border border-[var(--border)] hover:border-[var(--text-muted)] focus:border-[var(--accent)] text-white placeholder:text-[var(--text-muted)] px-5 py-3.5 rounded-xl text-base transition-all outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
+        />
+        <div className="relative btn-glow rounded-xl w-full sm:w-auto">
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="inline-flex items-center justify-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all w-full sm:w-auto disabled:opacity-60"
+          >
+            {status === "loading" ? (
+              <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+            )}
+            Sign Up for Early Access
+          </button>
+        </div>
+      </div>
+      {status === "error" && (
+        <p className="text-red-400 text-sm">{message}</p>
+      )}
+      <p className="text-sm text-[var(--text-muted)]">
+        Be the first to know when OCCode launches. No spam, ever.
+      </p>
+    </form>
+  );
+}
+
 export default function Home() {
   const [downloadUrls, setDownloadUrls] = useState<DownloadUrls>(FALLBACK_URLS);
   const [platform, setPlatform] = useState<Platform>("windows");
@@ -565,45 +651,21 @@ export default function Home() {
                     OpenClaw <span className="text-[var(--accent)]">Code</span>
                   </h1>
                   <p className="text-lg sm:text-xl text-[var(--text-muted)] max-w-2xl mb-10 leading-relaxed">
-                    The simplest way to get started with OpenClaw locally.
+                    The simplest way to set up and manage OpenClaw locally.
                     <br className="hidden sm:block" />
-                    Just download, open, and you&apos;re ready to go.
-                  </p>
-
-                  {/* Download + Star buttons */}
-                  <div className="flex flex-col items-center gap-3 mb-10">
-                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-                      <div className="relative btn-glow rounded-xl w-full sm:w-auto">
-                        <a
-                          href={downloadUrls[platform]}
-                          className="inline-flex items-center justify-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all w-full sm:w-auto"
-                        >
-                          {platformIcons[platform]}
-                          Download for {platformLabels[platform]}
-                        </a>
-                      </div>
-                      <a
-                        href="https://github.com/damoahdominic/occ"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center gap-2 border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-white font-semibold px-5 py-3.5 rounded-xl text-base transition-all hover:bg-white/5 w-full sm:w-auto"
-                      >
-                        <svg viewBox="0 0 16 16" className="w-5 h-5" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-                        Star on GitHub
-                      </a>
-                    </div>
-                    <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                      Also available for
-                      {otherPlatforms.map((p, i) => (
-                        <span key={p} className="inline-flex items-center gap-1.5">
-                          {i > 0 && <span className="mx-1">·</span>}
-                          <a href={downloadUrls[p]} className="inline-flex items-center gap-1.5 hover:text-white transition-colors">
-                            {platformIcons[p]}
-                            {platformLabels[p]}
-                          </a>
-                        </span>
-                      ))}
-                    </span>
+                    Sign up to be first in line when we launch.
+                  </p>                  {/* Early Access Signup */}
+                  <div className="flex flex-col items-center gap-3 mb-10 w-full max-w-lg">
+                    <EarlyAccessForm />
+                    <a
+                      href="https://github.com/damoahdominic/occ"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-white font-semibold px-5 py-3.5 rounded-xl text-base transition-all hover:bg-white/5"
+                    >
+                      <svg viewBox="0 0 16 16" className="w-5 h-5" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                      Star on GitHub
+                    </a>
                   </div>
 
 
@@ -1082,45 +1144,14 @@ export default function Home() {
 
               <div className="relative px-8 py-16 sm:px-20 text-center">
                 <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4 leading-tight">
-                  Get started in minutes
+                  Get early access
                 </h2>
                 <p className="text-[var(--text-muted)] text-base sm:text-lg mb-10 max-w-sm mx-auto leading-relaxed">
-                  Download OCCode and go from zero to a fully configured OpenClaw environment — no manual setup required.
+                  Be the first to experience OCCode when it launches. Sign up and we'll notify you the moment it's ready.
                 </p>
 
                 <div className="flex flex-col items-center justify-center gap-3">
-                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-                      <div className="relative btn-glow rounded-xl w-full sm:w-auto">
-                        <a
-                          href={downloadUrls[platform]}
-                          className="inline-flex items-center justify-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all w-full sm:w-auto"
-                        >
-                          {platformIcons[platform]}
-                          Download for {platformLabels[platform]}
-                        </a>
-                      </div>
-                      <a
-                        href="https://github.com/damoahdominic/occ"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center justify-center gap-2 border border-[var(--border)] hover:border-[var(--text-muted)] text-[var(--text-secondary)] hover:text-white font-semibold px-5 py-3.5 rounded-xl text-base transition-all hover:bg-white/5 w-full sm:w-auto"
-                      >
-                        <svg viewBox="0 0 16 16" className="w-5 h-5" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-                        Star on GitHub
-                      </a>
-                    </div>
-                    <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                      Also available for
-                      {otherPlatforms.map((p, i) => (
-                        <span key={p} className="inline-flex items-center gap-1.5">
-                          {i > 0 && <span className="mx-1">·</span>}
-                          <a href={downloadUrls[p]} className="inline-flex items-center gap-1.5 hover:text-white transition-colors">
-                            {platformIcons[p]}
-                            {platformLabels[p]}
-                          </a>
-                        </span>
-                      ))}
-                    </span>
+                    <EarlyAccessForm />
                 </div>
               </div>
 
