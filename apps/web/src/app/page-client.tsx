@@ -359,7 +359,7 @@ function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
           <button
             type="submit"
             disabled={status === "loading"}
-            className="inline-flex items-center justify-center gap-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-7 py-3.5 rounded-xl text-base transition-all w-full sm:w-auto disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-5 py-3.5 rounded-xl text-sm whitespace-nowrap transition-all w-full sm:w-auto disabled:opacity-60"
           >
             {status === "loading" ? (
               <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
@@ -372,7 +372,7 @@ function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
                 <polyline points="22,6 12,13 2,6" />
               </svg>
             )}
-            Sign Up for Early Access
+            Join Waitlist
           </button>
         </div>
       </div>
