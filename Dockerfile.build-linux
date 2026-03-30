@@ -18,6 +18,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     g++ \
     gcc \
     xz-utils \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install nvm + Node 20.18.2
@@ -31,6 +32,14 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | b
 ENV PATH="$NVM_DIR/versions/node/v20.18.2/bin:$PATH"
 
 WORKDIR /workspace
+
+# Configure GitHub token for npm to avoid 401 errors
+ARG GITHUB_TOKEN
+RUN if [ ! -z "$GITHUB_TOKEN" ]; then \
+      npm config set //npm.pkg.github.com/:_authToken $GITHUB_TOKEN && \
+      npm config set @vscode:registry https://registry.npmjs.org/ && \
+      npm config set @microsoft:registry https://registry.npmjs.org/; \
+    fi
 
 # Smoke test
 RUN node --version && npm --version

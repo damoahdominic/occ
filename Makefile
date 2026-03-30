@@ -88,7 +88,7 @@ build-core:
 	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
 	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
 	echo "==> Install build dependencies" && \
-	cd build && npm ci && cd .. && \
+	cd build && npm ci --ignore-scripts && cd .. && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \
