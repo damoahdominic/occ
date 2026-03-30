@@ -166,6 +166,35 @@ build-windows:
 	node_modules/.bin/gulp vscode-win32-x64-user-setup && \
 	echo "==> Windows build complete"
 
+## build-macos: Full macOS editor build (core + dmg packaging for both architectures)
+build-macos:
+	@echo "Running macOS build..."
+	$(MAKE) -C $(PROJECT_ROOT) build-core ELECTRON_ARCH=arm64 && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Package app (darwin-arm64)" && \
+	VSCODE_ARCH=arm64 node_modules/.bin/gulp vscode-darwin-arm64-min-ci && \
+	echo "==> Package app (darwin-x64)" && \
+	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-darwin-x64-min-ci && \
+	echo "==> macOS build complete"
+
+## build-macos-arm64: Build macOS arm64 only
+build-macos-arm64:
+	@echo "Running macOS arm64 build..."
+	$(MAKE) -C $(PROJECT_ROOT) build-core ELECTRON_ARCH=arm64 && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Package app (darwin-arm64)" && \
+	VSCODE_ARCH=arm64 node_modules/.bin/gulp vscode-darwin-arm64-min-ci && \
+	echo "==> macOS arm64 build complete"
+
+## build-macos-x64: Build macOS x64 only
+build-macos-x64:
+	@echo "Running macOS x64 build..."
+	$(MAKE) -C $(PROJECT_ROOT) build-core ELECTRON_ARCH=x64 && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Package app (darwin-x64)" && \
+	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-darwin-x64-min-ci && \
+	echo "==> macOS x64 build complete"
+
 ## container-build-linux: Run full Linux editor build inside the container
 container-build-linux:
 	@echo "Building editor image and running Linux build inside container..."
