@@ -1,4 +1,4 @@
-.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-linux container-build-linux
+.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows container-build-linux
 
 # Default target
 .DEFAULT_GOAL := help
@@ -77,16 +77,14 @@ build-linux-container:
 	@echo "Building $(BUILD_LINUX_IMAGE) container..."
 	DOCKER_BUILDKIT=0 docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
-## build-linux: Run full Linux editor build (local, no container)
-build-linux:
-	@echo "Running Linux build..."
+## build-core: Shared compilation (tsc, extensions, React, bundle, minify, download Electron)
+build-core:
+	@echo "Running core build..."
 	set -e && \
 	cd $(PROJECT_ROOT)/apps/editor && \
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor dependencies" && \
 	npm ci --ignore-scripts && \
-	echo "==> Rebuild native modules for Electron (x64)" && \
-	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
 	echo "==> Install build dependencies" && \
 	cd build && npm ci && cd .. && \
 	echo "==> Patch compilation.js" && \
@@ -129,6 +127,18 @@ build-linux:
 	node_modules/.bin/gulp minify-vscode && \
 	echo "==> Download Electron" && \
 	node build/lib/electron.js || true && \
+	echo "==> Core build complete"
+
+## build-linux: Full Linux editor build (rebuild + core + packaging)
+build-linux:
+	@echo "Running Linux build..."
+	set -e && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	export NODE_OPTIONS="--max-old-space-size=7168" && \
+	echo "==> Rebuild native modules for Electron (x64)" && \
+	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
+	$(MAKE) -C $(PROJECT_ROOT) build-core && \
+	cd $(PROJECT_ROOT)/apps/editor && \
 	echo "==> Package app (linux-x64)" && \
 	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-linux-x64-min-ci && \
 	echo "==> Remove musl watcher" && \
@@ -141,7 +151,28 @@ build-linux:
 	echo "==> Build .deb package" && \
 	node_modules/.bin/gulp vscode-linux-x64-prepare-deb && \
 	node_modules/.bin/gulp vscode-linux-x64-build-deb && \
-	echo "==> Build complete"
+	echo "==> Linux build complete"
+
+## build-windows: Full Windows editor build (rebuild + core + packaging)
+build-windows:
+	@echo "Running Windows build..."
+	set -e && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	export NODE_OPTIONS="--max-old-space-size=7168" && \
+	echo "==> Rebuild native modules for Electron (x64)" && \
+	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
+	$(MAKE) -C $(PROJECT_ROOT) build-core && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Package app (win32-x64)" && \
+	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-win32-x64-min-ci && \
+	echo "==> Stamp app icon" && \
+	npx rcedit "$(PROJECT_ROOT)/apps/VSCode-win32-x64/OCcode.exe" --set-icon resources/win32/code.ico && \
+	echo "==> Copy inno_updater to build" && \
+	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-win32-x64-inno-updater && \
+	echo "==> Build Windows installers" && \
+	node_modules/.bin/gulp vscode-win32-x64-system-setup && \
+	node_modules/.bin/gulp vscode-win32-x64-user-setup && \
+	echo "==> Windows build complete"
 
 ## container-build-linux: Run full Linux editor build inside the container
 container-build-linux:
