@@ -144,18 +144,10 @@ build-linux:
 	echo "==> Build complete"
 
 ## container-build-linux: Run full Linux editor build inside the container
-container-build-linux: build-linux-container
-	@echo "Running Linux build inside container..."
-	CID=$$(docker create \
-		-v $(PROJECT_ROOT)/apps/editor:/workspace \
+container-build-linux:
+	@echo "Building editor image and running Linux build inside container..."
+	docker compose build editor
+	docker compose run --rm \
+		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
-		-e GITHUB_TOKEN \
-		$(BUILD_LINUX_IMAGE) make -f /workspace/../../Makefile build-linux PROJECT_ROOT=/workspace/../..); \
-	docker start -a $$CID || true; \
-	echo "==> Copying build artifacts from container..."; \
-	mkdir -p $(PROJECT_ROOT)/apps/VSCode-linux-x64; \
-	docker cp $$CID:/VSCode-linux-x64/. $(PROJECT_ROOT)/apps/VSCode-linux-x64/ 2>/dev/null || true; \
-	mkdir -p $(PROJECT_ROOT)/apps/editor/.build/linux; \
-	docker cp $$CID:/workspace/.build/linux/. $(PROJECT_ROOT)/apps/editor/.build/linux/ 2>/dev/null || true; \
-	docker rm $$CID >/dev/null 2>&1 || true; \
-	echo "==> Artifacts in apps/VSCode-linux-x64/ and apps/editor/.build/linux/"
+		editor build-linux PROJECT_ROOT=/workspace
