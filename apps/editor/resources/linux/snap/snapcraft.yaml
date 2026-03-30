@@ -1,10 +1,8 @@
 name: @@NAME@@
 version: '@@VERSION@@'
-summary: Code editing. Redefined.
+summary: @@NAME_LONG@@. @@DESCRIPTION@@
 description: |
-  Visual Studio Code is a new choice of tool that combines the
-  simplicity of a code editor with what developers need for the core
-  edit-build-debug cycle.
+  @@DESCRIPTION_LONG@@
 
 architectures:
   - build-on: amd64
