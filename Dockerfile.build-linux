@@ -1,0 +1,36 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies matching the build-linux job
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    git \
+    fakeroot \
+    rpm \
+    libkrb5-dev \
+    libsecret-1-dev \
+    libx11-dev \
+    libxkbfile-dev \
+    python3 \
+    make \
+    g++ \
+    gcc \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install nvm + Node 20.18.2
+ENV NVM_DIR=/root/.nvm
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash \
+    && . "$NVM_DIR/nvm.sh" \
+    && nvm install 20.18.2 \
+    && nvm alias default 20.18.2
+
+# Put node/npm on PATH for all subsequent commands
+ENV PATH="$NVM_DIR/versions/node/v20.18.2/bin:$PATH"
+
+WORKDIR /workspace
+
+# Smoke test
+RUN node --version && npm --version
