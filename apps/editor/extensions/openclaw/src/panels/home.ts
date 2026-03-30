@@ -1365,9 +1365,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
 
-<<<<<<< HEAD
-=======
-  private _getSetupHtml(
+private _getSetupHtml(
     isInstalled: boolean,
     iconUri: string,
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null
@@ -2202,9 +2200,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   </script>
 </body>
 </html>`;
-  }
+}
 
->>>>>>> 44f23a3 (feat(ticket-021): implement docker bootstrap wizard UI + engine in home.ts)
   private _getWizardHtml(iconUri: string, occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null): string {
     // Render user area statically (avoids JS innerHTML escaping issues)
     let userAreaHtml: string;
