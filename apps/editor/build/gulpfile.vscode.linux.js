@@ -13,17 +13,18 @@ const vfs = require('vinyl-fs');
 const { rimraf } = require('./lib/util');
 const { getVersion } = require('./lib/getVersion');
 const task = require('./lib/task');
-const packageJson = require('../package.json');
 const product = require('../product.json');
 const dependenciesGenerator = require('./linux/dependencies-generator');
 const debianRecommendedDependencies = require('./linux/debian/dep-lists').recommendedDeps;
 const path = require('path');
 const cp = require('child_process');
+const fs = require('fs');
 const util = require('util');
 
 const exec = util.promisify(cp.exec);
 const root = path.dirname(__dirname);
 const commit = getVersion(root);
+const occVersion = fs.readFileSync(path.join(root, '..', '..', 'version.txt'), 'utf8').trim();
 
 const linuxPackageRevision = Math.floor(new Date().getTime() / 1000);
 
@@ -54,12 +55,16 @@ function prepareDebPackage(arch) {
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@EXEC@@', `/usr/share/${product.applicationName}/${product.applicationName}`))
 			.pipe(replace('@@ICON@@', product.linuxIconName))
-			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol));
+			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription));
 
 		const appdata = gulp.src('resources/linux/code.appdata.xml', { base: '.' })
 			.pipe(replace('@@NAME_LONG@@', product.nameLong))
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@LICENSE@@', product.licenseName))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription))
+			.pipe(replace('@@DESCRIPTION_LONG@@', product.linuxDescriptionLong))
+			.pipe(replace('@@HOMEPAGE@@', product.linuxHomepage))
 			.pipe(rename('usr/share/appdata/' + product.applicationName + '.appdata.xml'));
 
 		const workspaceMime = gulp.src('resources/linux/code-workspace.xml', { base: '.' })
@@ -88,11 +93,16 @@ function prepareDebPackage(arch) {
 				const that = this;
 				gulp.src('resources/linux/debian/control.template', { base: '.' })
 					.pipe(replace('@@NAME@@', product.applicationName))
-					.pipe(replace('@@VERSION@@', packageJson.version + '-' + linuxPackageRevision))
+					.pipe(replace('@@NAME_LONG@@', product.nameLong))
+					.pipe(replace('@@VERSION@@', occVersion + '-' + linuxPackageRevision))
 					.pipe(replace('@@ARCHITECTURE@@', debArch))
 					.pipe(replace('@@DEPENDS@@', dependencies.join(', ')))
 					.pipe(replace('@@RECOMMENDS@@', debianRecommendedDependencies.join(', ')))
 					.pipe(replace('@@INSTALLEDSIZE@@', Math.ceil(size / 1024)))
+					.pipe(replace('@@DESCRIPTION@@', product.linuxDescription))
+					.pipe(replace('@@DESCRIPTION_LONG@@', product.linuxDescriptionLong))
+					.pipe(replace('@@HOMEPAGE@@', product.linuxHomepage))
+					.pipe(replace('@@MAINTAINER@@', product.linuxMaintainer))
 					.pipe(rename('DEBIAN/control'))
 					.pipe(es.through(function (f) { that.emit('data', f); }, function () { that.emit('end'); }));
 			}));
@@ -170,12 +180,16 @@ function prepareRpmPackage(arch) {
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@EXEC@@', `/usr/share/${product.applicationName}/${product.applicationName}`))
 			.pipe(replace('@@ICON@@', product.linuxIconName))
-			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol));
+			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription));
 
 		const appdata = gulp.src('resources/linux/code.appdata.xml', { base: '.' })
 			.pipe(replace('@@NAME_LONG@@', product.nameLong))
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@LICENSE@@', product.licenseName))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription))
+			.pipe(replace('@@DESCRIPTION_LONG@@', product.linuxDescriptionLong))
+			.pipe(replace('@@HOMEPAGE@@', product.linuxHomepage))
 			.pipe(rename('BUILD/usr/share/appdata/' + product.applicationName + '.appdata.xml'));
 
 		const workspaceMime = gulp.src('resources/linux/code-workspace.xml', { base: '.' })
@@ -201,7 +215,7 @@ function prepareRpmPackage(arch) {
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@NAME_LONG@@', product.nameLong))
 			.pipe(replace('@@ICON@@', product.linuxIconName))
-			.pipe(replace('@@VERSION@@', packageJson.version))
+			.pipe(replace('@@VERSION@@', occVersion))
 			.pipe(replace('@@RELEASE@@', linuxPackageRevision))
 			.pipe(replace('@@ARCHITECTURE@@', rpmArch))
 			.pipe(replace('@@LICENSE@@', product.licenseName))
@@ -209,6 +223,10 @@ function prepareRpmPackage(arch) {
 			.pipe(replace('@@UPDATEURL@@', product.updateUrl || '@@UPDATEURL@@'))
 			.pipe(replace('@@DEPENDENCIES@@', dependencies.join(', ')))
 			.pipe(replace('@@STRIP@@', stripBinary))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription))
+			.pipe(replace('@@DESCRIPTION_LONG@@', product.linuxDescriptionLong))
+			.pipe(replace('@@HOMEPAGE@@', product.linuxHomepage))
+			.pipe(replace('@@MAINTAINER@@', product.linuxMaintainer))
 			.pipe(rename('SPECS/' + product.applicationName + '.spec'));
 
 		const specIcon = gulp.src('resources/linux/rpm/code.xpm', { base: '.' })
@@ -265,7 +283,8 @@ function prepareSnapPackage(arch) {
 			.pipe(replace('@@NAME@@', product.applicationName))
 			.pipe(replace('@@EXEC@@', `${product.applicationName} --force-user-env`))
 			.pipe(replace('@@ICON@@', `\${SNAP}/meta/gui/${product.linuxIconName}.png`))
-			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol));
+			.pipe(replace('@@URLPROTOCOL@@', product.urlProtocol))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription));
 
 		// An icon that is placed in snap/gui will be placed into meta/gui verbatim.
 		const icon = gulp.src('resources/linux/code.png', { base: '.' })
@@ -276,9 +295,11 @@ function prepareSnapPackage(arch) {
 
 		const snapcraft = gulp.src('resources/linux/snap/snapcraft.yaml', { base: '.' })
 			.pipe(replace('@@NAME@@', product.applicationName))
-			.pipe(replace('@@VERSION@@', commit.substr(0, 8)))
+			.pipe(replace('@@VERSION@@', occVersion))
 			// Possible run-on values https://snapcraft.io/docs/architectures
 			.pipe(replace('@@ARCHITECTURE@@', arch === 'x64' ? 'amd64' : arch))
+			.pipe(replace('@@DESCRIPTION@@', product.linuxDescription))
+			.pipe(replace('@@DESCRIPTION_LONG@@', product.linuxDescriptionLong))
 			.pipe(rename('snap/snapcraft.yaml'));
 
 		const electronLaunch = gulp.src('resources/linux/snap/electron-launch', { base: '.' })
