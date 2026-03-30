@@ -1,0 +1,64 @@
+version: '3.9'
+
+services:
+  editor:
+    build:
+      context: .
+      dockerfile: Dockerfile.build-linux
+    image: occ-build-linux:latest
+    container_name: occ-editor-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: development
+      NODE_OPTIONS: --max-old-space-size=7168
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
+    entrypoint: bash
+    command:
+      - -lc
+      - "npm i --ignore-scripts && npm run dev"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    networks:
+      dev-network: null
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.build-linux
+    image: occ-build-linux:latest
+    container_name: occ-web-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "3002:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    entrypoint: sh
+    command:
+      - -c
+      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; cd apps/web && npm ci --ignore-scripts && npm run dev"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    depends_on:
+      editor:
+        condition: service_healthy
+    networks:
+      dev-network: null
+
+networks:
+  dev-network:
+    driver: bridge

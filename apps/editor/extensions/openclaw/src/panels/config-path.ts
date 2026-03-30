@@ -1,6 +1,9 @@
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 let customPath: string | undefined;
 const DEFAULT_PATH = path.join(os.homedir(), ".openclaw", "openclaw.json");

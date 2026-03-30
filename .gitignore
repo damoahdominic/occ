@@ -15,3 +15,4 @@ ISsues
 .env
 .env.local
 occ-backend
+.worktree
