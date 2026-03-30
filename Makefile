@@ -77,7 +77,7 @@ build-linux-container:
 	@echo "Building $(BUILD_LINUX_IMAGE) container..."
 	DOCKER_BUILDKIT=0 docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
-## build-core: Shared compilation (tsc, extensions, React, bundle, minify, download Electron)
+## build-core: Shared build (rebuild + npm ci + tsc + extensions + React + bundle + minify + Electron)
 build-core:
 	@echo "Running core build..."
 	set -e && \
@@ -85,6 +85,8 @@ build-core:
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor dependencies" && \
 	npm ci --ignore-scripts && \
+	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
+	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
 	echo "==> Install build dependencies" && \
 	cd build && npm ci && cd .. && \
 	echo "==> Patch compilation.js" && \
@@ -129,15 +131,10 @@ build-core:
 	node build/lib/electron.js || true && \
 	echo "==> Core build complete"
 
-## build-linux: Full Linux editor build (rebuild + core + packaging)
+## build-linux: Full Linux editor build (core + .deb packaging)
 build-linux:
 	@echo "Running Linux build..."
-	set -e && \
-	cd $(PROJECT_ROOT)/apps/editor && \
-	export NODE_OPTIONS="--max-old-space-size=7168" && \
-	echo "==> Rebuild native modules for Electron (x64)" && \
-	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
-	$(MAKE) -C $(PROJECT_ROOT) build-core && \
+	$(MAKE) -C $(PROJECT_ROOT) build-core ELECTRON_ARCH=x64 && \
 	cd $(PROJECT_ROOT)/apps/editor && \
 	echo "==> Package app (linux-x64)" && \
 	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-linux-x64-min-ci && \
@@ -153,15 +150,10 @@ build-linux:
 	node_modules/.bin/gulp vscode-linux-x64-build-deb && \
 	echo "==> Linux build complete"
 
-## build-windows: Full Windows editor build (rebuild + core + packaging)
+## build-windows: Full Windows editor build (core + installer packaging)
 build-windows:
 	@echo "Running Windows build..."
-	set -e && \
-	cd $(PROJECT_ROOT)/apps/editor && \
-	export NODE_OPTIONS="--max-old-space-size=7168" && \
-	echo "==> Rebuild native modules for Electron (x64)" && \
-	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
-	$(MAKE) -C $(PROJECT_ROOT) build-core && \
+	$(MAKE) -C $(PROJECT_ROOT) build-core ELECTRON_ARCH=x64 && \
 	cd $(PROJECT_ROOT)/apps/editor && \
 	echo "==> Package app (win32-x64)" && \
 	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-win32-x64-min-ci && \
