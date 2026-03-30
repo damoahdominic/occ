@@ -1,4 +1,4 @@
-.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-linux
+.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-linux container-build-linux
 
 # Default target
 .DEFAULT_GOAL := help
@@ -77,76 +77,80 @@ build-linux-container:
 	@echo "Building $(BUILD_LINUX_IMAGE) container..."
 	DOCKER_BUILDKIT=0 docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
-## build-linux: Run full Linux editor build inside the container
-build-linux: build-linux-container
+## build-linux: Run full Linux editor build (local, no container)
+build-linux:
+	@echo "Running Linux build..."
+	set -e && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	export NODE_OPTIONS="--max-old-space-size=7168" && \
+	echo "==> Install editor dependencies" && \
+	npm ci --ignore-scripts && \
+	echo "==> Rebuild native modules for Electron (x64)" && \
+	npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
+	echo "==> Install build dependencies" && \
+	cd build && npm ci && cd .. && \
+	echo "==> Patch compilation.js" && \
+	node -e " \
+		const fs = require('fs'); \
+		const path = 'build/lib/compilation.js'; \
+		let c = fs.readFileSync(path, 'utf8'); \
+		c = c.replace( \
+			'createCompile(src, { build, emitError: true, transpileOnly: false', \
+			'createCompile(src, { build, emitError: false, transpileOnly: false' \
+		); \
+		fs.writeFileSync(path, c); \
+		console.log('Patched compilation.js: emitError -> false');" && \
+	echo "==> Compile to out-build" && \
+	node_modules/.bin/gulp compile-build-without-mangling && \
+	echo "==> Install extension dependencies" && \
+	find extensions -name "package.json" -not -path "*/node_modules/*" | while read pkg; do \
+		dir=$$(dirname "$$pkg"); \
+		echo "  Installing deps in $$dir"; \
+		(cd "$$dir" && npm install --ignore-scripts 2>/dev/null || true); \
+	done && \
+	echo "==> Compile OpenClaw extension" && \
+	cd $(PROJECT_ROOT)/apps/editor/extensions/openclaw && npm install dotenv --save-dev 2>/dev/null; node_modules/.bin/tsc -p tsconfig.json || true && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Compile non-native extensions" && \
+	node_modules/.bin/gulp compile-non-native-extensions-build && \
+	echo "==> Compile extension media" && \
+	node_modules/.bin/gulp compile-extension-media-build && \
+	echo "==> Build React bundles (Void UI)" && \
+	cd $(PROJECT_ROOT)/apps/editor/src/vs/workbench/contrib/void/browser/react && \
+	npx scope-tailwind ./src -o src2/ -s void-scope -c styles.css -p "void-" && \
+	npx tsup && \
+	cd $(PROJECT_ROOT)/apps/editor && \
+	echo "==> Copy React bundles into out-build" && \
+	mkdir -p out-build/vs/workbench/contrib/void/browser/react && \
+	cp -r src/vs/workbench/contrib/void/browser/react/out out-build/vs/workbench/contrib/void/browser/react/ && \
+	echo "==> Bundle (out-build -> out-vscode)" && \
+	node_modules/.bin/gulp bundle-vscode && \
+	echo "==> Minify (out-vscode -> out-vscode-min)" && \
+	node_modules/.bin/gulp minify-vscode && \
+	echo "==> Download Electron" && \
+	node build/lib/electron.js || true && \
+	echo "==> Package app (linux-x64)" && \
+	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-linux-x64-min-ci && \
+	echo "==> Remove musl watcher" && \
+	rm -rf $(PROJECT_ROOT)/apps/VSCode-linux-x64/resources/app/node_modules/@parcel/watcher-linux-x64-musl && \
+	echo "==> Create stub occ-tunnel for .deb deps" && \
+	cp $(PROJECT_ROOT)/apps/VSCode-linux-x64/bin/occ $(PROJECT_ROOT)/apps/VSCode-linux-x64/bin/occ-tunnel && \
+	chmod +x $(PROJECT_ROOT)/apps/VSCode-linux-x64/bin/occ-tunnel && \
+	echo "==> Patch dep checker to warn-only" && \
+	sed -i "s/FAIL_BUILD_FOR_NEW_DEPENDENCIES = true/FAIL_BUILD_FOR_NEW_DEPENDENCIES = false/" build/linux/dependencies-generator.js && \
+	echo "==> Build .deb package" && \
+	node_modules/.bin/gulp vscode-linux-x64-prepare-deb && \
+	node_modules/.bin/gulp vscode-linux-x64-build-deb && \
+	echo "==> Build complete"
+
+## container-build-linux: Run full Linux editor build inside the container
+container-build-linux: build-linux-container
 	@echo "Running Linux build inside container..."
 	CID=$$(docker create \
 		-v $(PROJECT_ROOT)/apps/editor:/workspace \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
 		-e GITHUB_TOKEN \
-		$(BUILD_LINUX_IMAGE) bash -c '\
-			set -e && \
-			echo "==> Install editor dependencies" && \
-			npm ci --ignore-scripts && \
-			echo "==> Rebuild native modules for Electron (x64)" && \
-			npx --yes @electron/rebuild -v 34.3.2 -a x64 && \
-			echo "==> Install build dependencies" && \
-			cd build && npm ci && cd .. && \
-			echo "==> Patch compilation.js" && \
-			node -e " \
-				const fs = require(\"fs\"); \
-				const path = \"build/lib/compilation.js\"; \
-				let c = fs.readFileSync(path, \"utf8\"); \
-				c = c.replace( \
-					\"createCompile(src, { build, emitError: true, transpileOnly: false\", \
-					\"createCompile(src, { build, emitError: false, transpileOnly: false\" \
-				); \
-				fs.writeFileSync(path, c); \
-				console.log(\"Patched compilation.js: emitError -> false\"); \
-			" && \
-			echo "==> Compile to out-build" && \
-			node_modules/.bin/gulp compile-build-without-mangling && \
-			echo "==> Install extension dependencies" && \
-			find extensions -name "package.json" -not -path "*/node_modules/*" | while read pkg; do \
-				dir=$$(dirname "$$pkg"); \
-				echo "  Installing deps in $$dir"; \
-				(cd "$$dir" && npm install --ignore-scripts 2>/dev/null || true); \
-			done && \
-			echo "==> Compile OpenClaw extension" && \
-			cd /workspace/extensions/openclaw && npm install dotenv --save-dev 2>/dev/null; node_modules/.bin/tsc -p tsconfig.json || true && \
-			cd /workspace && \
-			echo "==> Compile non-native extensions" && \
-			node_modules/.bin/gulp compile-non-native-extensions-build && \
-			echo "==> Compile extension media" && \
-			node_modules/.bin/gulp compile-extension-media-build && \
-			echo "==> Build React bundles (Void UI)" && \
-			cd /workspace/src/vs/workbench/contrib/void/browser/react && \
-			npx scope-tailwind ./src -o src2/ -s void-scope -c styles.css -p "void-" && \
-			npx tsup && \
-			cd /workspace && \
-			echo "==> Copy React bundles into out-build" && \
-			mkdir -p out-build/vs/workbench/contrib/void/browser/react && \
-			cp -r src/vs/workbench/contrib/void/browser/react/out out-build/vs/workbench/contrib/void/browser/react/ && \
-			echo "==> Bundle (out-build -> out-vscode)" && \
-			node_modules/.bin/gulp bundle-vscode && \
-			echo "==> Minify (out-vscode -> out-vscode-min)" && \
-			node_modules/.bin/gulp minify-vscode && \
-			echo "==> Download Electron" && \
-			node build/lib/electron.js || true && \
-			echo "==> Package app (linux-x64)" && \
-			VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-linux-x64-min-ci && \
-			echo "==> Remove musl watcher" && \
-			rm -rf /VSCode-linux-x64/resources/app/node_modules/@parcel/watcher-linux-x64-musl && \
-			echo "==> Create stub occ-tunnel for .deb deps" && \
-			cp /VSCode-linux-x64/bin/occ /VSCode-linux-x64/bin/occ-tunnel && \
-			chmod +x /VSCode-linux-x64/bin/occ-tunnel && \
-			echo "==> Patch dep checker to warn-only" && \
-			sed -i "s/FAIL_BUILD_FOR_NEW_DEPENDENCIES = true/FAIL_BUILD_FOR_NEW_DEPENDENCIES = false/" build/linux/dependencies-generator.js && \
-			echo "==> Build .deb package" && \
-			node_modules/.bin/gulp vscode-linux-x64-prepare-deb && \
-			node_modules/.bin/gulp vscode-linux-x64-build-deb && \
-			echo "==> Build complete" \
-		'); \
+		$(BUILD_LINUX_IMAGE) make -f /workspace/../../Makefile build-linux PROJECT_ROOT=/workspace/../..); \
 	docker start -a $$CID || true; \
 	echo "==> Copying build artifacts from container..."; \
 	mkdir -p $(PROJECT_ROOT)/apps/VSCode-linux-x64; \

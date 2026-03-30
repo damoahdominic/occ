@@ -2,29 +2,42 @@ version: '3.9'
 
 services:
   editor:
-    extends:
-      file: docker-compose.test.yml
-      service: test-nvm
-    image: occ-editor:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.build-linux
+    image: occ-build-linux:latest
     container_name: occ-editor-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
     ports:
       - "3001:3000"
     environment:
       NODE_ENV: development
-    entrypoint: sh
+      NODE_OPTIONS: --max-old-space-size=7168
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
+    entrypoint: bash
     command:
-      - -c
-      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; npm ci --ignore-scripts && cd apps/editor && npm ci && cd /app && npm run dev"
+      - -lc
+      - "npm i --ignore-scripts && npm run dev"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     networks:
       dev-network: null
 
   web:
-    extends:
-      file: docker-compose.test.yml
-      service: test-nvm
-    image: occ-web:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.build-linux
+    image: occ-build-linux:latest
     container_name: occ-web-dev
-    working_dir: /app
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
     ports:
       - "3002:3000"
     environment:
@@ -33,28 +46,19 @@ services:
     entrypoint: sh
     command:
       - -c
-      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; npm ci --ignore-scripts && cd apps/web && npm ci && npm run dev"
+      - "[ -s /root/.nvm/nvm.sh ] && . /root/.nvm/nvm.sh; cd apps/web && npm ci --ignore-scripts && npm run dev"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     depends_on:
-      - editor
+      editor:
+        condition: service_healthy
     networks:
       dev-network: null
 
-volumes:
-  node_modules:
-    driver: local
-  node_modules_editor:
-    driver: local
-  node_modules_web:
-    driver: local
-  node_modules_root_web:
-    driver: local
-  node_modules_nvm:
-    driver: local
-  nvm_cache:
-    driver: local
-
 networks:
   dev-network:
-    driver: bridge
-  test-network:
     driver: bridge
