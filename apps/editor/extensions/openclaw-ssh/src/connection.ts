@@ -1,4 +1,6 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type {
 	HostConnection,
@@ -13,6 +15,74 @@ import type {
 	SetupParams,
 	SSHConnection,
 } from '../../openclaw/src/hosts/types';
+
+// ─────────────────────────────────────────────
+// SSH host key verification helpers
+// ─────────────────────────────────────────────
+
+/**
+ * Checks whether a host+port combination is already in ~/.ssh/known_hosts.
+ * Returns true if the host key is known, false otherwise.
+ */
+export function isHostKnown(host: string, port?: number): boolean {
+	const knownHostsPath = path.join(os.homedir(), '.ssh', 'known_hosts');
+	if (!fs.existsSync(knownHostsPath)) { return false; }
+	// ssh-keygen -F looks up a host in known_hosts
+	const lookup = port && port !== 22 ? `[${host}]:${port}` : host;
+	const result = cp.spawnSync('ssh-keygen', ['-F', lookup], {
+		timeout: 5000,
+		windowsHide: true,
+	});
+	return result.status === 0 && result.stdout.toString().trim().length > 0;
+}
+
+/**
+ * Fetches the SSH host key fingerprint for a remote host using ssh-keyscan.
+ * Returns the fingerprint string or null if unreachable.
+ */
+export function fetchHostFingerprint(host: string, port?: number): string | null {
+	const args = ['-T', '10'];
+	if (port && port !== 22) { args.push('-p', String(port)); }
+	args.push(host);
+	const scan = cp.spawnSync('ssh-keyscan', args, {
+		timeout: 15000,
+		windowsHide: true,
+	});
+	if (scan.status !== 0 || !scan.stdout.toString().trim()) { return null; }
+	// Write scanned keys to a temp file so ssh-keygen can read the fingerprint
+	const tmpFile = path.join(os.tmpdir(), `occ-hostkey-${Date.now()}.pub`);
+	try {
+		fs.writeFileSync(tmpFile, scan.stdout);
+		const fp = cp.spawnSync('ssh-keygen', ['-lf', tmpFile], {
+			timeout: 5000,
+			windowsHide: true,
+		});
+		return fp.status === 0 ? fp.stdout.toString().trim() : null;
+	} finally {
+		try { fs.unlinkSync(tmpFile); } catch {}
+	}
+}
+
+/**
+ * Adds a host key to ~/.ssh/known_hosts using ssh-keyscan output.
+ */
+export function addHostToKnownHosts(host: string, port?: number): boolean {
+	const args = ['-T', '10'];
+	if (port && port !== 22) { args.push('-p', String(port)); }
+	args.push(host);
+	const scan = cp.spawnSync('ssh-keyscan', args, {
+		timeout: 15000,
+		windowsHide: true,
+	});
+	if (scan.status !== 0 || !scan.stdout.toString().trim()) { return false; }
+	const sshDir = path.join(os.homedir(), '.ssh');
+	if (!fs.existsSync(sshDir)) { fs.mkdirSync(sshDir, { recursive: true, mode: 0o700 }); }
+	const knownHostsPath = path.join(sshDir, 'known_hosts');
+	fs.appendFileSync(knownHostsPath, scan.stdout.toString(), { mode: 0o600 });
+	return true;
+}
+
+// ─────────────────────────────────────────────
 
 export class SSHHostConnection implements HostConnection {
 	readonly type: HostType = 'ssh';
@@ -30,7 +100,7 @@ export class SSHHostConnection implements HostConnection {
 		const args = [
 			'-o', 'BatchMode=yes',
 			'-o', 'ConnectTimeout=15',
-			'-o', 'StrictHostKeyChecking=accept-new',
+			'-o', 'StrictHostKeyChecking=yes',
 		];
 		if (this._cfg.port && this._cfg.port !== 22) { args.push('-p', String(this._cfg.port)); }
 		if (this._cfg.keyPath) { args.push('-i', this._cfg.keyPath); }
