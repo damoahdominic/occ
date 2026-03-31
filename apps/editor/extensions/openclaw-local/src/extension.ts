@@ -21,7 +21,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	}
 
 	const adapter = new LocalHostAdapter();
-	const disposable = coreAPI.registerHostAdapter(adapter);
+	const disposable = coreAPI.registerHostAdapter(adapter, 'openclaw.openclaw-local');
 	context.subscriptions.push(disposable);
 
 	const setupCmd = vscode.commands.registerCommand('openclaw.host.setup.local', () => {
