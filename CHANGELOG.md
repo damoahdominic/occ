@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.2.44](https://github.com/damoahdominic/occ/compare/v3.2.42...v3.2.44) (2026-03-31)
+
+
+### Bug Fixes
+
+* **build:** use explicit path for rcedit to avoid npx resolution issues on Windows ([c21662e](https://github.com/damoahdominic/occ/commit/c21662e8a3c2fcd83f1c8454cba92d25db473c23))
+* **ci:** give each matrix leg a unique artifact name to prevent overwrites ([bd91981](https://github.com/damoahdominic/occ/commit/bd9198163f497dd4fdc17a2aaa85c2743b51bd20))
+
 ## [3.2.43](https://github.com/damoahdominic/occ/compare/v3.2.42...v3.2.43) (2026-03-31)
 
 
