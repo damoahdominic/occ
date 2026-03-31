@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+apps/editor/extensions/**/out/
+apps/editor/extensions/**/package-lock.json
 *.vsix
 .DS_Store
 apps/editor/.build/
