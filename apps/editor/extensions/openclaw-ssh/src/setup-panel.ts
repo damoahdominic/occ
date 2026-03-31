@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
+import { isHostKnown, fetchHostFingerprint, addHostToKnownHosts } from './connection';
 
 export class SSHSetupPanel {
   public static currentPanel: SSHSetupPanel | undefined;
@@ -99,10 +100,37 @@ export class SSHSetupPanel {
     };
 
     try {
+      // ── Host key verification ──
+      // Before connecting, verify the server's identity to prevent MITM attacks.
+      if (!isHostKnown(host, port)) {
+        log(`Host ${host} is not in known_hosts — fetching fingerprint...\n`);
+        const fingerprint = fetchHostFingerprint(host, port);
+        if (!fingerprint) {
+          fail(`Could not fetch SSH host key for ${host}. Verify the host is reachable and try again.`);
+          return;
+        }
+        const choice = await vscode.window.showWarningMessage(
+          `First connection to ${host}.\n\nSSH host key fingerprint:\n${fingerprint}\n\nDo you trust this host?`,
+          { modal: true, detail: 'If you did not expect this fingerprint, someone may be intercepting your connection (MITM attack). Only continue if you trust this server.' },
+          'Trust & Connect',
+          'Cancel',
+        );
+        if (choice !== 'Trust & Connect') {
+          fail('Connection cancelled — host key not trusted.');
+          return;
+        }
+        log('Adding host key to known_hosts...\n');
+        if (!addHostToKnownHosts(host, port)) {
+          fail('Failed to add host key to known_hosts.');
+          return;
+        }
+        log('  ✓ Host key saved\n');
+      }
+
       const sshBase = [
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=15',
-        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'StrictHostKeyChecking=yes',
       ];
       if (port !== 22) { sshBase.push('-p', String(port)); }
       if (keyPath) { sshBase.push('-i', keyPath); }
