@@ -583,7 +583,7 @@ export class HomePanel {
   private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
     const port = this._getConfiguredPort();
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
       });
@@ -970,7 +970,7 @@ export class HomePanel {
 
   private _checkPort(port: number): Promise<'running' | 'stopped'> {
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'stopped');
       });

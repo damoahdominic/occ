@@ -110,7 +110,9 @@ function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext, f
 /** Returns true if the OpenClaw web server is reachable. */
 function isWebServerReachable(portOverride?: number): Promise<boolean> {
   const port = portOverride ?? getConfiguredGatewayPort();
-  const url = `http://localhost:${port}/`;
+  // Always use 127.0.0.1 explicitly — never 0.0.0.0 or a hostname that
+  // might resolve to a non-loopback address.
+  const url = `http://127.0.0.1:${port}/`;
   return new Promise(resolve => {
     const req = http.get(url, { timeout: 3000 }, res => {
       res.resume();
@@ -1134,7 +1136,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
       // Check if gateway is reachable
       const gatewayRunning = await new Promise<boolean>(resolve => {
-        const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+        const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
           res.resume();
           resolve(res.statusCode !== undefined && res.statusCode < 500);
         });

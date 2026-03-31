@@ -10,6 +10,7 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import type { HostConnection } from '../hosts/types';
@@ -129,6 +130,58 @@ function writeLog(text: string): void {
 }
 
 
+// ── Gateway security helpers ─────────────────────────────────────────────────
+
+const DEFAULT_GATEWAY_PORT = 18789;
+
+/**
+ * Reads the gateway auth token from ~/.openclaw/openclaw.json.
+ * Returns empty string if not configured or unreadable.
+ */
+function readGatewayToken(): string {
+  try {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    const gateway = config['gateway'] as Record<string, unknown> | undefined;
+    const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
+    if (auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string') {
+      return auth['token'] as string;
+    }
+  } catch { /* non-fatal */ }
+  return '';
+}
+
+/**
+ * Checks whether a port is reachable on 0.0.0.0 (all interfaces) by
+ * attempting a TCP connection to a non-loopback IP. If reachable, the
+ * gateway is dangerously exposed to the network.
+ */
+function checkGatewayExposed(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    // Find a non-loopback IPv4 address
+    const interfaces = os.networkInterfaces();
+    let nonLoopback: string | undefined;
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs ?? []) {
+        if (addr.family === 'IPv4' && !addr.internal) {
+          nonLoopback = addr.address;
+          break;
+        }
+      }
+      if (nonLoopback) { break; }
+    }
+    if (!nonLoopback) { resolve(false); return; }
+
+    const socket = new net.Socket();
+    socket.setTimeout(1500);
+    socket.on('connect', () => { socket.destroy(); resolve(true); });
+    socket.on('error', () => { socket.destroy(); resolve(false); });
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+    socket.connect(port, nonLoopback);
+  });
+}
+
 export class StatusPanelController {
   private _disposed = false;
   private _commandAction: 'start' | 'stop' | 'restart' | 'reboot' | null = null;
@@ -143,6 +196,7 @@ export class StatusPanelController {
   private _uninstallCloseSidebarTimer: ReturnType<typeof setTimeout> | undefined;
   private _uninstallCloseWatcher: ReturnType<typeof setInterval> | undefined;
   private _cachedGatewayPort = 18789;
+  private _exposedWarningShown = false;
   private readonly _outputChannel: vscode.OutputChannel;
 
   constructor(
@@ -415,7 +469,7 @@ export class StatusPanelController {
   private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
     const port = this._getConfiguredPort();
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
       });
@@ -488,6 +542,25 @@ export class StatusPanelController {
         this._closeSidebarOnGatewayStart = false;
         void vscode.commands.executeCommand('void.sidebar.close');
       }
+      // Security: check if gateway is exposed on non-loopback interfaces
+      if (status === 'running' && this._host.type === 'local' && !this._exposedWarningShown) {
+        void checkGatewayExposed(this._cachedGatewayPort).then(exposed => {
+          if (exposed && !this._exposedWarningShown) {
+            this._exposedWarningShown = true;
+            void vscode.window.showWarningMessage(
+              `⚠ Security: OpenClaw gateway on port ${this._cachedGatewayPort} is reachable from your network (bound to 0.0.0.0). ` +
+              `This exposes your agents, API keys, and channel configs to anyone on your network. ` +
+              `Restart the gateway bound to 127.0.0.1 only.`,
+              'Learn More',
+            ).then(choice => {
+              if (choice === 'Learn More') {
+                void vscode.env.openExternal(vscode.Uri.parse('https://openclaw.ai/docs/security#gateway-binding'));
+              }
+            });
+          }
+        });
+      }
+      if (status !== 'running') { this._exposedWarningShown = false; }
       try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
       try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
       if (jwt !== this._lastJwt) {
