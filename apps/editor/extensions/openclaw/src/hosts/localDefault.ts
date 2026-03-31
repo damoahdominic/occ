@@ -311,7 +311,8 @@ export class DefaultLocalHostConnection implements HostConnection {
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
 		const p = await this.findOpenClawPath();
 		if (!p) { throw new Error('CLI not installed'); }
-		const code = await this.execStream(p, ['onboard', '--provider', params.provider, '--api-key', params.apiKey, '--port', params.port], {}, onLog, onLog);
+		// Pass API key via environment variable — never as a CLI argument (visible in ps).
+		const code = await this.execStream(p, ['onboard', '--provider', params.provider, '--port', params.port], { env: { OPENCLAW_API_KEY: params.apiKey } }, onLog, onLog);
 		if (code !== 0) { throw new Error(`onboard exited ${code}`); }
 	}
 
