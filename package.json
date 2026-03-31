@@ -1,6 +1,6 @@
 {
   "name": "occode",
-  "version": "3.2.38",
+  "version": "3.2.40",
   "private": true,
   "description": "OCcode — branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [

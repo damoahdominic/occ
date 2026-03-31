@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.2.40](https://github.com/damoahdominic/occ/compare/v3.2.39...v3.2.40) (2026-03-31)
+
 ## [3.2.38](https://github.com/damoahdominic/occ/compare/v3.2.39...v3.2.38) (2026-03-31)
 
 ## [3.2.39](https://github.com/damoahdominic/occ/compare/v3.2.38...v3.2.39) (2026-03-31)
