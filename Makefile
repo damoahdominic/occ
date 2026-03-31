@@ -154,7 +154,7 @@ build-windows:
 	echo "==> Package app (win32-x64)" && \
 	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-win32-x64-min-ci && \
 	echo "==> Stamp app icon" && \
-	npx rcedit "$(PROJECT_ROOT)/apps/VSCode-win32-x64/OCcode.exe" --set-icon resources/win32/code.ico && \
+	node_modules/.bin/rcedit "$(PROJECT_ROOT)/apps/VSCode-win32-x64/OCcode.exe" --set-icon resources/win32/code.ico && \
 	echo "==> Copy inno_updater to build" && \
 	VSCODE_ARCH=x64 node_modules/.bin/gulp vscode-win32-x64-inno-updater && \
 	echo "==> Build Windows installers" && \
