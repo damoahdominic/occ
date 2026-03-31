@@ -272,12 +272,15 @@ export class DockerSetupPanel {
     };
 
     try {
-      logCmd(`$ docker run --rm \\\n    -v ${VOLUME_MOUNT} \\\n    ${IMAGE} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${CONTAINER_PORT}\n`);
+      logCmd(`$ docker run --rm \\\n    -v ${VOLUME_MOUNT} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${IMAGE} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${CONTAINER_PORT}\n`);
       log('Running OpenClaw onboard in container...\n');
       const code = await new Promise<number>((resolve) => {
         const proc = cp.spawn('docker', [
           'run', '--rm',
           '-v', VOLUME_MOUNT,
+          '--security-opt', 'no-new-privileges',
+          '--cap-drop', 'ALL',
+          '--cap-add', 'NET_BIND_SERVICE',
           IMAGE,
           'openclaw', 'onboard',
           '--non-interactive', '--accept-risk',
@@ -386,7 +389,7 @@ export class DockerSetupPanel {
         cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
       }
 
-      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${HOST_PORT}:${CONTAINER_PORT} \\\n    -v ${VOLUME_MOUNT} \\\n    ${IMAGE} \\\n    tail -f /dev/null\n`);
+      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${HOST_PORT}:${CONTAINER_PORT} \\\n    -v ${VOLUME_MOUNT} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${IMAGE} \\\n    tail -f /dev/null\n`);
       log(`Starting ${CONTAINER} container (port ${HOST_PORT}:${CONTAINER_PORT})...\n`);
       const launchCode = await new Promise<number>((resolve) => {
         const proc = cp.spawn('docker', [
@@ -395,6 +398,9 @@ export class DockerSetupPanel {
           '--restart', 'unless-stopped',
           '-p', `${HOST_PORT}:${CONTAINER_PORT}`,
           '-v', VOLUME_MOUNT,
+          '--security-opt', 'no-new-privileges',
+          '--cap-drop', 'ALL',
+          '--cap-add', 'NET_BIND_SERVICE',
           IMAGE,
           'tail', '-f', '/dev/null',
         ], { windowsHide: true });
