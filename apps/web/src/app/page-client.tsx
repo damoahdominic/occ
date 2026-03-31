@@ -275,7 +275,7 @@ function bezier(p1x: number, p1y: number, p2x: number, p2y: number, progress: nu
 
 const REPO = "damoahdominic/occ";
 
-async function fetchDownloadUrls(): Promise<DownloadUrls> {
+async function fetchDownloadUrls(): Promise<DownloadUrls & { checksums?: string }> {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: "application/vnd.github+json" },
@@ -284,16 +284,26 @@ async function fetchDownloadUrls(): Promise<DownloadUrls> {
     const data = await res.json();
     const tag: string = data.tag_name ?? "";
     const assets: Array<{ name: string; browser_download_url: string }> = data.assets ?? [];
-    const win = assets.find((a) => a.name.includes("win32") && a.name.endsWith(".exe"));
-    const mac = assets.find((a) => a.name.includes("darwin") && a.name.endsWith(".zip"));
+
+    // Only accept download URLs from the expected GitHub domain
+    const isGitHubUrl = (url: string) =>
+      url.startsWith("https://github.com/") || url.startsWith("https://objects.githubusercontent.com/");
+
+    const win = assets.find((a) => a.name.includes("win32") && a.name.endsWith(".exe") && isGitHubUrl(a.browser_download_url));
+    const mac = assets.find((a) => a.name.includes("darwin") && a.name.endsWith(".zip") && isGitHubUrl(a.browser_download_url));
     const lin = assets.find(
-      (a) => a.name.includes("linux") && (a.name.endsWith(".deb") || a.name.endsWith(".AppImage") || a.name.endsWith(".tar.gz"))
+      (a) => a.name.includes("linux") && (a.name.endsWith(".deb") || a.name.endsWith(".AppImage") || a.name.endsWith(".tar.gz")) && isGitHubUrl(a.browser_download_url)
     );
+    // Look for a checksums file in the release assets
+    const checksumAsset = assets.find((a) => /sha256|checksums?/i.test(a.name) && a.name.endsWith(".txt"));
+    const checksums = checksumAsset?.browser_download_url;
+
     const tagUrl = tag ? `https://github.com/${REPO}/releases/tag/${tag}` : FALLBACK_URLS.windows;
     return {
       windows: win?.browser_download_url ?? tagUrl,
       macos: mac?.browser_download_url ?? tagUrl,
       linux: lin?.browser_download_url ?? tagUrl,
+      checksums,
     };
   } catch {
     return FALLBACK_URLS;
@@ -302,6 +312,7 @@ async function fetchDownloadUrls(): Promise<DownloadUrls> {
 
 export default function Home() {
   const [downloadUrls, setDownloadUrls] = useState<DownloadUrls>(FALLBACK_URLS);
+  const [checksumsUrl, setChecksumsUrl] = useState<string | undefined>();
   const [platform, setPlatform] = useState<Platform>("windows");
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -320,7 +331,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    fetchDownloadUrls().then(setDownloadUrls);
+    fetchDownloadUrls().then((result) => {
+      const { checksums, ...urls } = result;
+      setDownloadUrls(urls);
+      setChecksumsUrl(checksums);
+    });
   }, []);
 
   // Cobe globe
@@ -604,6 +619,16 @@ export default function Home() {
                         </span>
                       ))}
                     </span>
+                    {checksumsUrl && (
+                      <a
+                        href={checksumsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[var(--text-muted)] hover:text-white transition-colors underline underline-offset-2"
+                      >
+                        Verify checksums (SHA-256)
+                      </a>
+                    )}
                   </div>
 
 
@@ -1121,6 +1146,16 @@ export default function Home() {
                         </span>
                       ))}
                     </span>
+                    {checksumsUrl && (
+                      <a
+                        href={checksumsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[var(--text-muted)] hover:text-white transition-colors underline underline-offset-2"
+                      >
+                        Verify checksums (SHA-256)
+                      </a>
+                    )}
                 </div>
               </div>
 
