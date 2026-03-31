@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.2.46](https://github.com/damoahdominic/occ/compare/v3.2.45...v3.2.46) (2026-03-31)
+
+
+### Bug Fixes
+
+* replace npx rcedit with gulp task for win32 icon stamping ([e65037f](https://github.com/damoahdominic/occ/commit/e65037fe79b6d2dce5a6254c922219818b573566))
+* restore npx rcedit in build-windows (not a local dep) ([15146f9](https://github.com/damoahdominic/occ/commit/15146f9d887d3fb7dad1fbd70027fcddf2ffb3b1))
+
 ## [3.2.45](https://github.com/damoahdominic/occ/compare/v3.2.42...v3.2.45) (2026-03-31)
 
 
