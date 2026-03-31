@@ -275,7 +275,7 @@ function bezier(p1x: number, p1y: number, p2x: number, p2y: number, progress: nu
 
 const REPO = "damoahdominic/occ";
 
-async function fetchDownloadUrls(): Promise<DownloadUrls> {
+async function fetchDownloadUrls(): Promise<DownloadUrls & { checksums?: string }> {
   try {
     const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: "application/vnd.github+json" },
@@ -284,24 +284,121 @@ async function fetchDownloadUrls(): Promise<DownloadUrls> {
     const data = await res.json();
     const tag: string = data.tag_name ?? "";
     const assets: Array<{ name: string; browser_download_url: string }> = data.assets ?? [];
-    const win = assets.find((a) => a.name.includes("win32") && a.name.endsWith(".exe"));
-    const mac = assets.find((a) => a.name.includes("darwin") && a.name.endsWith(".zip"));
+
+    // Only accept download URLs from the expected GitHub domain
+    const isGitHubUrl = (url: string) =>
+      url.startsWith("https://github.com/") || url.startsWith("https://objects.githubusercontent.com/");
+
+    const win = assets.find((a) => a.name.includes("win32") && a.name.endsWith(".exe") && isGitHubUrl(a.browser_download_url));
+    const mac = assets.find((a) => a.name.includes("darwin") && a.name.endsWith(".zip") && isGitHubUrl(a.browser_download_url));
     const lin = assets.find(
-      (a) => a.name.includes("linux") && (a.name.endsWith(".deb") || a.name.endsWith(".AppImage") || a.name.endsWith(".tar.gz"))
+      (a) => a.name.includes("linux") && (a.name.endsWith(".deb") || a.name.endsWith(".AppImage") || a.name.endsWith(".tar.gz")) && isGitHubUrl(a.browser_download_url)
     );
+    // Look for a checksums file in the release assets
+    const checksumAsset = assets.find((a) => /sha256|checksums?/i.test(a.name) && a.name.endsWith(".txt"));
+    const checksums = checksumAsset?.browser_download_url;
+
     const tagUrl = tag ? `https://github.com/${REPO}/releases/tag/${tag}` : FALLBACK_URLS.windows;
     return {
       windows: win?.browser_download_url ?? tagUrl,
       macos: mac?.browser_download_url ?? tagUrl,
       linux: lin?.browser_download_url ?? tagUrl,
+      checksums,
     };
   } catch {
     return FALLBACK_URLS;
   }
 }
 
+
+function EarlyAccessForm({ compact = false }: { compact?: boolean }) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setStatus("loading");
+    try {
+      const res = await fetch("https://occ.mba.sh/api/v1/early-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (res.ok) {
+        setStatus("success");
+        setMessage("You\u2019re on the list! We\u2019ll be in touch soon.");
+        setEmail("");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setStatus("error");
+        setMessage(data.error || "Something went wrong. Please try again.");
+      }
+    } catch {
+      setStatus("error");
+      setMessage("Something went wrong. Please try again.");
+    }
+  };
+
+  if (status === "success") {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <div className="inline-flex items-center gap-2 text-green-400 font-medium">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          {message}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className={`flex flex-col items-center gap-3 ${compact ? "" : "w-full max-w-md mx-auto"}`}>
+      <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setStatus("idle"); }}
+          placeholder="Enter your email"
+          required
+          className="flex-1 w-full sm:w-auto bg-white/5 border border-[var(--border)] hover:border-[var(--text-muted)] focus:border-[var(--accent)] text-white placeholder:text-[var(--text-muted)] px-5 py-3.5 rounded-xl text-base transition-all outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
+        />
+        <div className="relative btn-glow rounded-xl w-full sm:w-auto">
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="inline-flex items-center justify-center gap-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold px-5 py-3.5 rounded-xl text-sm whitespace-nowrap transition-all w-full sm:w-auto disabled:opacity-60"
+          >
+            {status === "loading" ? (
+              <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+            )}
+            Join Waitlist
+          </button>
+        </div>
+      </div>
+      {status === "error" && (
+        <p className="text-red-400 text-sm">{message}</p>
+      )}
+      <p className="text-sm text-[var(--text-muted)]">
+        Be the first to know when OCCode launches. No spam, ever.
+      </p>
+    </form>
+  );
+}
+
 export default function Home() {
   const [downloadUrls, setDownloadUrls] = useState<DownloadUrls>(FALLBACK_URLS);
+  const [checksumsUrl, setChecksumsUrl] = useState<string | undefined>();
   const [platform, setPlatform] = useState<Platform>("windows");
   const [showDropdown, setShowDropdown] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -320,7 +417,11 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    fetchDownloadUrls().then(setDownloadUrls);
+    fetchDownloadUrls().then((result) => {
+      const { checksums, ...urls } = result;
+      setDownloadUrls(urls);
+      setChecksumsUrl(checksums);
+    });
   }, []);
 
   // Cobe globe
@@ -565,9 +666,9 @@ export default function Home() {
                     OpenClaw <span className="text-[var(--accent)]">Code</span>
                   </h1>
                   <p className="text-lg sm:text-xl text-[var(--text-muted)] max-w-2xl mb-10 leading-relaxed">
-                    The simplest way to get started with OpenClaw locally.
+                    The simplest way to set up and manage OpenClaw locally.
                     <br className="hidden sm:block" />
-                    Just download, open, and you&apos;re ready to go.
+Just download, open, and you're ready to go.
                   </p>
 
                   {/* Download + Star buttons */}
@@ -604,6 +705,17 @@ export default function Home() {
                         </span>
                       ))}
                     </span>
+                    {checksumsUrl && (
+                      <a
+                        href={checksumsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[var(--text-muted)] hover:text-white transition-colors underline underline-offset-2"
+                      >
+                        Verify checksums (SHA-256)
+                      </a>
+                    )}
+                  </div>
                   </div>
 
 
@@ -1082,13 +1194,16 @@ export default function Home() {
 
               <div className="relative px-8 py-16 sm:px-20 text-center">
                 <h2 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4 leading-tight">
-                  Get started in minutes
+                  Get early access
                 </h2>
                 <p className="text-[var(--text-muted)] text-base sm:text-lg mb-10 max-w-sm mx-auto leading-relaxed">
-                  Download OCCode and go from zero to a fully configured OpenClaw environment — no manual setup required.
+                  Be the first to experience OCCode when it launches. Sign up and we'll notify you the moment it's ready.
                 </p>
 
                 <div className="flex flex-col items-center justify-center gap-3">
+<<<<<<< HEAD
+                    <EarlyAccessForm />
+=======
                     <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                       <div className="relative btn-glow rounded-xl w-full sm:w-auto">
                         <a
@@ -1121,6 +1236,17 @@ export default function Home() {
                         </span>
                       ))}
                     </span>
+                    {checksumsUrl && (
+                      <a
+                        href={checksumsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[var(--text-muted)] hover:text-white transition-colors underline underline-offset-2"
+                      >
+                        Verify checksums (SHA-256)
+                      </a>
+                    )}
+>>>>>>> 52592ff (security: harden version checks and download URLs against spoofing)
                 </div>
               </div>
 
