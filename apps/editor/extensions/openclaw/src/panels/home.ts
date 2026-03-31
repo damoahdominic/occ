@@ -887,6 +887,9 @@ export class HomePanel {
 
   // ── Version check ──────────────────────────────────────────────────────────
 
+  /** Strict semver-ish pattern to reject spoofed version strings. */
+  private static readonly _VERSION_RE = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[\w.]+)?$/;
+
   /** Fetches the latest openclaw version from the npm registry. */
   private _fetchLatestVersion(): Promise<string | null> {
     return new Promise(resolve => {
@@ -894,10 +897,17 @@ export class HomePanel {
       const req = https.get(
         { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
         res => {
+          if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
           let data = '';
           res.on('data', (c: Buffer) => (data += c));
           res.on('end', () => {
-            try { resolve(JSON.parse(data).version ?? null); } catch { resolve(null); }
+            try {
+              const version: unknown = JSON.parse(data).version;
+              if (typeof version !== 'string' || !HomePanel._VERSION_RE.test(version)) {
+                resolve(null); return;
+              }
+              resolve(version);
+            } catch { resolve(null); }
           });
         },
       );

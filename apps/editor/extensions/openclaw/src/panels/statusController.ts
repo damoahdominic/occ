@@ -661,15 +661,26 @@ export class StatusPanelController {
 
   // ── Version check ─────────────────────────────────────────────────────────
 
+  /** Strict semver-ish pattern to reject obviously spoofed version strings. */
+  private static readonly _VERSION_RE = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[\w.]+)?$/;
+
   private _fetchLatestVersion(): Promise<string | null> {
     return new Promise(resolve => {
       const req = https.get(
         { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
         res => {
+          // Reject unexpected redirects — a spoofed DNS might redirect us
+          if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
           let data = '';
           res.on('data', (c: Buffer) => (data += c));
           res.on('end', () => {
-            try { resolve(JSON.parse(data).version ?? null); } catch { resolve(null); }
+            try {
+              const version: unknown = JSON.parse(data).version;
+              if (typeof version !== 'string' || !StatusPanelController._VERSION_RE.test(version)) {
+                resolve(null); return;
+              }
+              resolve(version);
+            } catch { resolve(null); }
           });
         },
       );
@@ -732,7 +743,6 @@ export class StatusPanelController {
         'void.openChatWithMessage',
         `OpenClaw is installed but version ${installed} is not the latest (${latest}). Please update it now.\n\n` +
         `Run: openclaw update --yes --non-interactive\n\n` +
-        `If that command is not available, use: npm install -g openclaw@latest\n\n` +
         `After updating, verify with: openclaw --version`,
         'agent',
       );
