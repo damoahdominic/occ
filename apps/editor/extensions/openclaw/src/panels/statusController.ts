@@ -437,8 +437,6 @@ export class StatusPanelController {
       if (args && args.length > 0) {
         void vscode.commands.executeCommand('void.openChatWithMessage', args[0], 'agent');
       }
-    } else if (msg.command) {
-      vscode.commands.executeCommand(msg.command);
     } else {
       return false;
     }

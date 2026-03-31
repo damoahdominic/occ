@@ -235,17 +235,21 @@ export class LocalHostConnection implements HostConnection {
 	}
 
 	private async _installUnix(onLog: LogFn): Promise<void> {
-		onLog('Downloading OpenClaw installer...\n');
-		// Use curl to pipe the official install script
-		const code = await this.execStream(
-			'bash',
-			['-c', 'curl -fsSL https://get.openclaw.sh | bash'],
-			{ timeout: 120_000 },
-			onLog,
-			onLog,
-		);
-		if (code !== 0) {
-			throw new Error(`Installer exited with code ${code}`);
+		// Download script, verify checksum, then execute — never pipe curl directly to bash.
+		const steps = [
+			{ label: 'Downloading installer...\n', cmd: 'curl -fsSL https://get.openclaw.sh -o /tmp/occ-install.sh' },
+			{ label: 'Fetching checksum...\n', cmd: 'curl -fsSL https://releases.openclaw.sh/install.sh.sha256 -o /tmp/occ-install.sha256' },
+			{ label: 'Verifying installer integrity...\n', cmd: 'cd /tmp && sha256sum -c occ-install.sha256' },
+			{ label: 'Running installer...\n', cmd: 'bash /tmp/occ-install.sh' },
+			{ label: '', cmd: 'rm -f /tmp/occ-install.sh /tmp/occ-install.sha256' },
+		];
+		for (const step of steps) {
+			if (step.label) { onLog(step.label); }
+			const code = await this.execStream('bash', ['-c', step.cmd], { timeout: 120_000 }, onLog, onLog);
+			if (code !== 0 && step.label) {
+				await this.exec('rm', ['-f', '/tmp/occ-install.sh', '/tmp/occ-install.sha256']).catch(() => {});
+				throw new Error(`Install step failed: ${step.label.trim()}`);
+			}
 		}
 		onLog('OpenClaw installed.\n');
 	}
