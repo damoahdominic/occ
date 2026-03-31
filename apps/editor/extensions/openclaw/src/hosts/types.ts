@@ -300,7 +300,7 @@ export interface HostAdapter {
 export interface OpenClawCoreAPI {
 	readonly version: string;
 
-	registerHostAdapter(adapter: HostAdapter): vscode.Disposable;
+	registerHostAdapter(adapter: HostAdapter, extensionId: string): vscode.Disposable;
 
 	getActiveHost(): HostConnection | undefined;
 	getHost(id: string): HostConnection | undefined;

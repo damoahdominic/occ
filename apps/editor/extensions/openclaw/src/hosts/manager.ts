@@ -15,12 +15,26 @@ import { HostRegistry } from './registry';
 // Implements OpenClawCoreAPI for export to adapter extensions.
 // ─────────────────────────────────────────────
 
+/** Extension IDs trusted to register adapters without user confirmation. */
+const TRUSTED_ADAPTER_EXTENSIONS = new Set([
+	'openclaw.openclaw-local',
+	'openclaw.openclaw-docker',
+	'openclaw.openclaw-ssh',
+	'openclaw.openclaw-cloud',
+	'openclaw.home',
+]);
+
+/** globalState key for user-approved adapter extension IDs. */
+const APPROVED_ADAPTERS_KEY = 'occ.approvedAdapterExtensions';
+
 export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 	readonly version = '1.0.0';
 
 	private _adapters = new Map<HostType, HostAdapter>();
 	private _connections = new Map<string, HostConnection>();
 	private _disposables: vscode.Disposable[] = [];
+	private _globalState: vscode.Memento | undefined;
+	private readonly _log: vscode.OutputChannel;
 
 	private readonly _onDidChangeActiveHost = new vscode.EventEmitter<HostConnection | undefined>();
 	readonly onDidChangeActiveHost: vscode.Event<HostConnection | undefined> = this._onDidChangeActiveHost.event;
@@ -34,17 +48,66 @@ export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 	private readonly _onDidRemoveHost = new vscode.EventEmitter<string>();
 	readonly onDidRemoveHost: vscode.Event<string> = this._onDidRemoveHost.event;
 
-	constructor(private readonly registry: HostRegistry) {
+	constructor(private readonly registry: HostRegistry, globalState?: vscode.Memento) {
+		this._globalState = globalState;
+		this._log = vscode.window.createOutputChannel('OpenClaw Adapters');
 		this._disposables.push(
+			this._log,
 			registry.onDidChange(() => this._onRegistryChange()),
 		);
 	}
 
 	// ── Adapter registration ──────────────────
 
-	registerHostAdapter(adapter: HostAdapter): vscode.Disposable {
+	registerHostAdapter(adapter: HostAdapter, extensionId: string): vscode.Disposable {
+		// Verify the extension actually exists in VS Code
+		const ext = vscode.extensions.getExtension(extensionId);
+		if (!ext) {
+			this._log.appendLine(`[BLOCKED] Adapter "${adapter.type}" from unknown extension "${extensionId}"`);
+			throw new Error(`Extension "${extensionId}" not found`);
+		}
+
+		// Check trust
+		if (!this._isAdapterTrusted(extensionId)) {
+			this._log.appendLine(`[UNTRUSTED] Adapter "${adapter.type}" from "${extensionId}" — awaiting user approval`);
+			// Return a no-op disposable; actual registration happens if user approves
+			void this._promptAdapterApproval(adapter, extensionId);
+			return new vscode.Disposable(() => { /* no-op until approved */ });
+		}
+
+		return this._doRegister(adapter, extensionId);
+	}
+
+	private _isAdapterTrusted(extensionId: string): boolean {
+		if (TRUSTED_ADAPTER_EXTENSIONS.has(extensionId)) { return true; }
+		const approved = this._globalState?.get<string[]>(APPROVED_ADAPTERS_KEY, []) ?? [];
+		return approved.includes(extensionId);
+	}
+
+	private async _promptAdapterApproval(adapter: HostAdapter, extensionId: string): Promise<void> {
+		const choice = await vscode.window.showWarningMessage(
+			`Extension "${extensionId}" wants to register as an OpenClaw host adapter (type: ${adapter.type}). Allow?`,
+			{ modal: true },
+			'Allow',
+			'Deny',
+		);
+		if (choice === 'Allow') {
+			// Persist approval
+			const approved = this._globalState?.get<string[]>(APPROVED_ADAPTERS_KEY, []) ?? [];
+			if (!approved.includes(extensionId)) {
+				approved.push(extensionId);
+				await this._globalState?.update(APPROVED_ADAPTERS_KEY, approved);
+			}
+			this._doRegister(adapter, extensionId);
+			this._log.appendLine(`[APPROVED] Adapter "${adapter.type}" from "${extensionId}"`);
+		} else {
+			this._log.appendLine(`[DENIED] Adapter "${adapter.type}" from "${extensionId}"`);
+		}
+	}
+
+	private _doRegister(adapter: HostAdapter, extensionId: string): vscode.Disposable {
+		this._log.appendLine(`[OK] Adapter "${adapter.type}" registered from "${extensionId}"`);
 		this._adapters.set(adapter.type, adapter);
-		// Attempt to connect any persisted hosts of this type
 		this._connectPersistedHosts(adapter.type);
 		return new vscode.Disposable(() => {
 			this._adapters.delete(adapter.type);
@@ -96,8 +159,11 @@ export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 		if (!entry) { return undefined; }
 		const adapter = this._adapters.get(entry.type);
 		if (!adapter) { return undefined; }
+		// Hydrate full connection config from SecretStorage
+		const fullConnection = await this.registry.getHostConnection(id);
+		if (!fullConnection) { return undefined; }
 		try {
-			const conn = await adapter.connect(entry.connection);
+			const conn = await adapter.connect(fullConnection);
 			this._connections.set(id, conn);
 			this.registry.touchLastConnected(id);
 			return conn;
@@ -133,7 +199,7 @@ export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 	async addHost(entry: Omit<HostEntry, 'id' | 'createdAt'>): Promise<HostEntry> {
 		const id = `${entry.type}-${Date.now()}`;
 		const full: HostEntry = { ...entry, id, createdAt: new Date().toISOString() };
-		this.registry.addHost(full);
+		await this.registry.addHost(full);
 		this._onDidAddHost.fire(full);
 		await this._ensureConnected(id).catch(() => { /* ignore — caller handles */ });
 		return full;

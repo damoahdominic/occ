@@ -832,9 +832,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
   context.subscriptions.push({ dispose: releaseHandler });
 
   // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
-  const hostRegistry = new HostRegistry();
+  const hostRegistry = new HostRegistry(context.secrets);
   await hostRegistry.init();
-  const hostManager = new HostManager(hostRegistry);
+  const hostManager = new HostManager(hostRegistry, context.globalState);
   context.subscriptions.push(hostRegistry, hostManager);
 
   // (OPENCLAW HOSTS tree view and status bar removed — window-level binding used instead)
