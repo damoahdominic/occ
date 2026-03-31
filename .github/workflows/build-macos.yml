@@ -62,6 +62,8 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20.18.2'
+          cache: 'npm'
+          cache-dependency-path: apps/editor/package-lock.json
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -188,6 +190,8 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20.18.2'
+          cache: 'npm'
+          cache-dependency-path: apps/editor/package-lock.json
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -288,6 +292,8 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20.18.2'
+          cache: 'npm'
+          cache-dependency-path: apps/editor/package-lock.json
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')

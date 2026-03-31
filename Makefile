@@ -75,7 +75,7 @@ docker-test-node-setup:
 ## build-linux-container: Build the Linux build container image
 build-linux-container:
 	@echo "Building $(BUILD_LINUX_IMAGE) container..."
-	DOCKER_BUILDKIT=0 docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
+	docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
 ## build-core: Shared build (rebuild + npm ci + tsc + extensions + React + bundle + minify + Electron)
 build-core:
@@ -83,12 +83,10 @@ build-core:
 	set -e && \
 	cd $(PROJECT_ROOT)/apps/editor && \
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
-	echo "==> Install editor dependencies" && \
-	npm ci --ignore-scripts && \
+	echo "==> Install editor + build dependencies (parallel)" && \
+	( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ) && \
 	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
 	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
-	echo "==> Install build dependencies" && \
-	cd build && npm ci --ignore-scripts && cd .. && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \
@@ -102,12 +100,10 @@ build-core:
 		console.log('Patched compilation.js: emitError -> false');" && \
 	echo "==> Compile to out-build" && \
 	node_modules/.bin/gulp compile-build-without-mangling && \
-	echo "==> Install extension dependencies" && \
-	find extensions -name "package.json" -not -path "*/node_modules/*" | while read pkg; do \
-		dir=$$(dirname "$$pkg"); \
-		echo "  Installing deps in $$dir"; \
-		(cd "$$dir" && npm install --ignore-scripts 2>/dev/null || true); \
-	done && \
+	echo "==> Install extension dependencies (parallel)" && \
+	find extensions -name "package.json" -not -path "*/node_modules/*" | \
+		xargs -I{} dirname {} | \
+		xargs -P8 -I{} sh -c 'cd "{}" && npm install --ignore-scripts 2>/dev/null || true' && \
 	echo "==> Compile OpenClaw extension" && \
 	cd $(PROJECT_ROOT)/apps/editor/extensions/openclaw && npm install dotenv --save-dev 2>/dev/null; node_modules/.bin/tsc -p tsconfig.json || true && \
 	cd $(PROJECT_ROOT)/apps/editor && \
