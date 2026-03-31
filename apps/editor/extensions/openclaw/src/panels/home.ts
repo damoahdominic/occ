@@ -272,8 +272,6 @@ export class HomePanel {
         }
       } else if (msg.command === 'checkHostsStatus') {
         void this._handleCheckHostsStatus();
-      } else if (msg.command) {
-        vscode.commands.executeCommand(msg.command);
       }
     }, null, this._disposables);
   }
