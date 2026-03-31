@@ -725,7 +725,6 @@ export class HomePanel {
         'void.openChatWithMessage',
         `OpenClaw is installed but version ${installed} is not the latest (${latest}). Please update it now.\n\n` +
         `Run: openclaw update --yes --non-interactive\n\n` +
-        `If that command is not available, use: npm install -g openclaw@latest\n\n` +
         `After updating, verify with: openclaw --version`,
         'agent',
       );
