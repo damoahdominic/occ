@@ -184,7 +184,15 @@ export class HomePanel {
         void vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         void vscode.commands.executeCommand('openclaw.jwt.set', '');
       } else if (msg.command === 'openUrl') {
-        vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
+        const urlStr = msg.url as string;
+        try {
+          const parsed = new URL(urlStr);
+          const allowed = ['occ.mba.sh', 'mba.sh', 'openclaw.ai', 'openclawcode.ai', 'github.com', 'openclaw.sh'];
+          if (['https:', 'http:'].includes(parsed.protocol) &&
+              allowed.some(d => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) {
+            vscode.env.openExternal(vscode.Uri.parse(urlStr));
+          }
+        } catch { /* invalid URL — ignore */ }
       } else if (msg.command === 'openConfigFile') {
         const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(configPath));

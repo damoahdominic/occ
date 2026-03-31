@@ -2,6 +2,18 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
+
+/** Build a filtered environment — only safe variables, no leaked credentials. */
+function safeExecEnv(): Record<string, string | undefined> {
+	const safe = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE',
+		'TERM', 'TMPDIR', 'XDG_RUNTIME_DIR', 'DISPLAY', 'WAYLAND_DISPLAY',
+		'NODE_ENV', 'NVM_DIR', 'NVM_BIN', 'DOCKER_HOST'];
+	const env: Record<string, string | undefined> = {};
+	for (const key of safe) {
+		if (process.env[key]) { env[key] = process.env[key]; }
+	}
+	return env;
+}
 import type {
 	HostConnection,
 	HostType,
@@ -321,18 +333,18 @@ export class DockerHostConnection implements HostConnection {
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
 		const cliPath = await this.findOpenClawPath();
 		if (!cliPath) { throw new Error('OpenClaw CLI not installed — call installCli first'); }
+		// Pass API key via environment variable — never as a CLI argument (visible in ps/docker logs).
 		const args = ['onboard',
 			'--provider', params.provider,
-			'--api-key', params.apiKey,
 			'--port', params.port,
 		];
-		const code = await this.execStream(cliPath, args, {}, onLog, onLog);
+		const code = await this.execStream(cliPath, args, { env: { OPENCLAW_API_KEY: params.apiKey } }, onLog, onLog);
 		if (code !== 0) { throw new Error(`onboard exited with code ${code}`); }
 	}
 
 	// ── Environment ───────────────────────────
 
 	buildExecEnv(): Record<string, string | undefined> {
-		return { ...process.env };
+		return safeExecEnv();
 	}
 }
