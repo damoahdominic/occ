@@ -171,6 +171,7 @@ jobs:
         with:
           files: ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
           name: OCcode ${{ github.ref_name }}
+          body_path: CHANGELOG.md
           draft: false
           prerelease: false
 
@@ -278,6 +279,7 @@ jobs:
             ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}-user-setup.exe
             ${{ runner.temp }}/OCcode-win32-x64-${{ github.ref_name }}.zip
           name: OCcode ${{ github.ref_name }}
+          body_path: CHANGELOG.md
           draft: false
           prerelease: false
 
@@ -350,5 +352,6 @@ jobs:
             ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.deb
             ${{ runner.temp }}/OCcode-linux-x64-${{ github.ref_name }}.tar.gz
           name: OCcode ${{ github.ref_name }}
+          body_path: CHANGELOG.md
           draft: false
           prerelease: false
