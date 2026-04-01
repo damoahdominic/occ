@@ -11,16 +11,16 @@ services:
     volumes:
       - .:/workspace
     ports:
-      - "3001:3000"
+      - "9888:9888"
     environment:
       NODE_ENV: development
       NODE_OPTIONS: --max-old-space-size=7168
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
     entrypoint: bash -lc -
     command:
-      - "npm i --ignore-scripts && npm run dev"
+      - "npm i --ignore-scripts && npm run dev:editor"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9888/"]
       interval: 15s
       timeout: 5s
       retries: 5
