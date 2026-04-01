@@ -44,7 +44,8 @@ export class OnboardingPanel {
     const iconUri = panel.webview.asWebviewUri(
       vscode.Uri.joinPath(extensionUri, 'media', 'icon.png'),
     );
-    panel.webview.html = OnboardingPanel._getHtml(iconUri.toString());
+    const version = (context.extension.packageJSON as { version?: string }).version ?? '';
+    panel.webview.html = OnboardingPanel._getHtml(iconUri.toString(), version);
 
     panel.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'setTheme') {
@@ -68,7 +69,7 @@ export class OnboardingPanel {
     panel.onDidDispose(() => { OnboardingPanel._panel = undefined; });
   }
 
-  private static _getHtml(iconUri: string): string {
+  private static _getHtml(iconUri: string, version: string): string {
     const providers = [
       { id: 'anthropic',  label: 'Anthropic Claude', hint: 'console.anthropic.com/settings/keys', placeholder: 'sk-ant-...' },
       { id: 'openai',     label: 'OpenAI',           hint: 'platform.openai.com/api-keys',        placeholder: 'sk-...' },
@@ -96,7 +97,8 @@ export class OnboardingPanel {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       min-height: 100vh; padding: 32px 20px; text-align: center;
     }
-    .logo { width: 72px; height: 72px; margin-bottom: 16px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.35)); }
+    .logo { width: 72px; height: 72px; margin-bottom: 6px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.35)); }
+    .version-label { font-size: 11px; color: #555; margin-bottom: 14px; letter-spacing: 0.03em; }
     h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 4px; }
     h1 .accent { color: #dc2828; }
     .subtitle { color: #888; font-size: 13px; margin-bottom: 36px; }
@@ -190,6 +192,7 @@ export class OnboardingPanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OCC" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to <span class="accent">OCC</span></h1>
   <p class="subtitle">Let's get you set up in a few quick steps.</p>
 

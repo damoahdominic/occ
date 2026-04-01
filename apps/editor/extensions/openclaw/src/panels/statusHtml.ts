@@ -17,7 +17,8 @@ export function renderStatusHtml(
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
     emojiBaseUri: string = '',
     aiModelName = '',
-    hostType: 'local' | 'docker' | 'ssh' | 'cloud' = 'local'
+    hostType: 'local' | 'docker' | 'ssh' | 'cloud' = 'local',
+    version = ''
 ): string {
     // Render user area statically (avoids JS innerHTML escaping / runtime errors)
     let userAreaHtml: string;
@@ -124,10 +125,11 @@ export function renderStatusHtml(
     .logo {
       width: 96px;
       height: 96px;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
       flex-shrink: 0;
     }
+    .version-label { font-size: 11px; color: #555; margin-bottom: 8px; letter-spacing: 0.03em; }
     h1 {
       font-size: clamp(14px, 4vw, 22px);
       font-weight: 700;
@@ -995,6 +997,7 @@ export function renderStatusHtml(
   </div>
   ${isInstalled ? `
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
   <div class="checks">
     <div class="check-row ${dirClass === 'ok' ? 'check-row-clickable' : ''}" ${dirClass === 'ok' ? 'onclick="cmd(\'openConfigFile\')" title="Open openclaw.json"' : ''}>
@@ -1049,6 +1052,7 @@ export function renderStatusHtml(
   ` : `
   <div class="not-installed-wrap">
     <img class="logo" src="${iconUri}" alt="OpenClaw" />
+    <p class="version-label">v${version}</p>
     <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
       <button id="btn-primary" class="btn-primary" onclick="cmd('openclaw.install')">${icDownload}Install OpenClaw</button>
       <div id="install-status" style="display:none;font-size:11px;color:#666;text-align:center;max-width:260px;line-height:1.4;"></div>
