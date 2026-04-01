@@ -110,11 +110,13 @@ export class HomePanel {
   private _coreAPI: OpenClawCoreAPI | undefined;
   /** When true, always show the host picker — never auto-route to a single installed host. */
   private _forcePicker = false;
+  private readonly _version: string;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
     this._forcePicker = forcePicker;
     this._panel = panel;
     this._extensionUri = extensionUri;
+    this._version = (vscode.extensions.getExtension('openclaw.home')?.packageJSON as { version?: string })?.version ?? '';
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
     // Subscribe to active host changes from the core extension if available.
     const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
@@ -132,7 +134,7 @@ export class HomePanel {
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
-    this._panel.webview.html = this._getLoadingHtml(iconUri.toString());
+    this._panel.webview.html = this._getLoadingHtml(iconUri.toString(), this._version);
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     // Re-check installation whenever the panel becomes visible again.
@@ -155,7 +157,7 @@ export class HomePanel {
     homeWatcher.onDidCreate(() => void this._update(), null, this._disposables);
     homeWatcher.onDidDelete(() => void this._update(), null, this._disposables);
     this._disposables.push(homeWatcher);
-    this._panel.webview.onDidReceiveMessage(msg => {
+    this._panel.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
       } else if (msg.command === 'checkVersion') {
@@ -433,13 +435,13 @@ export class HomePanel {
         const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
         if (Number.isFinite(n) && n > 0 && n < 65536) { localPort = n; }
       } catch { /* use default */ }
-      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort);
+      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort, this._version);
       return;
     }
 
     // Show unified setup view when OpenClaw is not fully configured yet.
     if (!isConfigured) {
-      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
+      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString(), this._version);
       this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
       // Local is configured and Docker is not running — show local status.
@@ -467,7 +469,7 @@ export class HomePanel {
         }
       } catch { /* openclaw.json unreadable or missing fields */ }
 
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName, this._version);
       // One-shot version check: fires the first time the user lands on the full dashboard.
       // If the installed version is outdated, MoltPilot auto-starts the update.
       if (!this._autoUpdateTriggered) {
@@ -797,7 +799,7 @@ export class HomePanel {
     } catch { /* ignore */ }
   }
 
-  private _getHostsOverviewHtml(iconUri: string, localPort: number): string {
+  private _getHostsOverviewHtml(iconUri: string, localPort: number, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -811,7 +813,8 @@ export class HomePanel {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       min-height: 100vh; padding: 32px 20px 48px; text-align: center;
     }
-    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 12px; }
+    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 4px; }
+    .version-label { font-size: 11px; color: #555; margin-bottom: 12px; letter-spacing: 0.03em; }
     h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
     h1 .accent { color: #dc2828; }
     .tagline { color: #666; font-size: 12px; margin-bottom: 32px; }
@@ -855,6 +858,7 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>OCC <span class="accent">Home</span></h1>
   <p class="tagline">Choose a host to open</p>
 
@@ -937,7 +941,7 @@ export class HomePanel {
 </html>`;
   }
 
-  private _getHostTypeSelectionHtml(iconUri: string): string {
+  private _getHostTypeSelectionHtml(iconUri: string, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -954,9 +958,10 @@ export class HomePanel {
     }
     .logo {
       width: clamp(44px,10vw,68px); height: clamp(44px,10vw,68px);
-      margin-bottom: clamp(10px,2.5vw,16px);
+      margin-bottom: clamp(4px,1vw,6px);
       filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); flex-shrink: 0;
     }
+    .version-label { font-size: 11px; color: #555; margin-bottom: clamp(10px,2vw,14px); letter-spacing: 0.03em; }
     h1 { font-size: clamp(17px,4vw,26px); font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.2; }
     h1 .accent { color: #dc2828; }
     .tagline { color: #666; font-size: clamp(11px,2.5vw,13px); margin-bottom: clamp(24px,5vw,40px); max-width: 44ch; line-height: 1.5; }
@@ -996,6 +1001,7 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to <span class="accent">OpenClaw</span></h1>
   <p class="tagline">Choose where OpenClaw runs. You can always switch later.</p>
   <div class="cards">
@@ -1057,7 +1063,7 @@ export class HomePanel {
 </html>`;
   }
 
-  private _getLoadingHtml(iconUri: string): string {
+  private _getLoadingHtml(iconUri: string, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -1081,11 +1087,12 @@ export class HomePanel {
     .logo {
       width: clamp(56px, 14vw, 96px);
       height: clamp(56px, 14vw, 96px);
-      margin-bottom: clamp(14px, 3vw, 24px);
+      margin-bottom: clamp(4px, 1vw, 8px);
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
       animation: pulse 2s ease-in-out infinite;
       flex-shrink: 0;
     }
+    .version-label { font-size: 11px; color: #555; margin-bottom: clamp(12px, 2.5vw, 20px); letter-spacing: 0.03em; }
     @keyframes pulse {
       0%, 100% { opacity: 1; filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3)); }
       50% { opacity: 0.75; filter: drop-shadow(0 4px 20px rgba(220, 40, 40, 0.6)); }
@@ -1144,6 +1151,7 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
   <p class="tagline">Cursor for OpenClaw</p>
   <div class="spinner-wrap">
@@ -2552,9 +2560,10 @@ private _getSetupHtml(
     occJwt: string = '',
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
     emojiBaseUri: string = '',
-    aiModelName = ''
+    aiModelName = '',
+    version = ''
   ): string {
-    return renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri, occJwt, occUser, emojiBaseUri, aiModelName);
+    return renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri, occJwt, occUser, emojiBaseUri, aiModelName, 'local', version);
   }
 
 
