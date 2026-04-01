@@ -112,6 +112,10 @@ export class HomePanel {
   private _forcePicker = false;
   private readonly _version: string;
 
+  // Docker detection cache (5-minute TTL)
+  private static _dockerDetectionCache: { timestamp: number; result: Awaited<ReturnType<typeof HomePanel.detectDockerEnvironment>> } | null = null;
+  private static readonly DOCKER_DETECTION_TTL = 5 * 60 * 1000; // 5 minutes
+
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
     this._forcePicker = forcePicker;
     this._panel = panel;
@@ -196,6 +200,12 @@ export class HomePanel {
         } else {
           vscode.commands.executeCommand('vscode.open', vscode.Uri.file(LOG_PATH));
         }
+      } else if (msg.command === 'localSetupCommand') {
+        const { step } = msg;
+        void this._handleLocalSetupStep(step);
+      } else if (msg.command === 'occ.setup.reset') {
+        const { full } = msg;
+        void this._handleResetSetup(full === true);
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'SOUL.md', 'HEARTBEAT.md']);
         const file = msg.file as string;
@@ -677,6 +687,114 @@ export class HomePanel {
       }
     };
     setTimeout(tick, 4000);
+  }
+
+  // ── Reset/Teardown handler ─────────────────────────────────────────────────
+  private async _handleResetSetup(full: boolean = false): Promise<void> {
+    const dataDir = path.join(os.homedir(), '.openclaw');
+    const configPath = path.join(dataDir, 'openclaw.json');
+    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', 'docker-compose.full.yml');
+
+    // 1. Tear down Docker environment if it exists
+    try {
+      const resolvedCompose = fs.existsSync(composePath) ? fs.realpathSync(composePath) : null;
+      if (resolvedCompose) {
+        const cliCmd = 'docker';
+        await new Promise<void>((resolve, reject) => {
+          const args = ['compose', '-f', resolvedCompose, 'down'];
+          if (full) args.push('-v'); // also remove volumes
+          const child = cp.spawn(cliCmd, args, { stdio: 'ignore' });
+          child.on('close', code => code === 0 ? resolve() : reject(new Error(`docker compose down exited ${code}`)));
+          child.on('error', err => reject(err));
+        });
+      }
+    } catch (e) {
+      this._outputChannel.appendLine(`Docker teardown failed (non-fatal): ${e}`);
+    }
+
+    // 2. Remove configuration
+    try {
+      if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
+    } catch { /* non-fatal */ }
+
+    // 3. If full reset, remove data directory (except maybe logs)
+    if (full) {
+      try {
+        if (fs.existsSync(dataDir)) {
+          // Remove contents but keep logs maybe? Simpler: remove all
+          fs.rmSync(dataDir, { recursive: true, force: true });
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 4. Refresh panel to show wizard
+    void this._update();
+  }
+
+  // ── Local Setup step handler ───────────────────────────────────────────────
+  private async _handleLocalSetupStep(step: number): Promise<void> {
+    // Define commands per step
+    const home = os.homedir();
+    const commands: Record<number, { cmd: string; args?: string[]; cwd?: string; shell?: boolean }> = {
+      1: {
+        cmd: 'npm',
+        args: ['install', '-g', '@openclaw/cli'],
+        // May require sudo; we'll try without and if fails, show error
+      },
+      2: {
+        cmd: process.platform === 'win32' ? 'powershell' : 'bash',
+        args: process.platform === 'win32'
+          ? ['-Command', 'Start-Service -Name postgresql -ErrorAction SilentlyContinue']
+          : ['-c', `mkdir -p "${home}/.openclaw" && echo "{\\"gateway\\": {\\"host\\": \\"127.0.0.1\\", \\"port\\": 3001}}" > "${home}/.openclaw/openclaw.json"`],
+        shell: true
+      },
+      3: {
+        cmd: 'git',
+        args: ['clone', '--depth', '1', 'https://github.com/openclaw/backend', path.join(home, '.openclaw', 'backend')],
+        cwd: home
+      },
+      4: {
+        cmd: process.platform === 'win32' ? 'cmd' : 'open',
+        args: process.platform === 'win32'
+          ? ['/c', 'start', '"OCcode"', path.join(home, '.openclaw', 'backend', 'README.md')]
+          : ['-a', 'TextEdit'], // placeholder; could launch editor script
+        shell: false
+      }
+    };
+
+    const { cmd, args = [], cwd } = commands[step] || { cmd: '' };
+    if (!cmd) return;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = cp.spawn(cmd, args, {
+          cwd: cwd || os.homedir(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: process.platform === 'win32' // use shell on Windows for built-in commands
+        });
+        let output = '';
+        child.stdout?.on('data', (d: Buffer) => {
+          output += d.toString();
+          this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
+        });
+        child.stderr?.on('data', (d: Buffer) => {
+          output += d.toString();
+          this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
+        });
+        child.on('close', code => {
+          if (code === 0) {
+            this._panel.webview.postMessage({ type: 'localStatus', step, status: 'done' });
+            resolve();
+          } else {
+            reject(new Error(`Command exited with code ${code}`));
+          }
+        });
+        child.on('error', err => reject(err));
+      });
+    } catch (err) {
+      this._panel.webview.postMessage({ type: 'localStatus', step, status: 'failed' });
+      this._outputChannel.appendLine(`Local setup step ${step} failed: ${err}`);
+    }
   }
 
   // ── Version check ──────────────────────────────────────────────────────────
@@ -1439,6 +1557,12 @@ private _getSetupHtml(
       min-height: 100vh; padding: 32px 20px 40px; text-align: center;
     }
 
+    /* Focus styles for keyboard navigation */
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid #7c8cf8;
+      outline-offset: 2px;
+    }
+
     /* ── Header ── */
     .header-bar {
       position: fixed; top: 12px; right: 12px; z-index: 200;
@@ -1460,6 +1584,11 @@ private _getSetupHtml(
       padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: background 0.15s;
     }
     .sign-in-btn:hover { background: rgba(220,40,40,0.16); }
+    .reset-setup-btn {
+      font-size: 11px; color: #888; background: transparent; border: none;
+      cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    }
+    .reset-setup-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
     .user-popover-wrap { position: relative; }
     .user-popover {
       display: none; position: absolute; top: calc(100% + 8px); right: 0;
@@ -1683,8 +1812,13 @@ private _getSetupHtml(
   </style>
 </head>
 <body>
+  <!-- Skip link for accessibility -->
+  <a href="#main-content" class="skip-link" style="position:absolute;top:-40px;left:0;padding:8px;background:#fff;color:#000;z-index:2000;transition:top .2s;">Skip to content</a>
   <!-- Header -->
-  <div class="header-bar">${userAreaHtml}</div>
+  <div class="header-bar">
+    ${userAreaHtml}
+    <button class="reset-setup-btn" onclick="confirmResetSetup()" title="Reset setup to factory defaults">Reset Setup</button>
+  </div>
 
   <!-- Logo + title -->
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
@@ -1692,7 +1826,7 @@ private _getSetupHtml(
   <div class="setup-sub">Follow the steps below to get started</div>
 
   <!-- Step timeline -->
-  <div class="steps" id="steps-timeline">
+  <div class="steps" id="main-content" tabindex="-1">
     <div class="step-item ${isInstalled ? 'done' : 'active'}" id="step-install">
       <div class="step-dot">${isInstalled ? '✓' : '1'}</div>
       <div class="step-label-text">Install<br>OpenClaw</div>
@@ -1720,7 +1854,7 @@ private _getSetupHtml(
       <button class="setup-choice-card" id="btn-choose-local" onclick="chooseLocal()">
         <span style="font-size:28px;">💻</span>
         <span class="setup-choice-title">Local Setup</span>
-        <span class="setup-choice-sub">Advanced · Install directly on host</span>
+        <span class="setup-choice-sub">Advanced · Manual on-host install</span>
       </button>
     </div>
   </div>
@@ -1752,7 +1886,7 @@ private _getSetupHtml(
   <div class="panel" id="panel-docker-doctor" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:400px;width:100%;">
     <div class="panel-title" style="margin-bottom:2px;">Checking Requirements</div>
     <div id="doctor-checklist" style="width:100%;display:flex;flex-direction:column;gap:6px;"></div>
-    <div id="doctor-install-guide" style="display:none;width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;font-size:12px;color:#ccc;line-height:1.7;"></div>
+    <div id="doctor-install-guide" role="status" aria-live="polite" style="display:none;width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;font-size:12px;color:#ccc;line-height:1.7;"></div>
     <div id="doctor-actions" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px;"></div>
   </div>
 
@@ -1760,8 +1894,72 @@ private _getSetupHtml(
   <div class="panel" id="panel-docker-provision" style="display:none;flex-direction:column;align-items:center;gap:10px;max-width:420px;width:100%;">
     <div class="panel-title" style="margin-bottom:2px;">Starting Docker Environment</div>
     <div id="provision-log" style="width:100%;height:180px;overflow-y:auto;background:#0d0d0d;border:1px solid #222;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#a0a0a0;white-space:pre-wrap;word-break:break-all;"></div>
-    <div id="provision-status" style="font-size:12px;color:#888;text-align:center;"></div>
+    <div id="provision-status" role="status" aria-live="polite" style="font-size:12px;color:#888;text-align:center;"></div>
     <div id="provision-actions" style="display:none;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
+  </div>
+
+  <!-- Panel Local: Multi-step setup guide -->
+  <div class="panel" id="panel-local-setup" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:420px;width:100%;">
+    <button class="btn-link" style="margin-bottom:-4px;align-self:flex-start;" onclick="showBootstrapChoice()">← Back</button>
+    <div class="panel-title" style="margin-bottom:2px;">Local Development Setup</div>
+    <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">For developers who want to run services directly on the host. Follow these steps in order.</div>
+    <div id="local-steps" style="width:100%;display:flex;flex-direction:column;gap:8px;">
+      <!-- Step 1 -->
+      <div class="local-step" id="local-step-1">
+        <div class="local-step-header" onclick="toggleLocalStep(1)">
+          <span class="local-step-num">1</span>
+          <span class="local-step-title">Install OpenClaw CLI</span>
+          <span class="local-step-status" id="local-status-1">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Runs <code>npm install -g @openclaw/cli</code>. Requires Node.js 20+ and sudo/administrator rights.</div>
+          <button class="btn-primary" id="btn-local-1" onclick="runLocalStep(1)">Run</button>
+          <div id="local-log-1" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 2 -->
+      <div class="local-step" id="local-step-2">
+        <div class="local-step-header" onclick="toggleLocalStep(2)">
+          <span class="local-step-num">2</span>
+          <span class="local-step-title">Start Database (PostgreSQL)</span>
+          <span class="local-step-status" id="local-status-2">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Starts PostgreSQL service and creates <code>openclaw</code> database. Requires <code>sudo</code> on Linux/macOS or Administrator on Windows.</div>
+          <button class="btn-primary" id="btn-local-2" onclick="runLocalStep(2)">Run</button>
+          <div id="local-log-2" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 3 -->
+      <div class="local-step" id="local-step-3">
+        <div class="local-step-header" onclick="toggleLocalStep(3)">
+          <span class="local-step-num">3</span>
+          <span class="local-step-title">Run Backend API</span>
+          <span class="local-step-status" id="local-status-3">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Clones and starts the OpenClaw backend (or runs a local mock). This may take a minute.</div>
+          <button class="btn-primary" id="btn-local-3" onclick="runLocalStep(3)">Run</button>
+          <div id="local-log-3" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 4 -->
+      <div class="local-step" id="local-step-4">
+        <div class="local-step-header" onclick="toggleLocalStep(4)">
+          <span class="local-step-num">4</span>
+          <span class="local-step-title">Launch Editor</span>
+          <span class="local-step-status" id="local-status-4">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Starts the OCcode editor and connects to the local backend.</div>
+          <button class="btn-primary" id="btn-local-4" onclick="runLocalStep(4)">Run</button>
+          <div id="local-log-4" class="local-log"></div>
+        </div>
+      </div>
+    </div>
+    <div id="local-final-actions" style="display:none;flex-direction:row;gap:10px;margin-top:8px;">
+      <button class="btn-primary" onclick="finishLocalSetup()">Go to Dashboard →</button>
+    </div>
   </div>
 
   <!-- Panel: Xcode CLI required (macOS only) -->
@@ -1972,7 +2170,7 @@ private _getSetupHtml(
     }
     function chooseLocal() {
       document.getElementById('panel-bootstrap-choice').style.display = 'none';
-      document.getElementById('panel-install').style.display = 'flex';
+      document.getElementById('panel-local-setup').style.display = 'flex';
     }
     function chooseDocker() {
       document.getElementById('panel-bootstrap-choice').style.display = 'none';
@@ -2002,6 +2200,27 @@ private _getSetupHtml(
     function dockerCancel() {
       vscode.postMessage({ command: 'dockerCancel' });
       showBootstrapChoice();
+    }
+
+    // ── Local Setup helpers ───────────────────────────────────────────────
+    function toggleLocalStep(num) {
+      var body = document.querySelector('#local-step-' + num + ' .local-step-body');
+      if (body) { body.style.display = body.style.display === 'none' ? 'block' : 'none'; }
+    }
+
+    function runLocalStep(num) {
+      var statusEl = document.getElementById('local-status-' + num);
+      var logEl = document.getElementById('local-log-' + num);
+      var btn = document.getElementById('btn-local-' + num);
+      if (statusEl) statusEl.textContent = 'Running…';
+      if (btn) btn.disabled = true;
+      if (logEl) logEl.textContent = '';
+      // Stream logs via postMessage to extension, which will run the script
+      vscode.postMessage({ command: 'localSetupCommand', step: num });
+    }
+
+    function finishLocalSetup() {
+      vscode.postMessage({ command: 'openclaw.configure' });
     }
 
     // ── Log helpers ────────────────────────────────────────────────
@@ -2203,10 +2422,57 @@ private _getSetupHtml(
             }
           }
         }
+      } else if (d.type === 'localLog') {
+        var logEl = document.getElementById('local-log-' + d.step);
+        if (logEl) logEl.textContent += d.text;
+      } else if (d.type === 'localStatus') {
+        var statusEl = document.getElementById('local-status-' + d.step);
+        var btn = document.getElementById('btn-local-' + d.step);
+        if (statusEl) statusEl.textContent = d.status === 'done' ? 'Completed' : d.status === 'failed' ? 'Failed' : 'Running…';
+        if (btn) btn.disabled = d.status === 'running';
+        if (d.status === 'done' || d.status === 'failed') {
+          // Check if all steps are completed
+          [1,2,3,4].forEach(function(s) {
+            var el = document.getElementById('local-status-' + s);
+            if (el) el.textContent = el.textContent.trim();
+          });
+          var allDone = [1,2,3,4].every(function(s) {
+            var el = document.getElementById('local-status-' + s);
+            return el && (el.textContent === 'Completed' || el.textContent === 'Failed');
+          });
+          if (allDone) document.getElementById('local-final-actions').style.display = 'flex';
+        }
       }
     });
+
+    // Reset modal and helper functions
+    function confirmResetSetup() {
+      document.getElementById('reset-modal').style.display = 'flex';
+    }
+    function closeResetModal() {
+      document.getElementById('reset-modal').style.display = 'none';
+    }
+    function performFullReset() {
+      closeResetModal();
+      vscode.postMessage({ command: 'occ.setup.reset', full: true });
+    }
   </script>
-</body>
+
+    <!-- Reset Confirmation Modal -->
+    <div id="reset-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;">
+      <div class="modal-box" style="background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:20px;max-width:360px;width:90%;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,0.6);">
+        <div id="reset-modal-title" style="font-size:15px;font-weight:600;margin-bottom:8px;">Reset Setup?</div>
+        <div style="color:#aaa;font-size:12px;line-height:1.6;margin-bottom:16px;">
+          This will stop any running containers and remove the OpenClaw configuration.<br><br>
+          <strong style="color:#dc2828;">Warning:</strong> Checking "Also delete all data" will permanently delete your OpenClaw data directory and Docker volumes.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn-secondary" onclick="closeResetModal()" style="padding:8px 14px;border-radius:8px;border:1px solid #444;background:transparent;color:#ddd;cursor:pointer;">Cancel</button>
+          <button class="btn-primary" onclick="performFullReset()" style="padding:8px 14px;border-radius:8px;border:none;background:#dc2828;color:#fff;cursor:pointer;">Reset Everything</button>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>`;
 }
 
@@ -2882,6 +3148,12 @@ private _getSetupHtml(
     guide?: string;
     runtime?: 'docker' | 'podman';
   }> {
+    // Check cache first (5-minute TTL)
+    const now = Date.now();
+    if (HomePanel._dockerDetectionCache && (now - HomePanel._dockerDetectionCache.timestamp) < HomePanel.DOCKER_DETECTION_TTL) {
+      return HomePanel._dockerDetectionCache.result;
+    }
+
     const items: Array<{ label: string; detail?: string; status: 'ok' | 'fail' | 'warn' | 'pending' }> = [];
     let allPassed = true;
     let guide: string | undefined;
@@ -2978,7 +3250,10 @@ private _getSetupHtml(
         : 'Docker Compose should be included with Docker Desktop. Please reinstall Docker Desktop.';
     }
 
-    return { items, allPassed, canRetry: !allPassed, guide, runtime };
+    const result = { items, allPassed, canRetry: !allPassed, guide, runtime };
+    // Cache the detection result for 5 minutes
+    HomePanel._dockerDetectionCache = { timestamp: Date.now(), result };
+    return result;
   }
 
   /**
