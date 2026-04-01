@@ -693,7 +693,7 @@ export class HomePanel {
   private async _handleResetSetup(full: boolean = false): Promise<void> {
     const dataDir = path.join(os.homedir(), '.openclaw');
     const configPath = path.join(dataDir, 'openclaw.json');
-    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', 'docker-compose.full.yml');
+    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
 
     // 1. Tear down Docker environment if it exists
     try {

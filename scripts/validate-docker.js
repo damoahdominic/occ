@@ -12,9 +12,9 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 
-const COMPOSE_FILE = path.resolve(process.cwd(), 'docker-compose.yml');
-const EDITOR_PORT = 3001;
-const WEB_PORT = 3002;
+const COMPOSE_FILE = path.resolve(process.cwd(), 'docker/docker-compose.full.yml');
+const GATEWAY_PORT = 18789;
+const POSTGRES_PORT = 5432;
 
 async function execCmd(cmd, args = [], options = {}) {
   return new Promise((resolve, reject) => {
@@ -77,7 +77,7 @@ async function task2ConfigValidation() {
     console.error(`  ✗ Compose file not found: ${COMPOSE_FILE}`);
     throw new Error('Compose file missing');
   }
-  console.log('  ✓ docker-compose.yml exists');
+  console.log('  ✓ docker/docker-compose.full.yml exists');
 
   try {
     await execCmd('docker', ['compose', 'config', '--dry-run']);
@@ -96,7 +96,7 @@ async function task2ConfigValidation() {
   console.log(`  ✓ Workspace directory present: ${cwd}`);
 
   // Port conflicts
-  const ports = [EDITOR_PORT, WEB_PORT];
+  const ports = [GATEWAY_PORT, POSTGRES_PORT];
   for (const port of ports) {
     const inUse = await portInUse(port);
     if (inUse) {
@@ -127,7 +127,7 @@ async function task3ContainerTesting() {
   // Build images
   console.log('  → Building images (this may take a while)...');
   try {
-    await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'build']);
+    await execCmd('docker', ['compose', '-f', COMPOSE_FILE, 'build']);
     console.log('  ✓ Build succeeded');
   } catch (e) {
     console.error('  ✗ Build failed:', e.message);
@@ -137,7 +137,7 @@ async function task3ContainerTesting() {
   // Start services
   console.log('  → Starting services...');
   try {
-    await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'up', '-d']);
+    await execCmd('docker', ['compose', '-f', COMPOSE_FILE, 'up', '-d']);
     console.log('  ✓ Services started');
   } catch (e) {
     console.error('  ✗ Failed to start services:', e.message);
@@ -149,7 +149,7 @@ async function task3ContainerTesting() {
   const maxAttempts = 24;
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const { stdout } = await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'ps']);
+      const { stdout } = await execCmd('docker', ['compose', '-f', COMPOSE_FILE, 'ps']);
       if (stdout.includes('healthy')) {
         console.log('  ✓ Containers are healthy');
         break;
@@ -159,7 +159,7 @@ async function task3ContainerTesting() {
   }
 
   // Port accessibility
-  for (const port of [EDITOR_PORT, WEB_PORT]) {
+  for (const port of [GATEWAY_PORT, POSTGRES_PORT]) {
     const open = await checkPort(port);
     if (open) {
       console.log(`  ✓ Port ${port} is open`);
@@ -169,33 +169,33 @@ async function task3ContainerTesting() {
   }
 }
 
-async function task4DevWorkflow() {
-  console.log('\n🔍 Task 4: Development Workflow');
+async function task4GatewayHealth() {
+  console.log('\n🔍 Task 4: Gateway Health Check');
 
-  // Check that hot-reload is configured (volumes are mounted)
-  console.log('  → Verifying volume mounts...');
-  const { stdout } = await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'exec', 'editor', 'sh', '-c', 'mount | grep /workspace']);
-  if (stdout.includes('/workspace')) {
-    console.log('  ✓ Workspace volume is mounted in editor');
-  } else {
-    console.warn('  ⚠ Workspace mount not detected; hot-reload may not work');
+  const maxAttempts = 15;
+  let healthy = false;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const http = require('http');
+        const req = http.get(`http://127.0.0.1:${GATEWAY_PORT}/health`, res => {
+          if (res.statusCode === 200) resolve(true);
+          else reject(new Error(`status ${res.statusCode}`));
+        });
+        req.setTimeout(2000, () => reject(new Error('timeout')));
+        req.on('error', reject);
+      });
+      healthy = true;
+      break;
+    } catch (_) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
 
-  // Source change reflection: touch a file and see if it appears in container
-  const testFile = path.join(process.cwd(), '.docker-validation-test.txt');
-  fs.writeFileSync(testFile, `test ${Date.now()}\n`);
-  try {
-    const { stdout } = await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'exec', 'editor', 'cat', '/workspace/.docker-validation-test.txt']);
-    if (stdout.trim()) {
-      console.log('  ✓ File changes reflect in container (volume mount working)');
-    } else {
-      console.warn('  ⚠ File not found inside container');
-    }
-  } catch (e) {
-    console.warn('  ⚠ Could not verify file sync:', e.message);
-  } finally {
-    fs.unlinkSync(testFile);
-    await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'exec', 'editor', 'rm', '-f', '/workspace/.docker-validation-test.txt']).catch(() => {});
+  if (healthy) {
+    console.log(`  ✓ Gateway /health returned 200 on port ${GATEWAY_PORT}`);
+  } else {
+    console.warn(`  ⚠ Gateway did not respond healthy on port ${GATEWAY_PORT} after ${maxAttempts} attempts`);
   }
 }
 
@@ -204,7 +204,7 @@ async function task5Cleanup() {
 
   console.log('  → Tearing down containers...');
   try {
-    await execCmd('docker', ['compose', '-f', 'docker-compose.yml', 'down']);
+    await execCmd('docker', ['compose', '-f', COMPOSE_FILE, 'down']);
     console.log('  ✓ Containers stopped and removed');
   } catch (e) {
     console.error('  ✗ Teardown failed:', e.message);
@@ -229,7 +229,7 @@ async function main() {
     await task1DockerEnv();
     await task2ConfigValidation();
     await task3ContainerTesting();
-    await task4DevWorkflow();
+    await task4GatewayHealth();
     await task5Cleanup();
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
