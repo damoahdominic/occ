@@ -16,9 +16,8 @@ services:
       NODE_ENV: development
       NODE_OPTIONS: --max-old-space-size=7168
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
-    entrypoint: bash
+    entrypoint: bash -lc -
     command:
-      - -lc
       - "npm i --ignore-scripts && npm run dev"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
@@ -28,6 +27,8 @@ services:
       start_period: 120s
     networks:
       dev-network: null
+    mem_limit: ${MEM_LIMIT:-0.0}
+    restart: unless-stopped
 
   web:
     build:
