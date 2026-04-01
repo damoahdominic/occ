@@ -145,7 +145,7 @@ Implement a **Bootstrap Wizard** in the OCCode Home panel that runs on first lau
       - Port 18789 availability check via net.createServer
       - Compose: `docker compose version` then `docker-compose --version` fallback
     - [x] Subtask 2.3: Return fail status if CLI exists but daemon not accessible
-    - [ ] Subtask 2.4: Cache detection result for a short period (5 minutes) to avoid repeated heavy checks
+    - [x] Subtask 2.4: Cache detection result for a short period (5 minutes) to avoid repeated heavy checks
 
 - [x] Task 3: Create Bootstrap Wizard UI component
   - **Problem**: Show setup options and progress to user
@@ -198,8 +198,9 @@ Implement a **Bootstrap Wizard** in the OCCode Home panel that runs on first lau
       - Remove `~/.openclaw/openclaw.json` (or backup)
       - Reset `globalState` flag `setupCompleted = false`
       - Reopen Home panel to wizard Step 0
-    - [ ] Subtask 7.2: In wizard, always show "Cancel / Reset" button in top-right; on click, show confirmation dialog with options: "Cancel and keep data" vs "Reset and delete everything"
-    - [ ] Subtask 7.3: If user chooses full reset, also delete Docker volumes: `docker volume rm occ-openclaw-data occ-postgres-data` (after compose down)
+      - **Note**: `_handleResetSetup(full)` is implemented in `home.ts:693` and handles all of the above. Missing: registration via `vscode.commands.registerCommand('occ.setup.reset', ...)` so users can invoke from command palette.
+    - [x] Subtask 7.2: In wizard, always show "Cancel / Reset" button in top-right; on click, show confirmation dialog with options: "Cancel and keep data" vs "Reset and delete everything"
+    - [x] Subtask 7.3: If user chooses full reset, also delete Docker volumes: `docker volume rm occ-openclaw-data occ-postgres-data` (after compose down)
 
 - [x] Task 8: Testing (unit + integration)
   - **Problem**: Ensure setup flow works across platforms and handles failures gracefully
