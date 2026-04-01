@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.2.47](https://github.com/damoahdominic/occ/compare/v3.2.46...v3.2.47) (2026-04-01)
+
+
+### Bug Fixes
+
+* auto-register occode:// protocol handler on Linux, add to Windows installer ([a5523cd](https://github.com/damoahdominic/occ/commit/a5523cd1d9d51b49dde53f8d516333f21d4aed03))
+* register missing openclaw.host.setup.{local,docker,ssh} commands ([bfe334e](https://github.com/damoahdominic/occ/commit/bfe334e1abf87fb98853d513eb03c3698f439d5f))
+
 ## [3.2.46](https://github.com/damoahdominic/occ/compare/v3.2.45...v3.2.46) (2026-03-31)
 
 
