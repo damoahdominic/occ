@@ -47,8 +47,16 @@ function code() {
 		DISABLE_TEST_EXTENSION=""
 	fi
 
+	# Detect virtual/software GPU (VMware, VirtualBox, QEMU) — Chromium GPU
+	# acceleration is unsupported on these; fall back to software rendering.
+	DISABLE_GPU_FLAG=""
+	_gpu_vendor=$(cat /sys/class/drm/card0/device/vendor 2>/dev/null | tr -d '[:space:]')
+	if [ "$_gpu_vendor" = "0x15ad" ] || [ "$_gpu_vendor" = "0x80ee" ] || [ "$_gpu_vendor" = "0x1234" ]; then
+		DISABLE_GPU_FLAG="--disable-gpu"
+	fi
+
 	# Launch Code
-	exec "$CODE" . $DISABLE_TEST_EXTENSION "$@"
+	exec "$CODE" . $DISABLE_TEST_EXTENSION $DISABLE_GPU_FLAG "$@"
 }
 
 function code-wsl()
