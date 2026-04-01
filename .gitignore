@@ -6,9 +6,11 @@ apps/editor/extensions/**/package-lock.json
 *.vsix
 .DS_Store
 apps/editor/.build/
+apps/editor/core.*
 apps/VSCode-linux-x64/
 apps/VSCode-darwin-*/
 apps/VSCode-win32-*/
+
 
 # Internal infrastructure docs — keep private
 APPLE.md
@@ -22,3 +24,5 @@ ISsues
 occ-backend
 .worktree
 .worktrees/
+
+package-lock.json
