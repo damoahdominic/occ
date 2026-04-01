@@ -599,6 +599,90 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
   return () => {}; // spend is a no-op — kept so call sites don't break
 }
 
+async function ensureLinuxProtocolHandler(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    if (process.platform !== 'linux') return;
+
+    const HANDLER_KEY = 'occ.linuxProtocolHandlerRegisteredFor';
+    const appRoot = vscode.env.appRoot;
+
+    // Dev mode: launch via shell script so the full dev environment is set up correctly.
+    // Production: invoke the binary directly.
+    const devLauncher = path.resolve(appRoot, '../../launch-editor.sh');
+    const execPath = process.env['VSCODE_DEV'] && fs.existsSync(devLauncher)
+      ? devLauncher
+      : process.execPath;
+
+    const stored = context.globalState.get<string>(HANDLER_KEY, '');
+    if (stored === execPath) return; // already registered for this executable
+
+    const product = JSON.parse(
+      fs.readFileSync(path.join(appRoot, 'product.json'), 'utf-8')
+    ) as { applicationName: string; urlProtocol: string; nameLong: string; linuxIconName: string; linuxDescription: string };
+
+    // 1. Write ~/.local/share/applications/occ-url-handler.desktop
+    const appsDir = path.join(os.homedir(), '.local', 'share', 'applications');
+    fs.mkdirSync(appsDir, { recursive: true });
+
+    const desktopContent = [
+      '[Desktop Entry]',
+      `Name=${product.nameLong} - URL Handler`,
+      `Comment=${product.linuxDescription}`,
+      'GenericName=Text Editor',
+      `Exec="${execPath}" --open-url %U`,
+      `Icon=${product.linuxIconName}`,
+      'Type=Application',
+      'NoDisplay=true',
+      'StartupNotify=true',
+      'Categories=Utility;TextEditor;Development;IDE;',
+      `MimeType=x-scheme-handler/${product.urlProtocol};`,
+      'Keywords=vscode;',
+      '',
+    ].join('\n');
+
+    fs.writeFileSync(
+      path.join(appsDir, `${product.applicationName}-url-handler.desktop`),
+      desktopContent, 'utf-8'
+    );
+
+    // 2. Update ~/.config/mimeapps.list
+    const mimeappsPath = path.join(os.homedir(), '.config', 'mimeapps.list');
+    const mimeEntry = `x-scheme-handler/${product.urlProtocol}=${product.applicationName}-url-handler.desktop`;
+
+    let mimeContent = '';
+    try { mimeContent = fs.readFileSync(mimeappsPath, 'utf-8'); } catch { /* new file */ }
+
+    function ensureMimeSection(content: string, section: string, entry: string): string {
+      const header = `[${section}]`;
+      const keyPrefix = entry.split('=')[0] + '=';
+      if (!content.includes(header)) {
+        return content + (content.endsWith('\n') || content === '' ? '' : '\n') + `${header}\n${entry}\n`;
+      }
+      const lines = content.split('\n');
+      const secIdx = lines.findIndex(l => l.trim() === header);
+      for (let i = secIdx + 1; i < lines.length; i++) {
+        if (lines[i].startsWith('[')) { lines.splice(secIdx + 1, 0, entry); return lines.join('\n'); }
+        if (lines[i].startsWith(keyPrefix)) { lines[i] = entry; return lines.join('\n'); }
+      }
+      lines.splice(secIdx + 1, 0, entry);
+      return lines.join('\n');
+    }
+
+    mimeContent = ensureMimeSection(mimeContent, 'Default Applications', mimeEntry);
+    mimeContent = ensureMimeSection(mimeContent, 'Added Associations', mimeEntry);
+    fs.mkdirSync(path.dirname(mimeappsPath), { recursive: true });
+    fs.writeFileSync(mimeappsPath, mimeContent, 'utf-8');
+
+    // 3. Refresh desktop database (fire-and-forget, silently ignored if not available)
+    cp.spawn('update-desktop-database', [appsDir], { stdio: 'ignore', detached: true }).unref();
+
+    // 4. Persist so we skip on next launch
+    await context.globalState.update(HANDLER_KEY, execPath);
+  } catch {
+    // Silent failure — non-critical
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<OpenClawCoreAPI> {
   // ── One-time migration: move JWT from globalState → SecretStorage ────────────
   const legacyJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
@@ -606,6 +690,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     await context.secrets.store(OCC_JWT_KEY, legacyJwt);
     await context.globalState.update(OCC_JWT_KEY, undefined);
   }
+
+  // ── Linux dev: auto-register occode:// protocol handler ──────────────────────
+  void ensureLinuxProtocolHandler(context);
 
   // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
   const hostRegistry = new HostRegistry();
