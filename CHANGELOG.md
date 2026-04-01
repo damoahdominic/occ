@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.3.0](https://github.com/damoahdominic/occ/compare/v3.2.47...v3.3.0) (2026-04-01)
+
+
+### Features
+
+* show extension version below OCC logo on all welcome panels ([f892a5c](https://github.com/damoahdominic/occ/commit/f892a5c444812da28a4ff8f1314795c7df722290))
+
+
+### Bug Fixes
+
+* enable Chromium sandbox and resolve blank window on virtual GPUs ([9204d2b](https://github.com/damoahdominic/occ/commit/9204d2b82cc3565de4d8ecb2b3269c35cb125c4d))
+
 ## [3.2.47](https://github.com/damoahdominic/occ/compare/v3.2.46...v3.2.47) (2026-04-01)
 
 
