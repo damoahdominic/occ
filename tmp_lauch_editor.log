@@ -1,0 +1,25 @@
+
+> code-oss-dev@1.99.3 electron
+> node build/lib/electron
+
+[04:19:56] Synchronizing built-in extensions...
+[04:19:56] You can manage built-in extensions with the [36m--builtin[39m flag
+[90m[main 2026-04-01T08:19:58.386Z][0m update#setState disabled
+[90m[main 2026-04-01T08:19:58.405Z][0m [CSS_DEV] DONE, 0 css modules (177ms)
+User is opted out of basic Void metrics? false
+Void posthog metrics info: {
+  "distinctId": "1bcb0c71-faf4-4772-9881-a8be83c431c9",
+  "properties": {
+    "commit": "00ca304",
+    "vscodeVersion": "1.99.3",
+    "voidVersion": "v3.2.28",
+    "os": "linux",
+    "quality": "stable",
+    "distinctId": "1bcb0c71-faf4-4772-9881-a8be83c431c9",
+    "distinctIdUser": "3e9d7f54-4020-4761-9e3f-38cd793c0c79",
+    "oldId": "NULL",
+    "isDevMode": true,
+    "platform": "linux",
+    "arch": "x64"
+  }
+}

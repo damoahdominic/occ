@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash /home/linuxdev/Desktop/workshop/studio/hustle/occ/.tickets/scripts/verify_tickets.sh)",
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ add docker/docker-compose.full.yml launch-editor.sh)",
+      "Bash(git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ status)",
+      "Bash(GIT_CONFIG_NOSYSTEM=1 HOME=/tmp git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ status)",
+      "Read(//root/**)",
+      "Bash(cp /root/.gitconfig /tmp/.gitconfig-bak)",
+      "Bash(GIT_CONFIG_GLOBAL=/tmp/.gitconfig-bak git config --global --add safe.directory /home/linuxdev/Desktop/workshop/studio/hustle/occ)",
+      "Bash(GIT_CONFIG_GLOBAL=/tmp/.gitconfig-bak git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ status)",
+      "Bash(GIT_CONFIG_GLOBAL=/tmp/.gitconfig-bak git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ add docker/docker-compose.full.yml launch-editor.sh)",
+      "Bash(GIT_CONFIG_GLOBAL=/tmp/.gitconfig-bak git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ commit -m \"$\\(cat <<'EOF'\nfeat\\(ticket-021\\): add docker compose full stack + fix launch-editor.sh for Linux\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(GIT_DIR=/home/linuxdev/Desktop/workshop/studio/hustle/occ/.git GIT_WORK_TREE=/home/linuxdev/Desktop/workshop/studio/hustle/occ git -C /home/linuxdev/Desktop/workshop/studio/hustle/occ status --short)",
+      "Bash(git -c safe.directory=/home/linuxdev/Desktop/workshop/studio/hustle/occ -C /home/linuxdev/Desktop/workshop/studio/hustle/occ status --short)",
+      "Bash(git -c safe.directory=/home/linuxdev/Desktop/workshop/studio/hustle/occ -C /home/linuxdev/Desktop/workshop/studio/hustle/occ add apps/editor/extensions/openclaw/src/panels/home.ts)",
+      "Bash(git -c:*)",
+      "Bash(make container-build-linux:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(docker compose:*)",
+      "WebFetch(domain:docs.github.com)",
+      "WebSearch",
+      "WebFetch(domain:github.blog)",
+      "WebFetch(domain:github.com)",
+      "Bash(git pull:*)",
+      "Bash(npx commit-and-tag-version:*)",
+      "Bash(git commit:*)",
+      "Bash(find /home/linuxdev/Desktop/workshop/studio/hustle/occ -path *extensions/openclaw/src/panels/home.ts -o -path *extensions/*/panels/home.ts)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+    ]
+  }
+}
