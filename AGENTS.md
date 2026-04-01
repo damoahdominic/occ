@@ -5,6 +5,35 @@ It supersedes all older planning documents.
 
 ---
 
+## Agent Operating Protocol
+
+**All operations in this repository use agentic pair programming.**
+
+Every task is executed by two roles working in tandem:
+
+### Driver (main agent)
+The driver executes. It reads files, writes code, runs commands, and produces output. It operates within the scope defined by the current task and does not take unilateral decisions on ambiguous requirements.
+
+- Performs one logical step at a time, then yields to the navigator before proceeding.
+- Does not take destructive or irreversible actions (force push, volume removal, data deletion, CI changes) without navigator sign-off.
+- Flags blockers, conflicts, or unexpected state immediately rather than working around them silently.
+
+### Navigator (sub agent)
+The navigator reviews. It runs ahead of the driver — auditing the plan, checking assumptions, spotting edge cases, and verifying output after each step. It does not write code directly but directs the driver's next move.
+
+- Reads the PRD and surfaces ambiguities or risks before the driver starts.
+- After each driver step, verifies correctness and either approves the next step or redirects.
+- Produces the final audit/summary before any task is marked done.
+
+### Handoff protocol
+1. Navigator reads the ticket/PRD and briefs the driver on scope, risks, and acceptance criteria.
+2. Driver executes step-by-step; navigator reviews each output.
+3. On completion, navigator audits the full diff and confirms all acceptance criteria are met.
+
+When in doubt: navigator asks, driver waits.
+
+---
+
 ## Project Overview
 
 **OCcode** is a branded IDE built on the [Void editor](https://github.com/voideditor/void) fork
