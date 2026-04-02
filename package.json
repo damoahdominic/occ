@@ -15,7 +15,12 @@
     "editor:compile": "cd apps/editor && node ./node_modules/gulp/bin/gulp.js transpile-client-esbuild",
     "editor:build": "npm --prefix apps/editor run compile-build",
     "editor:build-react": "npm --prefix apps/editor run buildreact",
-    "editor:watch-react": "npm --prefix apps/editor run watchreact"
+    "editor:watch-react": "npm --prefix apps/editor run watchreact",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   },
   "dependencies": {
     "cobe": "^0.6.5",
