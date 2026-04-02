@@ -168,6 +168,9 @@ import './contrib/splash/browser/splash.contribution.js';
 // Remote Start Entry for the Web
 import './contrib/remote/browser/remoteStartEntry.contribution.js';
 
+// Null metrics service override for web/server (real one needs Electron IPC)
+import './contrib/void/browser/metricsServiceBrowser.js';
+
 //#endregion
 
 
