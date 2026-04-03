@@ -51,8 +51,8 @@ When `setupFor === 'docker'`:
 
 ### Docker Compose services
 
-The flow uses `docker/docker-compose.full.yml`:
-- `occ-gateway` (image: `openclaw/pod:latest`) — port 18789
+The flow uses `docker/docker-compose.openclaw.yml` (built from `docker/Dockerfile.openclaw`):
+- `occ-gateway` (built from `Dockerfile.openclaw`, tagged `openclaw/pod:latest`) — port 18789
 - `occ-postgres` (image: `postgres:16-alpine`) — port 5432
 - `occ-redis` (image: `redis:7-alpine`) — port 6379
 
@@ -99,7 +99,7 @@ After clicking the Docker card from the host picker, the extension disposes the 
 ### Provisioning engine
 
 `runDockerProvision()` in `home.ts`:
-1. Resolves `docker/docker-compose.full.yml` (4 `..` segments from extension path)
+1. Resolves `docker/docker-compose.openclaw.yml` (4 `..` segments from extension path)
 2. Writes `.env` with `OPENCLAW_DATA_DIR`
 3. `docker compose pull`
 4. `docker compose up -d --remove-orphans`

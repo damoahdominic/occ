@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 
-const COMPOSE_FILE = path.resolve(process.cwd(), 'docker/docker-compose.full.yml');
+const COMPOSE_FILE = path.resolve(process.cwd(), 'docker/docker-compose.openclaw.yml');
 const GATEWAY_PORT = 18789;
 const POSTGRES_PORT = 5432;
 
@@ -77,7 +77,7 @@ async function task2ConfigValidation() {
     console.error(`  ✗ Compose file not found: ${COMPOSE_FILE}`);
     throw new Error('Compose file missing');
   }
-  console.log('  ✓ docker/docker-compose.full.yml exists');
+  console.log('  ✓ docker/docker-compose.openclaw.yml exists');
 
   try {
     await execCmd('docker', ['compose', 'config', '--dry-run']);

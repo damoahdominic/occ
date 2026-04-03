@@ -1,0 +1,148 @@
+# OpenClaw Gateway — Development Dockerfile
+#
+# This image provides the OpenClaw gateway runtime environment for development.
+# It includes a lightweight gateway stub that responds to /health and serves
+# the config UI on port 18789.
+#
+# In production this is replaced with the real `openclaw/pod` image.
+#
+# Usage:
+#   docker build -f docker/Dockerfile.openclaw -t openclaw/pod:latest .
+#
+# Or via docker-compose (automatic):
+#   OPENCLAW_DATA_DIR=~/.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+
+FROM node:20-alpine
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    curl \
+    tini
+
+# Create non-root user for the gateway
+RUN addgroup -g 1001 openclaw && \
+    adduser -u 1001 -G openclaw -s /bin/sh -D openclaw
+
+# Set working directory
+WORKDIR /home/openclaw
+
+# Create gateway stub
+RUN mkdir -p /home/openclaw/.openclaw && \
+    cat > /home/openclaw/gateway.js << 'GATEWAY_EOF'
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = parseInt(process.env.GATEWAY_PORT, 10) || 18789;
+const DATA_DIR = '/home/openclaw/.openclaw';
+const CONFIG_FILE = path.join(DATA_DIR, 'openclaw.json');
+
+// Ensure config exists
+function ensureConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      const cfg = {
+        gateway: { host: '127.0.0.1', port: PORT },
+        agents: { defaults: { model: { primary: 'anthropic/claude-sonnet-4-20250514' } } },
+        models: { providers: {} }
+      };
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    }
+  } catch (e) {
+    console.error('Failed to write config:', e.message);
+  }
+}
+
+function readConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  } catch {
+    return { gateway: { host: '127.0.0.1', port: PORT } };
+  }
+}
+
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      status: 'ok',
+      port: PORT,
+      uptime: process.uptime(),
+      version: '0.2.2-dev',
+      timestamp: new Date().toISOString()
+    }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/status') {
+    const config = readConfig();
+    res.writeHead(200);
+    res.end(JSON.stringify({
+      state: 'running',
+      port: PORT,
+      config: config
+    }));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/api/config') {
+    const config = readConfig();
+    res.writeHead(200);
+    res.end(JSON.stringify(config));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/config') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const cfg = JSON.parse(body);
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // Default: simple status page
+  res.writeHead(200);
+  res.end(JSON.stringify({
+    service: 'openclaw-gateway',
+    status: 'running',
+    port: PORT,
+    endpoints: ['/health', '/status', '/api/config']
+  }));
+});
+
+ensureConfig();
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`OpenClaw Gateway (dev) listening on port ${PORT}`);
+  console.log(`  Health: http://localhost:${PORT}/health`);
+  console.log(`  Config: http://localhost:${PORT}/api/config`);
+});
+GATEWAY_EOF
+
+# Set ownership
+RUN chown -R openclaw:openclaw /home/openclaw
+
+# Expose gateway port
+EXPOSE 18789
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl -f http://localhost:18789/health || exit 1
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["tini", "--"]
+
+# Default command: run the gateway in foreground
+USER openclaw
+CMD ["node", "gateway.js"]
