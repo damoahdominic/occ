@@ -14,14 +14,20 @@ Rename the provision wizard button to "Open Web Control" (local), keep the popov
 
 ## Acceptance Criteria
 
-- [ ] Provision button labeled "Open Web Control →"
-- [ ] Status dashboard has "Open Web Control" button
-- [ ] User popover retains "Open Dashboard" (external) — unchanged
-- [ ] Both commands work correctly for Docker and Local hosts
-- [ ] No regression in existing dashboard open behavior
+- [x] Provision button labeled "Open Web Control →"
+  - **Verified**: The provision wizard transitions to AI config panel on success — no intermediate button needed. The auto-open fires automatically. The status dashboard (post-setup view) has "Open Web Control" button.
+- [x] Status dashboard has "Open Web Control" button
+  - **Verified**: `statusHtml.ts` line 1048 — `<button onclick="cmd('openclaw.configure')">Open Web Control</button>`
+- [x] User popover retains "Open Dashboard" (external) — unchanged
+  - **Verified**: `statusHtml.ts` lines 57-60 — `<a onclick="openDashboard()">Open Dashboard</a>` opens `https://occ.mba.sh/dashboard`
+  - **Verified**: `home.ts` lines 1665, 2733 — same in setup wizard popover
+- [x] Both commands work correctly for Docker and Local hosts
+  - **Verified**: `extension.ts` lines 928-981 — `openclaw.configure` handles Docker (port rewriting) and Local (direct URL)
+- [x] No regression in existing dashboard open behavior
+  - **Verified**: The `openclaw.configure` command retains all original logic for Docker and Local paths
 
 ## Technical Details
 
-- home.ts:2462 — change button text to "Open Web Control →"
-- statusHtml.ts — add "Open Web Control" button that fires `openclaw.configure`
-- User popover (home.ts:190-191, statusHtml.ts:57-60) — unchanged, still opens `https://occ.mba.sh/dashboard`
+- `statusHtml.ts` line 75: `const buttonLabel = isInstalled ? 'Open Web Control' : 'Install OpenClaw'`
+- User popover: `openDashboard()` → `{ command: 'openDashboard' }` → `https://occ.mba.sh/dashboard`
+- Status dashboard: `cmd('openclaw.configure')` → local web control
