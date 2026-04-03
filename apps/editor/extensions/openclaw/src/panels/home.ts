@@ -715,7 +715,7 @@ export class HomePanel {
   private async _handleResetSetup(full: boolean = false): Promise<void> {
     const dataDir = path.join(os.homedir(), '.openclaw');
     const configPath = path.join(dataDir, 'openclaw.json');
-    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
+    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
 
     // 1. Tear down Docker environment if it exists
     try {
@@ -3310,7 +3310,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     runtime: 'docker' | 'podman' = 'docker',
   ): Promise<void> {
     const tee = (text: string) => { post({ type: 'provisionLog', text }); writeLog(text); };
-    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
+    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
 
     // Resolve real compose file path (handle symlinks/relative)
     let resolvedCompose = composeFile;
@@ -3318,7 +3318,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
     if (!fs.existsSync(resolvedCompose)) {
       // Fallback: look relative to extension directory
-      const altCompose = path.join(extensionPath, 'docker', 'docker-compose.full.yml');
+      const altCompose = path.join(extensionPath, 'docker', 'docker-compose.openclaw.yml');
       if (fs.existsSync(altCompose)) resolvedCompose = altCompose;
       else {
         post({ type: 'provisionStatus', text: '❌ Compose file not found. Cannot provision.', done: true, ok: false });
@@ -3425,7 +3425,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
    * Tears down the Docker environment: `docker compose down`.
    */
   public static async runDockerTeardown(extensionPath: string, runtime: 'docker' | 'podman' = 'docker'): Promise<void> {
-    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
+    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
     let resolvedCompose = composeFile;
     try { resolvedCompose = fs.realpathSync(composeFile); } catch { /* use original */ }
     if (!fs.existsSync(resolvedCompose)) return;

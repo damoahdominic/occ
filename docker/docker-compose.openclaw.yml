@@ -2,6 +2,9 @@ version: "3.9"
 
 services:
   occ-gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.openclaw
     image: openclaw/pod:latest
     restart: unless-stopped
     ports:
@@ -11,7 +14,7 @@ services:
       REDIS_URL: redis://occ-redis:6379
       GATEWAY_PORT: "18789"
     volumes:
-      - ${OPENCLAW_DATA_DIR}:/root/.openclaw  # default: ~/Desktop/occ/.openclaw (set by extension)
+      - ${OPENCLAW_DATA_DIR}:/home/openclaw/.openclaw
     networks:
       - occ-network
     depends_on:
