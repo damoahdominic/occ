@@ -33,6 +33,50 @@ Properly register `occ.setup.reset` in `extension.ts`. Add a confirmation dialog
 - [x] `WindowHostBinding` cleared from workspace state
   - **Verified**: `extension.ts` line 1018 — `context.workspaceState.update(WINDOW_HOST_KEY, undefined)`
 
+## Tasks
+
+- [x] Task 1: Register `occ.setup.reset` command in extension.ts
+  - **Problem**: Command not registered, falls through to generic handler
+  - **Test**: Command appears in registered commands list, fires confirmation dialog
+  - **Depends on**: None
+  - **Subtasks**:
+    - [x] Subtask 1.1: Add `vscode.commands.registerCommand('occ.setup.reset', ...)` in extension.ts
+    - [x] Subtask 1.2: Add confirmation dialog with "Yes, Reset" / "Cancel"
+    - [x] Subtask 1.3: Clear `WindowHostBinding` from workspace state
+    - [x] Subtask 1.4: Call `HomePanel.currentPanel?.resetSetup(full)`
+    - [x] Subtask 1.5: Show host picker after reset (`HomePanel.createOrShow(..., true)`)
+
+- [x] Task 2: Rename `_handleResetSetup` to public `resetSetup` and preserve openclaw.json
+  - **Problem**: Method is private, deletes openclaw.json on full reset
+  - **Test**: Config file preserved after full reset
+  - **Depends on**: None
+  - **Subtasks**:
+    - [x] Subtask 2.1: Rename `_handleResetSetup` → `resetSetup` (public)
+    - [x] Subtask 2.2: Save `openclaw.json` before `rm -rf`, restore after
+    - [x] Subtask 2.3: Remove old config deletion code
+
+- [x] Task 3: Update webview message handler to route through registered command
+  - **Problem**: Webview calls method directly instead of registered command
+  - **Test**: `occ.setup.reset` message routes through `vscode.commands.executeCommand`
+  - **Depends on**: Task 1
+  - **Subtasks**:
+    - [x] Subtask 3.1: Update message handler to use `vscode.commands.executeCommand('occ.setup.reset', { full })`
+
+- [x] Task 4: Add `-v` flag support to `runDockerTeardown()`
+  - **Problem**: Static method doesn't pass `-v` for volume removal
+  - **Test**: `runDockerTeardown(path, 'docker', true)` passes `-v` to docker compose down
+  - **Depends on**: None
+  - **Subtasks**:
+    - [x] Subtask 4.1: Add `volumes` parameter to `runDockerTeardown()` signature
+    - [x] Subtask 4.2: Conditionally push `-v` to args array
+
+- [x] Task 5: Compile and verify
+  - **Test**: Extension compiles, all commands and methods present in compiled output
+  - **Depends on**: Tasks 1-4
+  - **Subtasks**:
+    - [x] Subtask 5.1: Recompile extension in Docker container
+    - [x] Subtask 5.2: Verify `occ.setup.reset`, `resetSetup`, `savedConfig` in compiled output
+
 ## Technical Details
 
 - `resetSetup(full: boolean)` — public method (renamed from `_handleResetSetup`)
