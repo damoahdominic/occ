@@ -3342,14 +3342,14 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     tee(`▶ Data directory: ${expandedDataPath}\n`);
     tee(`▶ Runtime: ${runtime}\n\n`);
 
-    post({ type: 'provisionStatus', text: 'Pulling images (this may take a few minutes)…' });
+    post({ type: 'provisionStatus', text: 'Building images (this may take a few minutes)…' });
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
     const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath };
 
-    // Pull images first
-    const pullResult = await new Promise<number>(resolve => {
-      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'pull'], {
+    // Build images (occ-gateway uses build: from Dockerfile.openclaw, not a registry image)
+    const buildResult = await new Promise<number>(resolve => {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'build'], {
         env, stdio: ['ignore', 'pipe', 'pipe'],
       });
       child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
@@ -3358,15 +3358,17 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       child.on('error', err => { tee(`\nError: ${err.message}\n`); resolve(1); });
     });
 
-    if (pullResult !== 0) {
-      tee('\n⚠️  Image pull had warnings (may be ok if images are cached)\n');
+    if (buildResult !== 0) {
+      tee('\n❌ Image build failed.\n');
+      post({ type: 'provisionStatus', text: '❌ Failed to build images. See log above.', done: true, ok: false });
+      return;
     }
 
     tee('\n▶ Starting services…\n');
     post({ type: 'provisionStatus', text: 'Starting containers…' });
 
     const upResult = await new Promise<number>(resolve => {
-      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'up', '-d', '--remove-orphans'], {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'up', '-d', '--build', '--remove-orphans'], {
         env, stdio: ['ignore', 'pipe', 'pipe'],
       });
       child.stdout?.on('data', (d: Buffer) => tee(d.toString()));

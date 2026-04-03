@@ -101,8 +101,8 @@ After clicking the Docker card from the host picker, the extension disposes the 
 `runDockerProvision()` in `home.ts`:
 1. Resolves `docker/docker-compose.openclaw.yml` (4 `..` segments from extension path)
 2. Writes `.env` with `OPENCLAW_DATA_DIR`
-3. `docker compose pull`
-4. `docker compose up -d --remove-orphans`
+3. `docker compose build` (builds occ-gateway from Dockerfile.openclaw)
+4. `docker compose up -d --build --remove-orphans`
 5. Polls `http://127.0.0.1:18789/health` every 2s for 60s
 6. Writes `openclaw.json` with gateway config
 7. Creates desktop shortcut
