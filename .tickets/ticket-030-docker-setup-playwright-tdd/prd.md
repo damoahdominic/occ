@@ -1,53 +1,36 @@
-# PRD: Docker Card Setup — Playwright TDD + Complete Wizard Flow
+# PRD: Docker Card Setup — Direct Docker Compose Provision
 
 ## 2.1 Problem Statement
 
-The Docker card setup wizard in the OCC Home panel (the multi-step flow: host picker → bootstrap choice → path input → doctor checks → provision) has zero automated test coverage. Some UI states and transitions may be broken or untested. We need Playwright tests that drive TDD-style implementation of the complete flow.
+Clicking the Docker card on the OCC Home panel should immediately navigate to the Docker initialization page and auto-start the OpenClaw gateway using `docker compose up`. The previous multi-step wizard (bootstrap choice → path input → doctor checks → provision) added unnecessary friction. Users who click Docker have already made their choice — they should see provisioning start automatically.
 
 ## 2.2 Scope
 
-Write Playwright tests that describe the intended behaviour of each wizard step using TDD. Tests initially fail where the implementation is incomplete or broken. Fix any gaps found during the test-writing process. Also add visual snapshot tests for each panel state.
-
-These tests build on the Playwright infrastructure from ticket-022 and ticket-029 and extend coverage into the Docker setup wizard.
+Simplify the Docker card flow to a single step: click → provision page → auto-start compose → done when healthy.
 
 ## 2.3 Flow Being Tested
 
-The wizard has four steps:
+The flow is now direct:
 
-1. **Host Picker → Bootstrap Choice**: User clicks Docker card on install wizard → new panel opens showing "Docker Setup" vs "Local Setup" buttons
-2. **Bootstrap Choice → Path Input**: User clicks "Docker Setup" (`#btn-choose-docker`) → `#panel-docker-path` appears with `#docker-path-input` pre-filled with default path
-3. **Path Input → Doctor Checks**: User confirms path → `#panel-docker-doctor` appears with `#doctor-checklist` showing requirement items (OS, Docker CLI, daemon, port, compose)
-4. **Doctor Checks → Provision**: All checks pass → user clicks Start → `#panel-docker-provision` with streaming `#provision-log`
+1. **Host Picker**: User sees three cards — Local, Docker (Recommended), SSH (Coming Soon)
+2. **Click Docker Card**: Extension disposes current panel, opens new one via `openclaw.host.setup.docker` with `setupFor: 'docker'`
+3. **Provision Page Shown**: `#panel-docker-provision` is immediately visible with streaming `#provision-log`
+4. **Auto-Provision**: After 400ms, `dockerProvision` message fires automatically — no button click needed
+5. **Compose Starts**: Extension runs `docker compose pull` then `docker compose up -d`
+6. **Health Poll**: Gateway polled at `http://127.0.0.1:18789/health` for up to 60s
+7. **Done**: "Open Dashboard →" button appears when healthy
 
-After clicking the Docker card from the host picker, the extension disposes the current panel and opens a new one via the `openclaw.host.setup.docker` command.
-
-## 2.4 Proposed Solution
-
-### Files to create / modify
-
-```
-playwright.config.ts                        ← update with snapshot config + always-list reporter
-tests/e2e/
-  docker-setup.spec.ts                      ← TDD tests for all wizard steps
-  snapshots.spec.ts                         ← visual regression tests for workbench, home panel, docker card states
-tests/e2e/snapshots/                        ← captured baseline screenshots (auto-generated)
-```
+## 2.4 Implementation
 
 ### Key selectors
 
 | Selector | Description |
 |---|---|
 | `[data-card="docker"]` | Docker card in host picker |
-| `#panel-bootstrap-choice` | Bootstrap choice panel root |
-| `#btn-choose-docker` | "Docker Setup" button |
-| `#btn-choose-local` | "Local Setup" button |
-| `#panel-docker-path` | Path input panel root |
-| `#docker-path-input` | Pre-filled path text input |
-| `#panel-docker-doctor` | Doctor checks panel root |
-| `#doctor-checklist` | List of requirement items |
-| `.doctor-item` | Individual requirement row |
-| `#panel-docker-provision` | Provision panel root |
+| `#panel-docker-provision` | Provision panel root (shown immediately for docker flow) |
 | `#provision-log` | Streaming provision log output |
+| `#provision-status` | Status text (pulling, starting, waiting for health, done) |
+| `#provision-actions` | Action buttons (appears when done) |
 
 ### Iframe chain
 
@@ -57,221 +40,83 @@ const inner = page
   .frameLocator('iframe#active-frame');
 ```
 
-### `playwright.config.ts` additions
+### How it works
 
-```ts
-reporter: [['list', { printSteps: true }]],   // always-list reporter
-expect: {
-  toHaveScreenshot: { maxDiffPixels: 100 },
-},
-snapshotDir: './tests/e2e/snapshots',
-```
+When `setupFor === 'docker'`:
+- `#panel-bootstrap-choice` is hidden (`display: none`)
+- `#panel-docker-provision` is visible (`display: flex`)
+- Step timeline shows: "Docker Selected" ✓ → "Provision Compose" (active) → "Ready" (pending)
+- An IIFE fires after 400ms posting `{ command: 'dockerProvision', dataPath: ... }`
+- `runDockerProvision()` in `home.ts` handles compose pull, up, health polling, and config writing
 
-### Test: `docker-setup.spec.ts`
+### Docker Compose services
 
-```ts
-import { test, expect } from '@playwright/test';
-
-test.describe('Docker setup wizard', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-    // Open home panel via command palette
-    await page.keyboard.press('F1');
-    await page.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-    await page.keyboard.type('OpenClaw: Open Home');
-    await page.locator('.quick-input-list .monaco-list-row').first().click();
-  });
-
-  const inner = (page: any) =>
-    page.frameLocator('iframe.webview').first().frameLocator('iframe#active-frame');
-
-  test('3a. Docker card is visible in host picker', async ({ page }) => {
-    await expect(inner(page).locator('[data-card="docker"]')).toBeVisible({ timeout: 20_000 });
-  });
-
-  test('3b. Click Docker card → bootstrap choice panel appears', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await expect(inner(page).locator('#panel-bootstrap-choice')).toBeVisible({ timeout: 20_000 });
-  });
-
-  test('3c. Click Docker Setup button → path input panel appears', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await inner(page).locator('#btn-choose-docker').click();
-    await expect(inner(page).locator('#panel-docker-path')).toBeVisible({ timeout: 20_000 });
-  });
-
-  test('3d. Path input has a default value', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await inner(page).locator('#btn-choose-docker').click();
-    const input = inner(page).locator('#docker-path-input');
-    await expect(input).not.toHaveValue('', { timeout: 10_000 });
-  });
-
-  test('3e. Confirm path → doctor checklist appears', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await inner(page).locator('#btn-choose-docker').click();
-    await inner(page).locator('button', { hasText: /confirm|next|continue/i }).click();
-    await expect(inner(page).locator('#panel-docker-doctor')).toBeVisible({ timeout: 20_000 });
-  });
-
-  test('3f. Doctor checklist shows requirement items', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await inner(page).locator('#btn-choose-docker').click();
-    await inner(page).locator('button', { hasText: /confirm|next|continue/i }).click();
-    await expect(inner(page).locator('#doctor-checklist')).toBeVisible({ timeout: 20_000 });
-    const items = inner(page).locator('.doctor-item');
-    await expect(items).toHaveCount(5, { timeout: 10_000 }); // OS, Docker CLI, daemon, port, compose
-  });
-
-  test('3g. Back navigation returns to host picker from bootstrap choice', async ({ page }) => {
-    await inner(page).locator('[data-card="docker"]').click();
-    await expect(inner(page).locator('#panel-bootstrap-choice')).toBeVisible({ timeout: 20_000 });
-    await inner(page).locator('button', { hasText: /back/i }).click();
-    await expect(inner(page).locator('[data-card="docker"]')).toBeVisible({ timeout: 20_000 });
-  });
-});
-```
-
-### Test: `snapshots.spec.ts`
-
-```ts
-import { test, expect } from '@playwright/test';
-
-test('workbench baseline snapshot', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-  await expect(page).toHaveScreenshot('workbench.png');
-});
-
-test('home panel snapshot', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-  await page.keyboard.press('F1');
-  await page.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await page.keyboard.type('OpenClaw: Open Home');
-  await page.locator('.quick-input-list .monaco-list-row').first().click();
-  const inner = page.frameLocator('iframe.webview').first().frameLocator('iframe#active-frame');
-  await inner.locator('#root').waitFor({ timeout: 20_000 });
-  await expect(page).toHaveScreenshot('home-panel.png');
-});
-
-test('bootstrap choice panel snapshot', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-  await page.keyboard.press('F1');
-  await page.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await page.keyboard.type('OpenClaw: Open Home');
-  await page.locator('.quick-input-list .monaco-list-row').first().click();
-  const inner = page.frameLocator('iframe.webview').first().frameLocator('iframe#active-frame');
-  await inner.locator('[data-card="docker"]').click();
-  await inner.locator('#panel-bootstrap-choice').waitFor({ timeout: 20_000 });
-  await expect(page).toHaveScreenshot('bootstrap-choice.png');
-});
-
-test('docker path input panel snapshot', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-  await page.keyboard.press('F1');
-  await page.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await page.keyboard.type('OpenClaw: Open Home');
-  await page.locator('.quick-input-list .monaco-list-row').first().click();
-  const inner = page.frameLocator('iframe.webview').first().frameLocator('iframe#active-frame');
-  await inner.locator('[data-card="docker"]').click();
-  await inner.locator('#btn-choose-docker').click();
-  await inner.locator('#panel-docker-path').waitFor({ timeout: 20_000 });
-  await expect(page).toHaveScreenshot('docker-path-input.png');
-});
-```
+The flow uses `docker/docker-compose.full.yml`:
+- `occ-gateway` (image: `openclaw/pod:latest`) — port 18789
+- `occ-postgres` (image: `postgres:16-alpine`) — port 5432
+- `occ-redis` (image: `redis:7-alpine`) — port 6379
 
 ## 2.5 Acceptance Criteria
 
-- [x] All tests in `tests/e2e/docker-setup.spec.ts` pass
-- [x] Visual snapshots captured for each panel state in `tests/e2e/snapshots/`
-- [x] Docker card click correctly transitions to bootstrap choice view
-- [x] Bootstrap choice `#btn-choose-docker` shows path input panel
-- [x] `#docker-path-input` has a sensible default value
-- [x] Doctor checklist appears and shows requirement items after path confirmation
-- [x] Back navigation returns to host picker from bootstrap choice
-- [x] `playwright.config.ts` updated with snapshot config and always-list reporter
-- [x] Host picker cards have `data-card` attributes for reliable test selectors
-- [x] Step timeline shows Docker-appropriate labels ("Check Requirements" → "Provision Docker") when `setupFor === 'docker'`
-- [x] Provision completion shows "Open Dashboard →" button after successful docker compose setup
+- [x] Docker card visible in host picker with `data-card="docker"` attribute
+- [x] Clicking Docker card navigates directly to provision panel (no intermediate steps)
+- [x] `#panel-docker-provision` is visible immediately after panel loads
+- [x] Docker compose auto-starts without user interaction
+- [x] Streaming log shows compose output in `#provision-log`
+- [x] Gateway health is polled after containers start
+- [x] "Open Dashboard →" button appears when compose services are healthy
+- [x] Step timeline reflects Docker flow: "Docker Selected" → "Provision Compose" → "Ready"
 
 ## 2.6 Tasks
 
-- [x] Task 1: Update `playwright.config.ts` with snapshot config + always-list reporter
-- [x] Task 2: Create `tests/e2e/snapshots.spec.ts` with visual regression tests for workbench, home panel, and docker card states
-- [x] Task 3: Create `tests/e2e/docker-setup.spec.ts` with TDD tests for all wizard steps
-  - [x] 3a. Test: Docker card visible in host picker (PASSED)
-  - [x] 3b. Test: Click Docker card → bootstrap choice panel appears (PASSED)
-  - [x] 3c. Test: Click Docker Setup button → path input panel appears (PASSED)
-  - [x] 3d. Test: Path input has a default value (PASSED)
-  - [x] 3e. Test: Confirm path → doctor checklist appears (PASSED)
-  - [x] 3f. Test: Doctor checklist shows requirement items (PASSED)
-  - [x] 3g. Test: Back navigation returns to host picker (PASSED)
-  - [x] 3h. Snapshots for bootstrap choice and path input panels
-- [x] Task 4: Fix gaps discovered during test authoring
-  - [x] Add `data-card` attributes to host picker cards (`data-card="local"`, `data-card="docker"`, `data-card="ssh"`)
-  - [x] Fix step timeline labels for Docker flow ("Check Requirements" → "Provision Docker" → "Ready")
-  - [x] Verify provision completion UI shows "Open Dashboard →" button
-- [x] Task 5: Run full test suite; confirm all tests pass
+- [x] Task 1: Hide bootstrap choice panel when `setupFor === 'docker'`
+- [x] Task 2: Show provision panel immediately when `setupFor === 'docker'`
+- [x] Task 3: Add auto-provision IIFE that fires on page load for docker setup
+- [x] Task 4: Update step timeline labels for Docker direct flow
+- [x] Task 5: Verify compose service starts and health check completes
 
-## 2.7 Audit Notes — Incorrect Bug Analysis Corrected
-
-The original PRD (Section 2.7) described an "Extension Bug" that was **incorrect**. The analysis claimed that `isInstalled` logic at `home.ts:411` would prevent `_getSetupHtml()` from rendering when `setupFor === 'docker'`.
-
-**Why the claimed bug does not exist:**
-
-When the Docker card is clicked from the host picker, the `openclaw.host.setup.docker` command creates a new `HomePanel` with `setupFor: 'docker'`. The `_host` field defaults to `DefaultLocalHostConnection` (type `'local'`), so `this._host.type !== 'local'` is **always `false`** during initial setup. This means:
-
-```
-isInstalled = isConfigured || (false && cliCheck.ok) = false
-```
-
-Therefore `_getSetupHtml()` IS rendered with `isInstalled = false`, the bootstrap choice panel IS visible, and all JavaScript handlers (`chooseDocker()`, `chooseLocal()`, etc.) are present and functional.
-
-**Real issues found and fixed:**
-
-1. **Missing `data-card` attributes** — Host picker cards lacked `data-card` attributes, making the PRD's proposed test selectors (`[data-card="docker"]`) non-functional. Fixed by adding `data-card="local"`, `data-card="docker"`, `data-card="ssh"` to the respective cards in `_getHostTypeSelectionHtml()`.
-
-2. **Generic step timeline labels** — The step timeline showed "Install OpenClaw" → "Configure AI Model" regardless of setup type. Fixed by passing `setupFor` to `_getSetupHtml()` and rendering Docker-appropriate labels ("Check Requirements" → "Provision Docker") when `setupFor === 'docker'`.
-
-3. **Provision completion UI** — Already implemented correctly. After `docker compose up` succeeds, the `provisionStatus` handler renders an "Open Dashboard →" button.
-
-## 2.8 Technical Details
-
-### Iframe nesting
-
-VS Code wraps webview panels in two iframe layers:
-
-1. Outer: `iframe.webview` — sandboxed shell
-2. Inner: `iframe#active-frame` inside the outer — contains the actual React/HTML app
-
-Use `frameLocator` chains as shown above. If the inner frame is cross-origin, pass `--disable-web-security` in the Playwright launch args or configure `page.context().setAllowedLocalhostRanges()`.
+## 2.7 Technical Details
 
 ### Panel lifecycle
 
-After clicking the Docker card from the host picker, the extension disposes the current panel and opens a new one via the `openclaw.host.setup.docker` command. Tests must wait for the new panel's inner frame to be ready before querying selectors — use explicit `waitFor` calls rather than relying on navigation timing.
+After clicking the Docker card from the host picker, the extension disposes the current panel and opens a new one via the `openclaw.host.setup.docker` command. The new panel is created with `setupFor: 'docker'`, which causes `_getSetupHtml()` to render the provision panel visible and bootstrap choice hidden.
 
-### Docker Compose Provisioning
+### Auto-provision IIFE
 
-The Docker setup flow uses `docker/docker-compose.full.yml` which defines:
-- `occ-gateway` (image: `openclaw/pod:latest`) — OpenClaw gateway on port 18789
-- `occ-postgres` (image: `postgres:16-alpine`) — PostgreSQL database
-- `occ-redis` (image: `redis:7-alpine`) — Redis cache
+```js
+(function() {
+  var dataPath = '~/Desktop/occ/.openclaw';
+  setTimeout(function() {
+    var log = document.getElementById('provision-log');
+    if (log) log.textContent = '▶ Initializing Docker environment...\n';
+    var status = document.getElementById('provision-status');
+    if (status) status.textContent = 'Preparing Docker compose…';
+    vscode.postMessage({ command: 'dockerProvision', dataPath: dataPath });
+  }, 400);
+})();
+```
 
-The provisioning engine (`runDockerProvision` in `home.ts`) writes a `.env` file with `OPENCLAW_DATA_DIR`, runs `docker compose pull`, then `docker compose up -d`, polls the gateway health endpoint, and writes `openclaw.json` with gateway configuration.
+### Provisioning engine
 
-## 2.9 Dependencies
+`runDockerProvision()` in `home.ts`:
+1. Resolves `docker/docker-compose.full.yml` (4 `..` segments from extension path)
+2. Writes `.env` with `OPENCLAW_DATA_DIR`
+3. `docker compose pull`
+4. `docker compose up -d --remove-orphans`
+5. Polls `http://127.0.0.1:18789/health` every 2s for 60s
+6. Writes `openclaw.json` with gateway config
+7. Creates desktop shortcut
+8. Posts `provisionStatus` with `done: true, ok: true` → UI shows "Open Dashboard →"
 
-- **ticket-022** — Docker compose validation (prerequisite)
-- **ticket-029** — Playwright smoke tests (Playwright infrastructure in place)
-- Requires: Docker container running at `localhost:9888` (code-server)
+## 2.8 Dependencies
 
-## 2.10 Relationship to Other Tickets
+- **ticket-021** — Docker bootstrap setup (compose file, provisioning engine)
+- **ticket-022** — Docker compose validation
+- **ticket-027** — Docker setup button compose file path fix
+- Requires: Docker daemon running on host
 
-- **Ticket-029** — Playwright smoke tests; this ticket extends that suite with wizard-specific coverage
-- **Ticket-022** — Docker compose validation workflow; the wizard under test drives the compose setup
-- **Ticket-027** — Docker setup button compose file path fix (already resolved)
-- **Ticket-021** — Docker bootstrap setup; this ticket tests the flow implemented there
+## 2.9 Relationship to Other Tickets
+
+- **Ticket-021** — Original Docker bootstrap; this ticket simplifies the flow
+- **Ticket-027** — Fixed compose file path resolution used by this flow
+- **Ticket-029** — Playwright smoke tests; infrastructure reused for testing
