@@ -1850,13 +1850,13 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
   <!-- Step timeline -->
   <div class="steps" id="main-content" tabindex="-1">
-    <div class="step-item ${isInstalled ? 'done' : 'active'}" id="step-install">
-      <div class="step-dot">${isInstalled ? '✓' : '1'}</div>
-      <div class="step-label-text">${setupFor === 'docker' ? 'Check<br>Requirements' : 'Install<br>OpenClaw'}</div>
+    <div class="step-item ${setupFor === 'docker' ? 'done' : (isInstalled ? 'done' : 'active')}" id="step-install">
+      <div class="step-dot">${setupFor === 'docker' ? '✓' : (isInstalled ? '✓' : '1')}</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Docker<br>Selected' : 'Install<br>OpenClaw'}</div>
     </div>
-    <div class="step-item ${isInstalled ? 'active' : 'pending'}" id="step-configure">
-      <div class="step-dot">2</div>
-      <div class="step-label-text">${setupFor === 'docker' ? 'Provision<br>Docker' : 'Configure<br>AI Model'}</div>
+    <div class="step-item ${setupFor === 'docker' ? 'active' : (isInstalled ? 'active' : 'pending')}" id="step-configure">
+      <div class="step-dot">${setupFor === 'docker' ? '2' : '2'}</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Provision<br>Compose' : 'Configure<br>AI Model'}</div>
     </div>
     <div class="step-item pending" id="step-ready">
       <div class="step-dot">3</div>
@@ -1864,8 +1864,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     </div>
   </div>
 
-  <!-- Panel A0: Bootstrap choice (shown first when not installed) -->
-  <div class="panel" id="panel-bootstrap-choice" style="display:${isInstalled ? 'none' : 'flex'};flex-direction:column;align-items:center;gap:14px;">
+  <!-- Panel A0: Bootstrap choice (shown first when not installed, hidden for docker direct flow) -->
+  <div class="panel" id="panel-bootstrap-choice" style="display:${setupFor === 'docker' ? 'none' : (isInstalled ? 'none' : 'flex')};flex-direction:column;align-items:center;gap:14px;">
     <button class="btn-back" onclick="goBack()">← Back</button>
     <div class="panel-title" style="margin-bottom:2px;">How would you like to set up OpenClaw?</div>
     <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">Choose your installation method. Docker is recommended for a consistent, isolated environment.</div>
@@ -1915,7 +1915,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   </div>
 
   <!-- Panel Docker: Provisioning -->
-  <div class="panel" id="panel-docker-provision" style="display:none;flex-direction:column;align-items:center;gap:10px;max-width:420px;width:100%;">
+  <div class="panel" id="panel-docker-provision" style="display:${setupFor === 'docker' ? 'flex' : 'none'};flex-direction:column;align-items:center;gap:10px;max-width:420px;width:100%;">
     <div class="panel-title" style="margin-bottom:2px;">Starting Docker Environment</div>
     <div id="provision-log" style="width:100%;height:180px;overflow-y:auto;background:#0d0d0d;border:1px solid #222;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#a0a0a0;white-space:pre-wrap;word-break:break-all;"></div>
     <div id="provision-status" role="status" aria-live="polite" style="font-size:12px;color:#888;text-align:center;"></div>
@@ -2114,6 +2114,20 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
           setTimeout(function() { vscode.postMessage({ command: 'autoSetupSkipped' }); }, 1500);
         }
       }, 600);
+    })();
+    ` : ''}
+
+    // ── Auto-provision Docker (direct flow from Docker card) ───────
+    ${setupFor === 'docker' ? `
+    (function() {
+      var dataPath = '${HomePanel.getDefaultOpenClawDataPath()}';
+      setTimeout(function() {
+        var log = document.getElementById('provision-log');
+        if (log) log.textContent = '▶ Initializing Docker environment...\\n';
+        var status = document.getElementById('provision-status');
+        if (status) status.textContent = 'Preparing Docker compose…';
+        vscode.postMessage({ command: 'dockerProvision', dataPath: dataPath });
+      }, 400);
     })();
     ` : ''}
 
