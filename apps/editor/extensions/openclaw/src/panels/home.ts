@@ -115,6 +115,7 @@ export class HomePanel {
   /** True once _getSetupHtml() has been rendered — prevents onDidChangeViewState re-renders from resetting in-progress wizard state. */
   private _setupHtmlShown = false;
   private readonly _version: string;
+  private _dashboardAutoOpened = false;
 
   // Docker detection cache (5-minute TTL)
   private static _dockerDetectionCache: { timestamp: number; result: Awaited<ReturnType<typeof HomePanel.detectDockerEnvironment>> } | null = null;
@@ -210,7 +211,7 @@ export class HomePanel {
         void this._handleLocalSetupStep(step);
       } else if (msg.command === 'occ.setup.reset') {
         const { full } = msg;
-        void this._handleResetSetup(full === true);
+        void vscode.commands.executeCommand('occ.setup.reset', { full });
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'SOUL.md', 'HEARTBEAT.md']);
         const file = msg.file as string;
@@ -296,9 +297,15 @@ export class HomePanel {
         const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
         void HomePanel.runDockerProvision(post, dataPath, this._extensionUri.fsPath, runtime)
           .then(() => {
-            // Re-check if openclaw is now configured
-            setTimeout(() => void this._update(), 2000);
+            // AI config panel is shown by the webview JS on provisionStatus done:ok.
+            // _update() is called after AI config is saved or skipped.
           });
+      } else if (msg.command === 'saveAiConfig') {
+        const provider = msg.provider as string;
+        const apiKey = msg.apiKey as string;
+        void this._saveAiConfig(provider, apiKey);
+      } else if (msg.command === 'skipAiConfig') {
+        void this._skipAiConfig();
       } else if (msg.command === 'dockerCancel') {
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
         void HomePanel.runDockerTeardown(this._extensionUri.fsPath, runtime);
@@ -712,9 +719,8 @@ export class HomePanel {
   }
 
   // ── Reset/Teardown handler ─────────────────────────────────────────────────
-  private async _handleResetSetup(full: boolean = false): Promise<void> {
+  public async resetSetup(full: boolean = false): Promise<void> {
     const dataDir = path.join(os.homedir(), '.openclaw');
-    const configPath = path.join(dataDir, 'openclaw.json');
     const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
 
     // 1. Tear down Docker environment if it exists
@@ -734,22 +740,16 @@ export class HomePanel {
       this._outputChannel.appendLine(`Docker teardown failed (non-fatal): ${e}`);
     }
 
-    // 2. Remove configuration
-    try {
-      if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
-    } catch { /* non-fatal */ }
-
-    // 3. If full reset, remove data directory (except maybe logs)
+    // 2. If full reset, remove data directory (openclaw.json is preserved — the user's config stays)
     if (full) {
       try {
         if (fs.existsSync(dataDir)) {
-          // Remove contents but keep logs maybe? Simpler: remove all
           fs.rmSync(dataDir, { recursive: true, force: true });
         }
       } catch { /* non-fatal */ }
     }
 
-    // 4. Refresh panel to show wizard
+    // 3. Refresh panel to show wizard
     void this._update();
   }
 
@@ -937,6 +937,107 @@ export class HomePanel {
     try {
       this._panel.webview.postMessage({ type: 'hostsStatus', local: localStatus, docker: dockerStatus });
     } catch { /* ignore */ }
+  }
+
+  // ── AI Config after Docker provision ─────────────────────────────
+
+  /**
+   * Writes the selected AI provider and API key into openclaw.json,
+   * then transitions to the IDE experience.
+   */
+  private async _saveAiConfig(provider: string, apiKey: string): Promise<void> {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    try {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      }
+
+      // Provider model defaults
+      const defaultModels: Record<string, string> = {
+        anthropic: 'anthropic/claude-sonnet-4-20250514',
+        openai: 'openai/gpt-4.1',
+        google: 'google/gemini-2.5-pro',
+        groq: 'groq/llama-3.3-70b-versatile',
+        openrouter: 'openrouter/anthropic/claude-sonnet-4-20250514',
+      };
+
+      // Ensure models.providers structure exists
+      const models = (config['models'] as Record<string, unknown> | undefined) ?? {};
+      const providers = (models['providers'] as Record<string, unknown> | undefined) ?? {};
+
+      // Add the selected provider's API key
+      providers[provider] = { apiKey };
+      models['providers'] = providers;
+      config['models'] = models;
+
+      // Set the primary model
+      const agents = (config['agents'] as Record<string, unknown> | undefined) ?? {};
+      const defaults = (agents['defaults'] as Record<string, unknown> | undefined) ?? {};
+      const model = (defaults['model'] as Record<string, string> | undefined) ?? {};
+      model['primary'] = defaultModels[provider] ?? `${provider}/default`;
+      defaults['model'] = model;
+      agents['defaults'] = defaults;
+      config['agents'] = agents;
+
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      writeLog(`[ai-config] saved provider=${provider}\n`);
+    } catch (err) {
+      writeLog(`[ai-config] failed to save: ${err}\n`);
+    }
+
+    void this._transitionToIde();
+  }
+
+  /**
+   * Skips AI configuration and proceeds to the IDE experience.
+   */
+  private async _skipAiConfig(): Promise<void> {
+    writeLog('[ai-config] skipped by user\n');
+    void this._transitionToIde();
+  }
+
+  /**
+   * After setup is complete (Docker running + AI configured or skipped),
+   * transition the user into the actual IDE experience:
+   *  1. Close the OCC Home panel
+   *  2. Open the OpenClaw workspace folder (from openclaw.json)
+   *  3. Open the AI chat sidebar
+   */
+  private async _transitionToIde(): Promise<void> {
+    // Verify Docker is running
+    let dockerRunning = false;
+    try {
+      const dc = cp.spawnSync(
+        'docker',
+        ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+        { timeout: 3000, windowsHide: true },
+      );
+      const st = (dc.stdout?.toString() ?? '').trim();
+      dockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+    } catch { /* docker not available */ }
+
+    if (!dockerRunning) {
+      writeLog('[ide-transition] docker not running, falling back to _update()\n');
+      setTimeout(() => void this._update(), 500);
+      return;
+    }
+
+    // Close the Home panel
+    this.dispose();
+
+    // Open the workspace folder from openclaw.json if configured
+    const workspaceDir = getOpenClawWorkspaceDir();
+    if (fs.existsSync(workspaceDir)) {
+      try {
+        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(workspaceDir), { forceNewWindow: false });
+      } catch { /* non-fatal — sidebar still opens */ }
+    }
+
+    // Open the AI chat sidebar
+    try {
+      await vscode.commands.executeCommand('workbench.view.extension.void');
+    } catch { /* sidebar view may not be registered yet */ }
   }
 
   private _getHostsOverviewHtml(iconUri: string, localPort: number, version: string): string {
@@ -1922,6 +2023,36 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div id="provision-actions" style="display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
   </div>
 
+  <!-- Panel: AI Config (shown after Docker provision succeeds) -->
+  <div class="panel" id="panel-ai-config" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:420px;width:100%;">
+    <div class="panel-title" style="margin-bottom:2px;">Configure AI Model</div>
+    <div class="panel-desc">Select your AI provider and enter your API key to power agent conversations.</div>
+    <div style="width:100%;display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <div class="field-label">Provider</div>
+        <select id="ai-provider-select" style="width:100%;background:#111;border:1px solid #2b2b2b;border-radius:6px;color:#e0e0e0;font-size:13px;padding:9px 12px;outline:none;box-sizing:border-box;cursor:pointer;" onchange="onAiConfigChange()">
+          <option value="">Select a provider...</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+      </div>
+      <div>
+        <div class="field-label">API Key</div>
+        <div style="position:relative;">
+          <input id="ai-api-key" class="key-input" type="password" placeholder="Enter your API key" autocomplete="off" oninput="onAiConfigChange()" style="padding-right:40px;" />
+          <button id="ai-key-toggle" onclick="toggleAiKeyVisibility()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px;" type="button">&#x1F441;</button>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row" style="width:100%;justify-content:space-between;">
+      <button class="btn-link" onclick="skipAiConfig()">Skip for now</button>
+      <button class="btn-primary" id="btn-finish-setup" onclick="saveAiConfig()" disabled>Finish Setup</button>
+    </div>
+  </div>
+
   <!-- Panel Local: Multi-step setup guide -->
   <div class="panel" id="panel-local-setup" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:420px;width:100%;">
     <button class="btn-link" style="margin-bottom:-4px;align-self:flex-start;" onclick="showBootstrapChoice()">← Back</button>
@@ -2266,6 +2397,39 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       vscode.postMessage({ command: 'openclaw.configure' });
     }
 
+    // ── AI Config helpers ──────────────────────────────────────────
+    function toggleAiKeyVisibility() {
+      var inp = document.getElementById('ai-api-key');
+      var btn = document.getElementById('ai-key-toggle');
+      if (inp.type === 'password') {
+        inp.type = 'text';
+        btn.textContent = '\uD83D\uDC41\u200D\uD83D\uDDE8';
+      } else {
+        inp.type = 'password';
+        btn.textContent = '\uD83D\uDC41';
+      }
+    }
+
+    function onAiConfigChange() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var key = document.getElementById('ai-api-key').value.trim();
+      var btn = document.getElementById('btn-finish-setup');
+      if (btn) btn.disabled = !(provider && key.length >= 8);
+    }
+
+    function saveAiConfig() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var apiKey = document.getElementById('ai-api-key').value.trim();
+      if (!provider || !apiKey) return;
+      var btn = document.getElementById('btn-finish-setup');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spin"></span> Saving…'; }
+      vscode.postMessage({ command: 'saveAiConfig', provider: provider, apiKey: apiKey });
+    }
+
+    function skipAiConfig() {
+      vscode.postMessage({ command: 'skipAiConfig' });
+    }
+
     // ── Log helpers ────────────────────────────────────────────────
     function showLog(initialMsg) {
       var wrap = document.getElementById('log-wrap');
@@ -2444,7 +2608,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         var actions = document.getElementById('doctor-actions');
         actions.innerHTML = '';
         if (d.allPassed) {
-          actions.innerHTML = '<button class="btn-primary" onclick="dockerProvision()">🚀 Start Docker Environment</button>';
+          actions.innerHTML = '<button class="btn-primary" onclick="dockerProvision()">🚀 Retry Docker Environment</button>';
         } else if (d.canRetry) {
           actions.innerHTML = '<button class="btn-secondary" onclick="dockerRetry()">↻ Retry Check</button><button class="btn-link" onclick="showBootstrapChoice()">← Back</button>';
         }
@@ -2459,7 +2623,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
           if (pa) {
             pa.style.display = 'flex';
             if (d.ok) {
-              pa.innerHTML = '<button class="btn-primary" onclick="cmd(\'openclaw.configure\')">Open Dashboard →</button>';
+              // Hide provision panel, show AI config panel
+              document.getElementById('panel-docker-provision').style.display = 'none';
+              document.getElementById('panel-ai-config').style.display = 'flex';
+              document.getElementById('step-configure').className = 'step-item done';
+              document.getElementById('step-ready').className = 'step-item active';
             } else {
               pa.innerHTML = '<button class="btn-secondary" onclick="dockerRetry()">↻ Retry</button><button class="btn-link" onclick="showBootstrapChoice()">← Back</button>';
             }

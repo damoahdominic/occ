@@ -919,7 +919,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
           type: 'docker', hostId: 'docker:occ-openclaw', port: DEFAULT_GATEWAY_PORT, label: 'Docker',
         } satisfies WindowHostBinding);
       }
-      HomePanel.createOrShow(context.extensionUri);
+      HomePanel.createOrShow(context.extensionUri, false, 'docker');
     }),
     vscode.commands.registerCommand('openclaw.host.setup.ssh', () => {
       // SSH host details are entered via the home panel UI — open it and let the panel drive.
@@ -1005,6 +1005,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     }),
     vscode.commands.registerCommand('openclaw.openWorkspace', () => {
       void openOpenClawFolder();
+    }),
+    vscode.commands.registerCommand('occ.setup.reset', async (options?: { full?: boolean }) => {
+      const full = options?.full === true;
+      const confirm = await vscode.window.showWarningMessage(
+        'This will stop all Docker containers and remove volumes. Your openclaw.json will be preserved. Continue?',
+        'Yes, Reset',
+        'Cancel',
+      );
+      if (confirm !== 'Yes, Reset') return;
+
+      await context.workspaceState.update(WINDOW_HOST_KEY, undefined);
+
+      HomePanel.currentPanel?.resetSetup(full);
+
+      HomePanel.createOrShow(context.extensionUri, true);
     }),
     vscode.commands.registerCommand('openclaw.status', () => {
       StatusPanel.createOrShow(context.extensionUri);
