@@ -14,7 +14,7 @@ services:
       REDIS_URL: redis://occ-redis:6379
       GATEWAY_PORT: "18789"
     volumes:
-      - ${OPENCLAW_DATA_DIR}:/home/openclaw/.openclaw
+      - ${OPENCLAW_DATA_DIR}:/root/.openclaw
     networks:
       - occ-network
     depends_on:
