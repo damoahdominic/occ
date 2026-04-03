@@ -17,17 +17,24 @@ Properly register `occ.setup.reset` in `extension.ts`. Add a confirmation dialog
 
 ## Acceptance Criteria
 
-- [ ] `occ.setup.reset` command registered in extension.ts
-- [ ] Confirmation dialog before reset
-- [ ] Docker compose down -v removes containers and volumes
-- [ ] `occ-openclaw` container stopped and removed
-- [ ] Panel returns to initial host picker
-- [ ] `openclaw.json` preserved (user data intact)
-- [ ] `WindowHostBinding` cleared from workspace state
+- [x] `occ.setup.reset` command registered in extension.ts
+  - **Verified**: `extension.ts` lines 1009-1023 — `vscode.commands.registerCommand('occ.setup.reset', ...)`
+- [x] Confirmation dialog before reset
+  - **Verified**: `extension.ts` lines 1011-1016 — `vscode.window.showWarningMessage(...)` with "Yes, Reset" / "Cancel"
+- [x] Docker compose down -v removes containers and volumes
+  - **Verified**: `home.ts` lines 736-742 — `args.push('-v')` when `full` is true
+  - **Verified**: `home.ts` lines 3627-3639 — `runDockerTeardown()` accepts `volumes` parameter, passes `-v` when true
+- [x] `occ-openclaw` container stopped and removed
+  - **Verified**: `docker compose down` stops and removes all containers defined in `docker-compose.openclaw.yml`
+- [x] Panel returns to initial host picker
+  - **Verified**: `extension.ts` line 1022 — `HomePanel.createOrShow(context.extensionUri, true)` with `forcePicker=true`
+- [x] `openclaw.json` preserved (user data intact)
+  - **Verified**: `home.ts` lines 752-766 — saves config before `rm -rf`, recreates directory, restores config
+- [x] `WindowHostBinding` cleared from workspace state
+  - **Verified**: `extension.ts` line 1018 — `context.workspaceState.update(WINDOW_HOST_KEY, undefined)`
 
 ## Technical Details
 
-- extension.ts: register `occ.setup.reset` command
-- home.ts: `_handleResetSetup()` already implemented — just needs proper command registration
-- Add confirmation via `vscode.window.showWarningMessage()`
-- Clear `WINDOW_HOST_KEY` from workspace state after reset
+- `resetSetup(full: boolean)` — public method (renamed from `_handleResetSetup`)
+- `runDockerTeardown(extensionPath, runtime, volumes)` — static method with optional `-v` flag
+- Webview sends `{ command: 'occ.setup.reset', full: true }` → routed through registered command
