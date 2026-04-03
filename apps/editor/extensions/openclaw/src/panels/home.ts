@@ -110,14 +110,19 @@ export class HomePanel {
   private _coreAPI: OpenClawCoreAPI | undefined;
   /** When true, always show the host picker — never auto-route to a single installed host. */
   private _forcePicker = false;
+  /** When set, show the Docker/Local setup wizard instead of the install wizard. */
+  private _setupFor: 'docker' | 'local' | null = null;
+  /** True once _getSetupHtml() has been rendered — prevents onDidChangeViewState re-renders from resetting in-progress wizard state. */
+  private _setupHtmlShown = false;
   private readonly _version: string;
 
   // Docker detection cache (5-minute TTL)
   private static _dockerDetectionCache: { timestamp: number; result: Awaited<ReturnType<typeof HomePanel.detectDockerEnvironment>> } | null = null;
   private static readonly DOCKER_DETECTION_TTL = 5 * 60 * 1000; // 5 minutes
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false, setupFor?: 'docker' | 'local') {
     this._forcePicker = forcePicker;
+    this._setupFor = setupFor ?? null;
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._version = (vscode.extensions.getExtension('openclaw.home')?.packageJSON as { version?: string })?.version ?? '';
@@ -297,6 +302,10 @@ export class HomePanel {
       } else if (msg.command === 'dockerCancel') {
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
         void HomePanel.runDockerTeardown(this._extensionUri.fsPath, runtime);
+      } else if (msg.command === 'backToHostPicker') {
+        this._setupFor = null;
+        this._setupHtmlShown = false;
+        void this._update();
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
         // Best-effort: close files from the other host's dir (non-blocking).
@@ -319,11 +328,12 @@ export class HomePanel {
     }, null, this._disposables);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri, forcePicker = false) {
+  public static createOrShow(extensionUri: vscode.Uri, forcePicker = false, setupFor?: 'docker' | 'local') {
     if (HomePanel.currentPanel) {
       if (forcePicker) { HomePanel.currentPanel._forcePicker = true; }
+      if (setupFor !== undefined) { HomePanel.currentPanel._setupFor = setupFor; HomePanel.currentPanel._setupHtmlShown = false; }
       HomePanel.currentPanel._panel.reveal();
-      if (forcePicker) { void HomePanel.currentPanel._update(); }
+      if (forcePicker || setupFor !== undefined) { void HomePanel.currentPanel._update(); }
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -332,7 +342,7 @@ export class HomePanel {
         vscode.Uri.joinPath(extensionUri, 'media'),
       ] }
     );
-    HomePanel.currentPanel = new HomePanel(panel, extensionUri, forcePicker);
+    HomePanel.currentPanel = new HomePanel(panel, extensionUri, forcePicker, setupFor);
   }
 
   /** Push a live balance update to the webview popover — called from extension.ts balance poller. */
@@ -446,6 +456,18 @@ export class HomePanel {
         if (Number.isFinite(n) && n > 0 && n < 65536) { localPort = n; }
       } catch { /* use default */ }
       this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort, this._version);
+      return;
+    }
+
+    // Docker/Local setup wizard: setupFor is explicitly set by the user choosing
+    // Docker or Local from the host picker. Show the setup wizard regardless of
+    // whether there's an existing config - the user explicitly wants to set up that host.
+    // Only render once — subsequent _update() calls (from onDidChangeViewState,
+    // polling, etc.) must NOT replace the HTML or they'll reset in-progress
+    // wizard navigation state (panel-docker-path, panel-docker-doctor, etc.).
+    if (this._setupFor !== null && !this._setupHtmlShown) {
+      this._setupHtmlShown = true;
+      this._panel.webview.html = this._getSetupHtml(isInstalled, iconUri.toString(), occUser, this._setupFor);
       return;
     }
 
@@ -1124,7 +1146,7 @@ export class HomePanel {
   <p class="tagline">Choose where OpenClaw runs. You can always switch later.</p>
   <div class="cards">
 
-    <button class="card" onclick="pick('local')">
+    <button class="card" data-card="local" onclick="pick('local')">
       <div class="card-header">
         <span class="card-icon">💻</span>
       </div>
@@ -1139,7 +1161,7 @@ export class HomePanel {
       </ul>
     </button>
 
-    <button class="card" onclick="pick('docker')">
+    <button class="card" data-card="docker" onclick="pick('docker')">
       <div class="card-header">
         <span class="card-icon">🐳</span>
         <span class="badge-rec">Recommended</span>
@@ -1155,7 +1177,7 @@ export class HomePanel {
       </ul>
     </button>
 
-    <button class="card disabled" title="Coming soon" onclick="return false">
+    <button class="card disabled" data-card="ssh" title="Coming soon" onclick="return false">
       <div class="card-header">
         <span class="card-icon">🌐</span>
         <span class="badge-soon">Soon</span>
@@ -1491,10 +1513,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
 
-private _getSetupHtml(
+ private _getSetupHtml(
     isInstalled: boolean,
     iconUri: string,
-    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null
+    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
+    setupFor: 'docker' | 'local' | null = null
   ): string {
     // Render user area statically (avoids JS innerHTML escaping issues)
     let userAreaHtml: string;
@@ -1829,11 +1852,11 @@ private _getSetupHtml(
   <div class="steps" id="main-content" tabindex="-1">
     <div class="step-item ${isInstalled ? 'done' : 'active'}" id="step-install">
       <div class="step-dot">${isInstalled ? '✓' : '1'}</div>
-      <div class="step-label-text">Install<br>OpenClaw</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Check<br>Requirements' : 'Install<br>OpenClaw'}</div>
     </div>
     <div class="step-item ${isInstalled ? 'active' : 'pending'}" id="step-configure">
       <div class="step-dot">2</div>
-      <div class="step-label-text">Configure<br>AI Model</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Provision<br>Docker' : 'Configure<br>AI Model'}</div>
     </div>
     <div class="step-item pending" id="step-ready">
       <div class="step-dot">3</div>
@@ -1843,6 +1866,7 @@ private _getSetupHtml(
 
   <!-- Panel A0: Bootstrap choice (shown first when not installed) -->
   <div class="panel" id="panel-bootstrap-choice" style="display:${isInstalled ? 'none' : 'flex'};flex-direction:column;align-items:center;gap:14px;">
+    <button class="btn-back" onclick="goBack()">← Back</button>
     <div class="panel-title" style="margin-bottom:2px;">How would you like to set up OpenClaw?</div>
     <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">Choose your installation method. Docker is recommended for a consistent, isolated environment.</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;width:100%;max-width:380px;">
@@ -1895,7 +1919,7 @@ private _getSetupHtml(
     <div class="panel-title" style="margin-bottom:2px;">Starting Docker Environment</div>
     <div id="provision-log" style="width:100%;height:180px;overflow-y:auto;background:#0d0d0d;border:1px solid #222;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#a0a0a0;white-space:pre-wrap;word-break:break-all;"></div>
     <div id="provision-status" role="status" aria-live="polite" style="font-size:12px;color:#888;text-align:center;"></div>
-    <div id="provision-actions" style="display:none;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="provision-actions" style="display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
   </div>
 
   <!-- Panel Local: Multi-step setup guide -->
@@ -2159,6 +2183,11 @@ private _getSetupHtml(
       document.getElementById('panel-cfg-b2').style.display = 'none';
       showLog('Installing Inference for your new OpenClaw...');
       vscode.postMessage({ command: 'runSetup', provider: selectedProvider, apiKey: apiKey, port: port });
+    }
+
+    // ── Back to host picker ────────────────────────────────────────
+    function goBack() {
+      vscode.postMessage({ command: 'backToHostPicker' });
     }
 
     // ── Docker Bootstrap ───────────────────────────────────────────
