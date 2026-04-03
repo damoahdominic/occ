@@ -745,11 +745,23 @@ export class HomePanel {
       this._outputChannel.appendLine(`Docker teardown failed (non-fatal): ${e}`);
     }
 
-    // 2. If full reset, remove data directory (openclaw.json is preserved — the user's config stays)
+    // 2. If full reset, remove data directory contents BUT preserve openclaw.json
     if (full) {
       try {
         if (fs.existsSync(dataDir)) {
+          const configPath = path.join(dataDir, 'openclaw.json');
+          // Read and preserve openclaw.json
+          let savedConfig: string | null = null;
+          if (fs.existsSync(configPath)) {
+            savedConfig = fs.readFileSync(configPath, 'utf-8');
+          }
+          // Remove everything in the data directory
           fs.rmSync(dataDir, { recursive: true, force: true });
+          // Recreate the directory and restore openclaw.json
+          fs.mkdirSync(dataDir, { recursive: true });
+          if (savedConfig) {
+            fs.writeFileSync(configPath, savedConfig, 'utf-8');
+          }
         }
       } catch { /* non-fatal */ }
     }
@@ -1045,6 +1057,11 @@ export class HomePanel {
      if (aiConfigured) {
        try {
          await vscode.commands.executeCommand('workbench.view.extension.void');
+         // Show a welcome notification in the editor
+         void vscode.window.showInformationMessage(
+           'OpenClaw is ready! Start chatting with your AI assistant in the sidebar.',
+           { modal: false },
+         );
        } catch { /* sidebar view may not be registered yet */ }
      }
    }
@@ -3603,15 +3620,17 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   /**
    * Tears down the Docker environment: `docker compose down`.
    */
-  public static async runDockerTeardown(extensionPath: string, runtime: 'docker' | 'podman' = 'docker'): Promise<void> {
+  public static async runDockerTeardown(extensionPath: string, runtime: 'docker' | 'podman' = 'docker', volumes = false): Promise<void> {
     const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
     let resolvedCompose = composeFile;
     try { resolvedCompose = fs.realpathSync(composeFile); } catch { /* use original */ }
     if (!fs.existsSync(resolvedCompose)) return;
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
+    const args = ['compose', '-f', resolvedCompose, 'down'];
+    if (volumes) args.push('-v');
     await new Promise<void>(resolve => {
-      cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'down'], {
+      cp.spawn(cliCmd, args, {
         stdio: 'ignore',
       }).on('close', () => resolve()).on('error', () => resolve());
     });
