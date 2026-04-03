@@ -3536,10 +3536,23 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     tee(`▶ Data directory: ${expandedDataPath}\n`);
     tee(`▶ Runtime: ${runtime}\n\n`);
 
-    post({ type: 'provisionStatus', text: 'Building images (this may take a few minutes)…' });
+    post({ type: 'provisionStatus', text: 'Cleaning up any existing containers…' });
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
     const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath };
+
+    // Tear down any previous compose stack first (non-fatal — may not exist yet)
+    await new Promise<number>(resolve => {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'down'], {
+        env, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
+      child.stderr?.on('data', (d: Buffer) => tee(d.toString()));
+      child.on('close', code => resolve(code ?? 0)); // non-fatal, always resolve ok
+      child.on('error', () => resolve(0));
+    });
+
+    post({ type: 'provisionStatus', text: 'Building images (this may take a few minutes)…' });
 
     // Build images (occ-gateway uses build: from Dockerfile.openclaw, not a registry image)
     const buildResult = await new Promise<number>(resolve => {
