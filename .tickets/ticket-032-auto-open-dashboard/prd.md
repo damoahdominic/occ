@@ -21,12 +21,42 @@ After `runDockerProvision()` completes successfully, automatically fire `opencla
   - **Verified**: `home.ts` lines 302-306 — `setTimeout(() => vscode.commands.executeCommand('openclaw.configure'), 2000)` after `runDockerProvision` resolves
 - [x] "Open Web Control" button still visible for manual re-open
   - **Verified**: `statusHtml.ts` line 1048 — `<button onclick="cmd('openclaw.configure')">Open Web Control</button>`
-  - Note: In the provision wizard flow, the panel transitions to AI config instead of showing a manual button. The auto-open handles the dashboard opening.
 - [x] No double-open if user already clicked the button
   - **Verified**: `home.ts` line 118 — `private _dashboardAutoOpened = false;` guard at lines 303-304
 - [x] Button renamed from "Open Dashboard" to "Open Web Control" for clarity
   - **Verified**: `statusHtml.ts` line 75 — `const buttonLabel = isInstalled ? 'Open Web Control' : 'Install OpenClaw'`
-  - Note: User popover retains "Open Dashboard" (external occ.mba.sh) per ticket-033 — this is intentional.
+
+## Tasks
+
+- [x] Task 1: Add `_dashboardAutoOpened` guard flag
+  - **Problem**: No mechanism to prevent duplicate dashboard opens
+  - **Test**: Flag declared and prevents second open
+  - **Depends on**: None
+  - **Subtasks**:
+    - [x] Subtask 1.1: Add `private _dashboardAutoOpened = false` field to HomePanel class
+
+- [x] Task 2: Implement auto-open in dockerProvision handler
+  - **Problem**: Dashboard doesn't open automatically after provision
+  - **Test**: `openclaw.configure` fires 2s after provision resolves
+  - **Depends on**: Task 1
+  - **Subtasks**:
+    - [x] Subtask 2.1: Add guarded `setTimeout` in `dockerProvision` `.then()` callback
+    - [x] Subtask 2.2: Set `_dashboardAutoOpened = true` before scheduling
+
+- [x] Task 3: Rename button text to "Open Web Control"
+  - **Problem**: Button says "Open Dashboard" which is confusing with external dashboard
+  - **Test**: Status dashboard button reads "Open Web Control"
+  - **Depends on**: None
+  - **Subtasks**:
+    - [x] Subtask 3.1: Update `statusHtml.ts` button label to "Open Web Control"
+    - [x] Subtask 3.2: Update provision wizard retry button text
+
+- [x] Task 4: Compile and verify
+  - **Test**: Extension compiles, all strings present in compiled output
+  - **Depends on**: Tasks 1-3
+  - **Subtasks**:
+    - [x] Subtask 4.1: Recompile extension in Docker container
+    - [x] Subtask 4.2: Verify `_dashboardAutoOpened`, `openclaw.configure`, and "Open Web Control" in compiled output
 
 ## Technical Details
 
