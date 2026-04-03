@@ -196,7 +196,7 @@ registerAction2(class extends Action2 {
 		await chatThreadService.focusCurrentChat()
 
 		const threadId = chatThreadService.state.currentThreadId
-		await chatThreadService.addUserMessageAndStreamResponse({ userMessage: message, threadId })
+		await chatThreadService.addUserMessageAndStreamResponse({ userMessage: message, _chatSelections: [], threadId })
 	}
 })
 
