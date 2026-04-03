@@ -299,6 +299,11 @@ export class HomePanel {
           .then(() => {
             // AI config panel is shown by the webview JS on provisionStatus done:ok.
             // _update() is called after AI config is saved or skipped.
+            // Auto-open the web control panel after a short delay (guarded to prevent double-open).
+            if (!this._dashboardAutoOpened) {
+              this._dashboardAutoOpened = true;
+              setTimeout(() => void vscode.commands.executeCommand('openclaw.configure'), 2000);
+            }
           });
       } else if (msg.command === 'saveAiConfig') {
         const provider = msg.provider as string;
@@ -986,7 +991,7 @@ export class HomePanel {
       writeLog(`[ai-config] failed to save: ${err}\n`);
     }
 
-    void this._transitionToIde();
+    void this._transitionToIde(true);
   }
 
   /**
@@ -994,51 +999,55 @@ export class HomePanel {
    */
   private async _skipAiConfig(): Promise<void> {
     writeLog('[ai-config] skipped by user\n');
-    void this._transitionToIde();
+    void this._transitionToIde(false);
   }
 
-  /**
-   * After setup is complete (Docker running + AI configured or skipped),
-   * transition the user into the actual IDE experience:
-   *  1. Close the OCC Home panel
-   *  2. Open the OpenClaw workspace folder (from openclaw.json)
-   *  3. Open the AI chat sidebar
-   */
-  private async _transitionToIde(): Promise<void> {
-    // Verify Docker is running
-    let dockerRunning = false;
-    try {
-      const dc = cp.spawnSync(
-        'docker',
-        ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
-        { timeout: 3000, windowsHide: true },
-      );
-      const st = (dc.stdout?.toString() ?? '').trim();
-      dockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
-    } catch { /* docker not available */ }
+   /**
+    * After setup is complete (Docker running + AI configured or skipped),
+    * transition the user into the actual IDE experience:
+    *  1. Close the OCC Home panel
+    *  2. Open the OpenClaw workspace folder (from openclaw.json)
+    *  3. Open the AI chat sidebar (only if AI was configured)
+    *
+    * @param aiConfigured - true if the user configured an AI provider
+    */
+   private async _transitionToIde(aiConfigured: boolean): Promise<void> {
+     // Verify Docker is running
+     let dockerRunning = false;
+     try {
+       const dc = cp.spawnSync(
+         'docker',
+         ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+         { timeout: 3000, windowsHide: true },
+       );
+       const st = (dc.stdout?.toString() ?? '').trim();
+       dockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+     } catch { /* docker not available */ }
 
-    if (!dockerRunning) {
-      writeLog('[ide-transition] docker not running, falling back to _update()\n');
-      setTimeout(() => void this._update(), 500);
-      return;
-    }
+     if (!dockerRunning) {
+       writeLog('[ide-transition] docker not running, falling back to _update()\n');
+       setTimeout(() => void this._update(), 500);
+       return;
+     }
 
-    // Close the Home panel
-    this.dispose();
+     // Close the Home panel
+     this.dispose();
 
-    // Open the workspace folder from openclaw.json if configured
-    const workspaceDir = getOpenClawWorkspaceDir();
-    if (fs.existsSync(workspaceDir)) {
-      try {
-        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(workspaceDir), { forceNewWindow: false });
-      } catch { /* non-fatal — sidebar still opens */ }
-    }
+     // Open the workspace folder from openclaw.json if configured
+     const workspaceDir = getOpenClawWorkspaceDir();
+     if (fs.existsSync(workspaceDir)) {
+       try {
+         await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(workspaceDir), { forceNewWindow: false });
+       } catch { /* non-fatal — sidebar still opens */ }
+     }
 
-    // Open the AI chat sidebar
-    try {
-      await vscode.commands.executeCommand('workbench.view.extension.void');
-    } catch { /* sidebar view may not be registered yet */ }
-  }
+     // Open the AI chat sidebar only if AI was configured
+     if (aiConfigured) {
+       try {
+         await vscode.commands.executeCommand('workbench.view.extension.void');
+       } catch { /* sidebar view may not be registered yet */ }
+     }
+   }
 
   private _getHostsOverviewHtml(iconUri: string, localPort: number, version: string): string {
     return `<!DOCTYPE html>
