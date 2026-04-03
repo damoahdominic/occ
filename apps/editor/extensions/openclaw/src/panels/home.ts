@@ -10,7 +10,7 @@ import { DefaultLocalHostConnection } from '../hosts/localDefault';
 import { renderStatusHtml } from './statusHtml';
 import { setActiveOpenClawWorkspaceFolder, closeFilesFromDir } from './statusController';
 
-type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
+type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'rebooting' | 'errored' | 'ai-fixing';
 
 // ── Persistent diagnostics log ────────────────────────────────────────────────
 const LOG_PATH     = path.join(os.homedir(), '.openclaw', 'occ-home.log');
@@ -169,7 +169,7 @@ export class HomePanel {
     this._disposables.push(homeWatcher);
     this._panel.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'gatewayAction') {
-        void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
+        void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart' | 'reboot');
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
       } else if (msg.command === 'runUpdate') {
@@ -658,15 +658,28 @@ export class HomePanel {
    * or the timeout expires. Streams live status updates to the webview while
    * waiting so the UI stays accurate (still "Starting…" etc.).
    */
-  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart'): Promise<void> {
+  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart' | 'reboot'): Promise<void> {
     const intermediary: GatewayStatus =
-      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
+      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'rebooting';
     const expectedState: GatewayStatus = action === 'stop' ? 'stopped' : 'running';
 
     this._commandAction = action;
     try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
 
-    // Hand off to AI — it will run the command and handle any errors
+    // Hand off to AI for start/stop/restart, but reboot is direct (machine goes down)
+    if (action === 'reboot') {
+      const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+      this._outputChannel.appendLine(`[reboot] Initiating machine reboot on ${osInfo}`);
+      try {
+        await this._host.gatewayReboot(line => this._outputChannel.appendLine(line));
+      } catch (err) {
+        this._outputChannel.appendLine(`[reboot] Error: ${err}`);
+      }
+      this._commandAction = null;
+      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: 'stopped' }); } catch {}
+      return;
+    }
+
     const verb = action === 'restart' ? 'restart' : action;
     const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
     const port = this._getConfiguredPort();
@@ -1602,7 +1615,7 @@ export class HomePanel {
     // Phase 2 — Hand off to MoltPilot for AI-assisted installation
     // ══════════════════════════════════════════════════════════════════════════
 
-    post({ type: 'wizardLog', text: '\n✅ Download complete — handing off to MoltPilot for installation...\n', done: true, ok: true });
+    post({ type: 'wizardLog', text: '\n✅ Download complete — handing off to AI assistant for installation...\n', done: true, ok: true });
 
     const binaryName = isWin ? 'cass.exe' : 'cass';
     const handoffMessage = isWin
@@ -2170,7 +2183,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div class="panel-desc">Choose how you want to power the AI gateway.</div>
     <button class="btn-primary" id="btn-start-free" onclick="chooseFree()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      Start Free
+      Create Account
     </button>
     <button class="btn-link" onclick="chooseBYOK()">Use my own API key →</button>
   </div>
@@ -2209,7 +2222,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div class="log-status dots" id="log-status">Working</div>
     <button class="molt-help" id="molt-help" onclick="askMoltPilot()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-      Ask MoltPilot to fix this
+      Ask AI to fix this
     </button>
     <button class="molt-help" id="show-error-logs" onclick="cmd('openLogs');closeMoreMenu&&closeMoreMenu()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
@@ -2304,7 +2317,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     // ── Configure: choose mode ─────────────────────────────────────
     function chooseFree() {
       document.getElementById('panel-cfg-b0').style.display = 'none';
-      showLog('Installing Inference for MoltPilot...\\nInstalling Inference for your new OpenClaw...');
+      showLog('Installing Inference for your new OpenClaw...');
       vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: (_occUser && _occUser.api_keys && _occUser.api_keys.occKey) || '', port: '18789' });
     }
 
@@ -2916,7 +2929,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
       <button class="btn-primary" id="btn-start-free" onclick="chooseFree()">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        Start Free
+        Create Account
       </button>
       <button class="btn-link" onclick="chooseBYOK()">Use my own API key →</button>
     </div>
