@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "npm --prefix apps/editor run watch",
-    "dev:editor": "npm --prefix apps/editor run dev:editor",
+    "editor:dev": "npm --prefix apps/editor run editor:dev",
     "dev:react": "npm --prefix apps/editor run watchreact",
     "web": "npm run --workspace=apps/web dev",
     "editor:compile": "cd apps/editor && node ./node_modules/gulp/bin/gulp.js transpile-client-esbuild",
