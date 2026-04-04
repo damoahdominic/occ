@@ -251,6 +251,19 @@ export class SSHHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`gateway restart exited with code ${code}`); }
 	}
 
+	async gatewayReboot(onLog: LogFn): Promise<void> {
+		const p = await this.findOpenClawPath();
+		if (p) {
+			try {
+				const code = await this.execStream(p, ['gateway', 'reboot'], {}, onLog, onLog);
+				if (code === 0) return;
+			} catch { /* fall through to OS-level reboot */ }
+		}
+		onLog('openclaw gateway reboot unavailable — falling back to OS reboot');
+		const code = await this.execStream('sudo', ['reboot'], {}, onLog, onLog);
+		if (code !== 0) { throw new Error(`OS reboot command exited with code ${code}`); }
+	}
+
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
 		const p = await this.findOpenClawPath();
 		if (!p) { throw new Error('OpenClaw CLI not installed — call installCli first'); }
