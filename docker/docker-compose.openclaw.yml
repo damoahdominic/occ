@@ -8,11 +8,11 @@ services:
     image: openclaw/pod:latest
     restart: unless-stopped
     ports:
-      - "127.0.0.1:18789:18789"
+      - "127.0.0.1:${GATEWAY_PORT:-18789}:18789"
     environment:
       DATABASE_URL: postgresql://openclaw:occdev@occ-postgres:5432/openclaw
       REDIS_URL: redis://occ-redis:6379
-      GATEWAY_PORT: "18789"
+      GATEWAY_PORT: "${GATEWAY_PORT:-18789}"
     volumes:
       - ${OPENCLAW_DATA_DIR}:/root/.openclaw
     networks:
