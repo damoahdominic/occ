@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.4.2](https://github.com/damoahdominic/occ/compare/v3.3.0...v3.4.2) (2026-04-04)
+
+
+### Features
+
+* add commit and bump npm script' ([8add84d](https://github.com/damoahdominic/occ/commit/8add84de7dd7e85bf8c5b0511b51a741afcab9e4))
+* add dev:editor script; serve editor via code-server on port 9888 ([9546e30](https://github.com/damoahdominic/occ/commit/9546e30eeb6096c5c8865b9cce9e7c6393c76fd7))
+* **ticket-021:** complete Docker bootstrap setup and local option ([e066210](https://github.com/damoahdominic/occ/commit/e0662101b149d7b6c519404fe242572e8e5bf847))
+* **ticket-022:** add Playwright e2e smoke tests + workbench browser fixes ([55f282a](https://github.com/damoahdominic/occ/commit/55f282a5a650e96efcf87dc4e9cfcd5c784999b1))
+* **ticket-022:** implement Docker compose validation workflow ([73213c5](https://github.com/damoahdominic/occ/commit/73213c5909252b2760e33142f9fa4ec809b74c9e))
+* **ticket-026:** dev scheme ownership for occode:// on all platforms ([29e1aa1](https://github.com/damoahdominic/occ/commit/29e1aa1d8caa9f1fbdd180770e11cbd113456ec3))
+* **ticket-028:** add ticket for editor web server mode and Playwright e2e ([b39b2ab](https://github.com/damoahdominic/occ/commit/b39b2abc7f357dd5cf178027aba225118ecabde9))
+* **ticket-029:** add Playwright smoke test ticket ([6de0911](https://github.com/damoahdominic/occ/commit/6de091143eaa53daf90e5115c3bb1dd283bdf531))
+* **ticket-030:** add Dockerfile.openclaw, rename compose file, update all references ([bc8f716](https://github.com/damoahdominic/occ/commit/bc8f716222bd8e9d131318a17daa5939ea865e70))
+* **ticket-038:** add configurable gateway port and env file ([3531db2](https://github.com/damoahdominic/occ/commit/3531db2c784a404b9a3276cb283661717c268cf7))
+* **ticket-038:** add docker setup UI with port config ([0c3d919](https://github.com/damoahdominic/occ/commit/0c3d9197c6347e35d7855ca17cdbaabe938a6a98))
+* **ticket-038:** add gatewayReboot to host adapters ([09b5443](https://github.com/damoahdominic/occ/commit/09b5443ff27e1e6ade95bfef6ca29ab7c6e6c680))
+* **tickets-031-035:** implement post-provision flow — AI config, auto-open, dashboard unify, IDE transition, reset command ([5698a69](https://github.com/damoahdominic/occ/commit/5698a69ece13607c4b856bc506a3518b4a302d3b))
+
+
+### Bug Fixes
+
+* deeplinking working and showing setup cards after signup. hurray ([39feb63](https://github.com/damoahdominic/occ/commit/39feb632a9289632659030e7c88f84add4265805))
+* **docker:** bind server to 0.0.0.0, use curl for healthcheck, skip postinstall in dev ([22b3e96](https://github.com/damoahdominic/occ/commit/22b3e96a98cc077bf5718ca3a601b407ad8bb52d))
+* parametrisize docker mem limit ([8500346](https://github.com/damoahdominic/occ/commit/85003467eadcccadcb782a91f0ec015d9dd580f7))
+* run npm i before concurrently in dev:editor script ([72c418d](https://github.com/damoahdominic/occ/commit/72c418dd664ccc939f09c7b57787d1c91308495d))
+* **ticket-001:** update onboarding copy — remove MoltPilot references, rename Start Free to Create Account ([8ce7309](https://github.com/damoahdominic/occ/commit/8ce730907908f11937d51be1f1c866ca207484d5))
+* **ticket-027:** correct compose file path in _handleResetSetup and validate-docker ([7423f7a](https://github.com/damoahdominic/occ/commit/7423f7a9f63ad4a14a44f7659ed7f3bea67d2b55))
+* **ticket-030:** align compose volume mount with Dockerfile root user ([8381e21](https://github.com/damoahdominic/occ/commit/8381e21517b34afd050d1b891400ac5c1b2731fd))
+* **ticket-030:** correct docker card flow and amend PRD ([3d8f751](https://github.com/damoahdominic/occ/commit/3d8f751ebe35653b4d7b91ba103d62dfc69f1fa3))
+* **ticket-030:** direct docker card flow — auto-provision on click ([6742fd5](https://github.com/damoahdominic/occ/commit/6742fd5fd532f45e6367616eb4a045ee63c05e1a))
+* **ticket-030:** replace docker compose pull with build for gateway image ([65f30ce](https://github.com/damoahdominic/occ/commit/65f30cec3e1e54908647a3dd014493d7090f5cd5))
+* **ticket-030:** rewrite Dockerfile.openclaw using oven/bun:1.3.10-slim template ([1d04873](https://github.com/damoahdominic/occ/commit/1d04873a27ff239de3982e0df4b7367fc6286c96))
+* **ticket-030:** rewrite Dockerfile.openclaw with oven/bun base, fnm, node 24, openclaw cli ([461d205](https://github.com/damoahdominic/occ/commit/461d205010b1a48cc1fb9f17cec59b676cfb6ff0))
+* **ticket-036:** remove host port bindings for postgres and redis ([5bb86c7](https://github.com/damoahdominic/occ/commit/5bb86c76feee903b51d7610251f7bd8fca1116bb))
+* **ticket-036:** run docker compose down before provision to ensure clean state ([a79556b](https://github.com/damoahdominic/occ/commit/a79556b8f9cf7be738843e8129054cc26099cf6e))
+* **ticket-037:** MoltPilot Open Chat button fails with image input error ([e12c447](https://github.com/damoahdominic/occ/commit/e12c4475bda94d714a239ca582d221fe0746e58c))
+* **ticket-039:** resolve Windows app icon showing blue box ([1672dfe](https://github.com/damoahdominic/occ/commit/1672dfe23e9a8e0036644a054e97e6e65cd1e517))
+* **tickets-032,034:** fix failing acceptance criteria from audit ([ba3f07e](https://github.com/damoahdominic/occ/commit/ba3f07e503e3fb53badc94df01c2143fb014c30b))
+* **tickets-034,035:** fix remaining failing acceptance criteria from audit ([3327174](https://github.com/damoahdominic/occ/commit/3327174fb6d86fbcaf5d7f33c4e88e16edfba088))
+
 ## [3.3.0](https://github.com/damoahdominic/occ/compare/v3.2.47...v3.3.0) (2026-04-01)
 
 
