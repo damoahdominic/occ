@@ -3,6 +3,8 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { HostConnection, OpenClawCoreAPI } from '../hosts/types';
+import { DefaultLocalHostConnection } from '../hosts/localDefault';
 
 type GatewayStatus = {
   installed: boolean;
@@ -48,10 +50,24 @@ export class StatusPanel {
   private _lastStatusAt = 0;
   private _isVisible = true;
   private _gatewayTerminal?: vscode.Terminal;
+  private _host: HostConnection = new DefaultLocalHostConnection();
+  private _outputChannel: vscode.OutputChannel;
 
   private constructor(panel: vscode.WebviewPanel) {
     this._panel = panel;
     this._isVisible = panel.visible;
+    this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
+    // Subscribe to active host changes from the core extension if available.
+    const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
+    if (coreExt?.isActive && coreExt.exports != null) {
+      const coreAPI = coreExt.exports;
+      const hostSub = coreAPI.onDidChangeActiveHost(conn => {
+        this._host = conn ?? new DefaultLocalHostConnection();
+      });
+      this._disposables.push(hostSub);
+      const active = coreAPI.getActiveHost();
+      if (active) { this._host = active; }
+    }
     this._panel.webview.html = this._getLoadingHtml();
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
@@ -71,6 +87,8 @@ export class StatusPanel {
         void this._runGateway('stop');
       } else if (msg.command === 'gateway-restart') {
         void this._runGateway('restart');
+      } else if (msg.command === 'gateway-reboot') {
+        void this._runGatewayReboot();
       } else if (msg.command === 'install') {
         vscode.commands.executeCommand('openclaw.install');
       } else if (msg.command === 'configure') {
@@ -138,6 +156,26 @@ export class StatusPanel {
     }
     await this._update();
     await this._pollStatus(20000, 2000);
+  }
+
+  private async _runGatewayReboot() {
+    const confirmed = await vscode.window.showWarningMessage(
+      'Reboot Machine?',
+      { modal: true, detail: 'This will reboot the entire host machine. All running processes will be terminated and the machine will restart. This cannot be undone.' },
+      'Reboot',
+      'Cancel',
+    );
+    if (confirmed !== 'Reboot') return;
+
+    const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+    this._outputChannel.appendLine(`[reboot] Initiating machine reboot on ${osInfo}`);
+    try {
+      await this._host.gatewayReboot(line => this._outputChannel.appendLine(line));
+    } catch (err) {
+      this._outputChannel.appendLine(`[reboot] Error: ${err}`);
+    }
+
+    await this._update();
   }
 
   private async _update() {
@@ -879,6 +917,7 @@ export class StatusPanel {
     .btn-start { background: #4ade80; color: #1a1a1a; }
     .btn-stop { background: #ef4444; color: #fff; }
     .btn-restart { background: #f59e0b; color: #141414; }
+    .btn-reboot { background: #dc2626; color: #fff; }
     .btn-refresh { background: #222; color: #bdbdbd; border: 1px solid #3a3a3a; }
     .btn-install { background: #dc2828; color: #fff; }
     .link {
@@ -913,6 +952,7 @@ export class StatusPanel {
           : '<button class="btn-start" data-cmd="gateway-start">Start Gateway</button>')
       : '<button class="btn-install" data-cmd="install">Install OpenClaw</button>'}
     ${installed ? '<button class="btn-restart" data-cmd="gateway-restart">Restart Gateway</button>' : ''}
+    ${installed ? '<button class="btn-reboot" data-cmd="gateway-reboot">Reboot Machine</button>' : ''}
     <button class="btn-refresh" data-cmd="refresh">Refresh</button>
   </div>
   <script>

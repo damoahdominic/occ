@@ -876,6 +876,10 @@ export function renderStatusHtml(
         </div>
         <div class="more-menu-section">
           <div class="more-menu-section-label">Connection</div>
+          <button class="more-menu-item more-menu-item-danger" role="menuitem" data-search="reboot machine restart host" onclick="closeMoreMenu();showRebootConfirm()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            Reboot Machine
+          </button>
           <button class="more-menu-item more-menu-item-danger" role="menuitem" data-search="disconnect host switch" onclick="cmd('disconnectHost');closeMoreMenu()">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/><line x1="2" y1="2" x2="22" y2="22" stroke-width="1.8"/></svg>
             Disconnect host
@@ -956,6 +960,18 @@ export function renderStatusHtml(
       <div class="confirm-actions">
         <button class="confirm-btn-cancel" onclick="closeConfirm()">Cancel</button>
         <button class="confirm-btn-confirm" onclick="confirmUninstall()">Yes, uninstall</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm modal (reboot) -->
+  <div id="reboot-overlay" class="confirm-overlay">
+    <div class="confirm-card">
+      <h3>Reboot Machine?</h3>
+      <p>This will reboot the entire host machine. All running processes will be terminated and the machine will restart. This cannot be undone.</p>
+      <div class="confirm-actions">
+        <button class="confirm-btn-cancel" onclick="closeRebootConfirm()">Cancel</button>
+        <button class="confirm-btn-confirm" onclick="confirmReboot()">Yes, reboot</button>
       </div>
     </div>
   </div>
@@ -1169,6 +1185,18 @@ export function renderStatusHtml(
       closeConfirm();
       cmd('openclaw.uninstall');
     }
+    function showRebootConfirm() {
+      const el = document.getElementById('reboot-overlay');
+      if (el) el.classList.add('visible');
+    }
+    function closeRebootConfirm() {
+      const el = document.getElementById('reboot-overlay');
+      if (el) el.classList.remove('visible');
+    }
+    function confirmReboot() {
+      closeRebootConfirm();
+      vscode.postMessage({ command: 'gatewayAction', action: 'reboot' });
+    }
     function toggleSubmenu(id, e) {
       e.stopPropagation();
       const wrap = document.getElementById(id);
@@ -1221,6 +1249,7 @@ export function renderStatusHtml(
       starting:   { label: 'Starting…',           color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
       stopping:   { label: 'Stopping…',           color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
       restarting: { label: 'Restarting…',         color: '#60a5fa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
+      rebooting:  { label: 'Rebooting…',           color: '#f87171', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
       checking:   { label: 'Checking…',           color: '#666',    btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: false },
       'ai-fixing':{ label: 'AI Copilot fixing…',  color: '#a78bfa', btnLabel: null,      btnClass: '',           action: null,      spin: true,  aiSpin: true  },
     };
