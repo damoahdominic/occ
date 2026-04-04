@@ -11,6 +11,7 @@
 	"applicationName": "occ",
 	"dataFolderName": ".occode-editor",
 	"win32MutexName": "occodeeditor",
+	"win32AppIcon": "resources/win32/occode.ico",
 	"licenseName": "MIT",
 	"licenseUrl": "https://github.com/voideditor/void/blob/main/LICENSE.txt",
 	"serverLicenseUrl": "https://github.com/voideditor/void/blob/main/LICENSE.txt",
