@@ -310,6 +310,21 @@ export class DockerHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`gateway restart exited with code ${code}`); }
 	}
 
+	async gatewayReboot(onLog: LogFn): Promise<void> {
+		const cliPath = await this.findOpenClawPath();
+		if (cliPath) {
+			try {
+				const code = await this.execStream(cliPath, ['gateway', 'reboot'], {}, onLog, onLog);
+				if (code === 0) return;
+			} catch { /* fall through to warning */ }
+		}
+		// For Docker hosts, we cannot reboot the host from inside the container.
+		// The existing "Restart" button handles container restart. Reboot should
+		// prompt the user to reboot the host machine externally.
+		onLog('Cannot reboot Docker host from inside container — please reboot the host machine externally');
+		throw new Error('Docker host reboot requires external reboot (not container restart)');
+	}
+
 	// ── Full install + onboard ────────────────
 
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
