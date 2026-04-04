@@ -54,4 +54,5 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
 ENTRYPOINT ["tini", "--"]
 
 # Start the OpenClaw gateway via login shell (fnm env sourced automatically)
-CMD ["bash", "-lc", "openclaw gateway run"]
+# --allow-unconfigured allows gateway to start without prior setup
+CMD ["bash", "-lc", "openclaw gateway run --allow-unconfigured"]
