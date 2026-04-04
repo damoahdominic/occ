@@ -14,7 +14,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		console.warn('[openclaw-ssh] Core extension did not export API');
 		return;
 	}
-	const disposable = coreAPI.registerHostAdapter(new SSHHostAdapter());
+	const disposable = coreAPI.registerHostAdapter(new SSHHostAdapter(), 'openclaw.openclaw-ssh');
 	context.subscriptions.push(disposable);
 
 	const setupCmd = vscode.commands.registerCommand('openclaw.host.setup.ssh', () => {

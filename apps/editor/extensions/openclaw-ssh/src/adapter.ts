@@ -10,7 +10,7 @@ import type {
 	ConfigField,
 	ConfigValidationResult,
 } from '../../openclaw/src/hosts/types';
-import { SSHHostConnection } from './connection';
+import { SSHHostConnection, isHostKnown } from './connection';
 
 export class SSHHostAdapter implements HostAdapter {
 	readonly type: HostType = 'ssh';
@@ -28,6 +28,13 @@ export class SSHHostAdapter implements HostAdapter {
 
 	async testConnection(config: HostConnectionConfig): Promise<TestResult> {
 		const sshCfg = config as SSHConnection;
+		// Refuse to connect if host key is unknown (prevents MITM on first connect)
+		if (!isHostKnown(sshCfg.host, sshCfg.port)) {
+			return {
+				success: false,
+				message: `Host ${sshCfg.host} is not in known_hosts. Use the SSH setup wizard to verify the host key fingerprint before connecting.`,
+			};
+		}
 		const conn = new SSHHostConnection(sshCfg);
 		try {
 			const r = await conn.exec('echo', ['ok'], { timeout: 15000 });

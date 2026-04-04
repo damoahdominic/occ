@@ -1,6 +1,7 @@
 import * as cp from 'child_process';
 import * as vscode from 'vscode';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
+import { isHostKnown, fetchHostFingerprint, addHostToKnownHosts } from './connection';
 
 export class SSHSetupPanel {
   public static currentPanel: SSHSetupPanel | undefined;
@@ -99,10 +100,37 @@ export class SSHSetupPanel {
     };
 
     try {
+      // ── Host key verification ──
+      // Before connecting, verify the server's identity to prevent MITM attacks.
+      if (!isHostKnown(host, port)) {
+        log(`Host ${host} is not in known_hosts — fetching fingerprint...\n`);
+        const fingerprint = fetchHostFingerprint(host, port);
+        if (!fingerprint) {
+          fail(`Could not fetch SSH host key for ${host}. Verify the host is reachable and try again.`);
+          return;
+        }
+        const choice = await vscode.window.showWarningMessage(
+          `First connection to ${host}.\n\nSSH host key fingerprint:\n${fingerprint}\n\nDo you trust this host?`,
+          { modal: true, detail: 'If you did not expect this fingerprint, someone may be intercepting your connection (MITM attack). Only continue if you trust this server.' },
+          'Trust & Connect',
+          'Cancel',
+        );
+        if (choice !== 'Trust & Connect') {
+          fail('Connection cancelled — host key not trusted.');
+          return;
+        }
+        log('Adding host key to known_hosts...\n');
+        if (!addHostToKnownHosts(host, port)) {
+          fail('Failed to add host key to known_hosts.');
+          return;
+        }
+        log('  ✓ Host key saved\n');
+      }
+
       const sshBase = [
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=15',
-        '-o', 'StrictHostKeyChecking=accept-new',
+        '-o', 'StrictHostKeyChecking=yes',
       ];
       if (port !== 22) { sshBase.push('-p', String(port)); }
       if (keyPath) { sshBase.push('-i', keyPath); }
@@ -124,14 +152,58 @@ export class SSHSetupPanel {
 
       if (!alreadyInstalled) {
         log('Installing OpenClaw...\n');
-        const code = await new Promise<number>((resolve) => {
-          const proc = cp.spawn('ssh', [...sshBase, remote, 'curl -fsSL https://get.openclaw.sh | bash'], { windowsHide: true });
-          proc.stdout.on('data', (d: Buffer) => log(d.toString()));
-          proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
-          proc.on('close', (c) => resolve(c ?? -1));
-          proc.on('error', () => resolve(-1));
-        });
-        if (code !== 0) { fail('OpenClaw installation failed. See the log above for details.'); return; }
+
+        const INSTALL_SCRIPT_URL  = 'https://get.openclaw.sh';
+        const INSTALL_CHECKSUM_URL = 'https://releases.openclaw.sh/install.sh.sha256';
+        const TMP_SCRIPT   = '/tmp/occ-install.sh';
+        const TMP_CHECKSUM = '/tmp/occ-install.sha256';
+
+        const installSteps: Array<{ label: string; cmd: string }> = [
+          {
+            label: 'Downloading installer...\n',
+            cmd: `curl -fsSL ${INSTALL_SCRIPT_URL} -o ${TMP_SCRIPT}`,
+          },
+          {
+            label: 'Fetching checksum...\n',
+            cmd: `curl -fsSL ${INSTALL_CHECKSUM_URL} -o ${TMP_CHECKSUM}`,
+          },
+          {
+            label: 'Verifying installer integrity...\n',
+            cmd: `cd /tmp && sha256sum -c ${TMP_CHECKSUM}`,
+          },
+          {
+            label: 'Running installer...\n',
+            cmd: `bash ${TMP_SCRIPT}`,
+          },
+        ];
+
+        let installFailed = false;
+        for (const step of installSteps) {
+          log(step.label);
+          const code = await new Promise<number>((resolve) => {
+            const proc = cp.spawn('ssh', [...sshBase, remote, step.cmd], { windowsHide: true });
+            proc.stdout.on('data', (d: Buffer) => log(d.toString()));
+            proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
+            proc.on('close', (c) => resolve(c ?? -1));
+            proc.on('error', () => resolve(-1));
+          });
+          if (code !== 0) {
+            // Always clean up temp files before reporting failure
+            cp.spawn('ssh', [...sshBase, remote, `rm -f ${TMP_SCRIPT} ${TMP_CHECKSUM}`], { windowsHide: true });
+            if (step.label.startsWith('Verifying')) {
+              fail('Installer integrity check failed — the downloaded script does not match the expected checksum. Installation aborted.');
+            } else {
+              fail(`OpenClaw installation failed at: ${step.label.trim()}. See the log above for details.`);
+            }
+            installFailed = true;
+            break;
+          }
+        }
+
+        // Clean up temp files after successful install too
+        cp.spawn('ssh', [...sshBase, remote, `rm -f ${TMP_SCRIPT} ${TMP_CHECKSUM}`], { windowsHide: true });
+
+        if (installFailed) { return; }
         log('\n\u2713 OpenClaw installed\n');
       } else {
         log('\u2713 OpenClaw already installed \u2014 skipping\n');

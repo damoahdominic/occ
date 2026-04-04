@@ -1,5 +1,7 @@
 import * as cp from 'child_process';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -244,6 +246,78 @@ export class LocalSetupPanel {
     }
   }
 
+  /**
+   * Fetches openclaw package metadata from npm, downloads the tarball,
+   * verifies its SHA-512 integrity, and returns the path to the verified file.
+   * Throws if the download fails or the hash doesn't match.
+   */
+  private async _downloadAndVerifyOpenClaw(tee: (s: string) => void): Promise<string> {
+    tee('Fetching package metadata from npm registry...\n');
+
+    // 1. Fetch metadata
+    const meta = await new Promise<{ version: string; integrity: string; tarball: string }>((resolve, reject) => {
+      const req = https.get(
+        { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
+        res => {
+          let raw = '';
+          res.on('data', (c: Buffer) => { raw += c.toString(); });
+          res.on('end', () => {
+            try {
+              const d = JSON.parse(raw) as { version: string; dist: { integrity: string; tarball: string } };
+              resolve({ version: d.version, integrity: d.dist.integrity, tarball: d.dist.tarball });
+            } catch (e) { reject(new Error(`Failed to parse npm metadata: ${e}`)); }
+          });
+        }
+      );
+      req.on('error', reject);
+      req.setTimeout(15000, () => { req.destroy(); reject(new Error('npm registry request timed out')); });
+    });
+
+    tee(`  ✓ Latest version: ${meta.version}\n`);
+    tee(`Downloading openclaw@${meta.version}...\n`);
+
+    // 2. Download tarball
+    const tmpFile = path.join(os.tmpdir(), `openclaw-${meta.version}-${Date.now()}.tgz`);
+    await new Promise<void>((resolve, reject) => {
+      const follow = (url: string) => {
+        https.get(url, res => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            follow(res.headers.location!); return;
+          }
+          if (res.statusCode !== 200) { reject(new Error(`Download failed: HTTP ${res.statusCode}`)); return; }
+          const out = fs.createWriteStream(tmpFile);
+          res.pipe(out);
+          out.on('finish', () => { out.close(); resolve(); });
+          out.on('error', reject);
+          res.on('error', reject);
+        }).on('error', reject);
+      };
+      follow(meta.tarball);
+    });
+
+    tee('  ✓ Download complete\n');
+    tee('Verifying package integrity...\n');
+
+    // 3. Verify SHA-512 (SRI format: "sha512-<base64>")
+    const [algo, expectedB64] = meta.integrity.split('-');
+    if (algo !== 'sha512' || !expectedB64) {
+      throw new Error(`Unsupported integrity algorithm: ${algo}. Expected sha512.`);
+    }
+    const fileBuffer = fs.readFileSync(tmpFile);
+    const actualHash = crypto.createHash('sha512').update(fileBuffer).digest('base64');
+    if (actualHash !== expectedB64) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      throw new Error(
+        `⚠ Security check failed — package integrity mismatch for openclaw@${meta.version}.\n` +
+        `Expected: ${expectedB64}\nGot:      ${actualHash}\n` +
+        `This could indicate a compromised download. Installation aborted.`
+      );
+    }
+
+    tee('  ✓ Integrity verified (SHA-512 match)\n');
+    return tmpFile;
+  }
+
   private async _runInstall(): Promise<void> {
     const platform = process.platform;
     const arch = process.arch;
@@ -477,12 +551,22 @@ export class LocalSetupPanel {
     tee('\n');
 
     if (npmOk) {
-      tee('Installing openclaw via npm...\n');
+      // Download and verify before installing
+      let verifiedTgz: string | null = null;
+      try {
+        verifiedTgz = await this._downloadAndVerifyOpenClaw(tee);
+      } catch (e) {
+        tee(`\n${(e as Error).message}\n`);
+        await fail(); return;
+      }
+
+      tee('Installing openclaw...\n');
       const spawnOpts: cp.SpawnOptions = platform === 'win32' ? { shell: true, windowsHide: true } : {};
-      const npmArgs = ['install', '-g', 'openclaw'];
+      const npmArgs = ['install', '-g', verifiedTgz];
       const r1 = sudoCached
         ? await runCaptured('sudo', ['-E', 'npm', ...npmArgs])
         : await runCaptured('npm', npmArgs, spawnOpts);
+      try { fs.unlinkSync(verifiedTgz); } catch {}
       if (r1.code === 0) {
         if (sudoCached) await fixOpenclawPermissions();
         await succeed(); return;
@@ -493,7 +577,16 @@ export class LocalSetupPanel {
         if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
         sudoCached = true;
         tee('Retrying with elevated permissions...\n');
-        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', 'openclaw']);
+        // Re-download and re-verify for the sudo retry
+        let retryTgz: string | null = null;
+        try {
+          retryTgz = await this._downloadAndVerifyOpenClaw(tee);
+        } catch (e) {
+          tee(`\n${(e as Error).message}\n`);
+          await fail(); return;
+        }
+        const r2 = await runCaptured('sudo', ['-E', 'npm', 'install', '-g', retryTgz]);
+        try { fs.unlinkSync(retryTgz); } catch {}
         if (r2.code === 0) {
           await fixOpenclawPermissions();
           await succeed(); return;
@@ -505,9 +598,17 @@ export class LocalSetupPanel {
       const nvmSh = path.join(os.homedir(), '.nvm', 'nvm.sh');
       if (fs.existsSync(nvmSh)) {
         tee('nvm detected — installing Node.js LTS...\n');
+        let nvmTgz: string | null = null;
+        try {
+          nvmTgz = await this._downloadAndVerifyOpenClaw(tee);
+        } catch (e) {
+          tee(`\n${(e as Error).message}\n`);
+          await fail(); return;
+        }
         const nvmR = await runCaptured('bash', ['-c',
-          `. "${nvmSh}" && nvm install --lts && nvm use --lts && npm install -g openclaw`
+          `. "${nvmSh}" && nvm install --lts && nvm use --lts && npm install -g '${nvmTgz}'`
         ]);
+        try { fs.unlinkSync(nvmTgz); } catch {}
         if (nvmR.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
         tee('nvm install failed — falling back to system install...\n');
       }
@@ -556,10 +657,27 @@ export class LocalSetupPanel {
       tee('Installing OpenClaw...\n');
       const npmCandidates = ['/usr/local/bin/npm', '/usr/bin/npm'];
       const npmBin = npmCandidates.find(p => fs.existsSync(p)) ?? 'npm';
-      const npmR1 = await runCaptured(npmBin, ['install', '-g', 'openclaw']);
+      // Always use verified tarball — never install bare package name
+      let postNodeTgz: string | null = null;
+      try {
+        postNodeTgz = await this._downloadAndVerifyOpenClaw(tee);
+      } catch (e) {
+        tee(`\n${(e as Error).message}\n`);
+        await fail(); return;
+      }
+      const npmR1 = await runCaptured(npmBin, ['install', '-g', postNodeTgz]);
+      try { fs.unlinkSync(postNodeTgz); } catch {}
       if (npmR1.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
       if (isPermError(fullLog)) {
-        const npmR2 = await runCaptured('sudo', ['-n', npmBin, 'install', '-g', 'openclaw']);
+        let sudoTgz: string | null = null;
+        try {
+          sudoTgz = await this._downloadAndVerifyOpenClaw(tee);
+        } catch (e) {
+          tee(`\n${(e as Error).message}\n`);
+          await fail(); return;
+        }
+        const npmR2 = await runCaptured('sudo', ['-n', npmBin, 'install', '-g', sudoTgz]);
+        try { fs.unlinkSync(sudoTgz); } catch {}
         if (npmR2.code === 0) { await fixOpenclawPermissions(); await succeed(); return; }
       }
       await fail(); return;
@@ -568,33 +686,89 @@ export class LocalSetupPanel {
       tee('npm not found — running full installer script...\n');
     }
 
+    // Last-resort: download installer script, verify checksum, then run.
+    // Never pipe remote scripts directly into a shell.
+    const INSTALL_CHECKSUM_URL = 'https://releases.openclaw.sh/install.sh.sha256';
+
     if (platform === 'win32') {
       tee('Running PowerShell installer...\n');
-      const psArgs = [
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-        `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; ` +
-        `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 | Invoke-Expression`,
-      ];
-      const r = await runCaptured('powershell', psArgs, { windowsHide: true } as cp.SpawnOptions);
+      const psScript = path.join(os.tmpdir(), `occ-install-${Date.now()}.ps1`);
+      const psChecksumFile = path.join(os.tmpdir(), `occ-install-${Date.now()}.ps1.sha256`);
+      const dlScript = await runCaptured('powershell', ['-NoProfile', '-Command',
+        `Invoke-WebRequest -UseBasicParsing https://openclaw.ai/install.ps1 -OutFile '${psScript}'`
+      ], { windowsHide: true } as cp.SpawnOptions);
+      if (dlScript.code !== 0) { tee('Failed to download installer script.\n'); await fail(); return; }
+      const dlChecksum = await runCaptured('powershell', ['-NoProfile', '-Command',
+        `Invoke-WebRequest -UseBasicParsing https://releases.openclaw.sh/install.ps1.sha256 -OutFile '${psChecksumFile}'`
+      ], { windowsHide: true } as cp.SpawnOptions);
+      if (dlChecksum.code === 0) {
+        const verifyR = await runCaptured('powershell', ['-NoProfile', '-Command',
+          `$expected = (Get-Content '${psChecksumFile}').Split(' ')[0]; ` +
+          `$actual = (Get-FileHash -Algorithm SHA256 '${psScript}').Hash.ToLower(); ` +
+          `if ($expected -ne $actual) { Write-Error "Checksum mismatch: expected $expected got $actual"; exit 1 }`
+        ], { windowsHide: true } as cp.SpawnOptions);
+        if (verifyR.code !== 0) {
+          tee('⚠ Installer script integrity check failed — aborting.\n');
+          try { fs.unlinkSync(psScript); } catch {}
+          try { fs.unlinkSync(psChecksumFile); } catch {}
+          await fail(); return;
+        }
+        tee('  ✓ Installer integrity verified (SHA-256)\n');
+      } else {
+        tee('Warning: could not fetch checksum — proceeding with unverified installer.\n');
+      }
+      try { fs.unlinkSync(psChecksumFile); } catch {}
+      const r = await runCaptured('powershell', [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psScript,
+      ], { windowsHide: true } as cp.SpawnOptions);
+      try { fs.unlinkSync(psScript); } catch {}
       if (r.code === 0) { await succeed(); return; }
     } else {
-      tee('Running install script...\n');
-      const r1 = await runCaptured('bash', ['-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+      tee('Downloading install script...\n');
+      const tmpScript = path.join(os.tmpdir(), `occ-install-${Date.now()}.sh`);
+      const tmpChecksum = path.join(os.tmpdir(), `occ-install-${Date.now()}.sha256`);
+      const dlScript = await runCaptured('curl', ['-fsSL', 'https://openclaw.ai/install.sh', '-o', tmpScript]);
+      if (dlScript.code !== 0) { tee('Failed to download installer script.\n'); await fail(); return; }
+      const dlChecksum = await runCaptured('curl', ['-fsSL', INSTALL_CHECKSUM_URL, '-o', tmpChecksum]);
+      if (dlChecksum.code === 0) {
+        // Rewrite checksum file to reference actual tmp filename, then verify
+        const checksumContent = fs.readFileSync(tmpChecksum, 'utf-8').trim();
+        const expectedHash = checksumContent.split(/\s+/)[0];
+        const scriptName = path.basename(tmpScript);
+        fs.writeFileSync(tmpChecksum, `${expectedHash}  ${scriptName}\n`);
+        const verifyR = await runCaptured('bash', ['-c',
+          `cd "${path.dirname(tmpScript)}" && (sha256sum -c '${tmpChecksum}' 2>/dev/null || shasum -a 256 -c '${tmpChecksum}')`
+        ]);
+        if (verifyR.code !== 0) {
+          tee('⚠ Installer script integrity check failed — aborting.\n');
+          try { fs.unlinkSync(tmpScript); } catch {}
+          try { fs.unlinkSync(tmpChecksum); } catch {}
+          await fail(); return;
+        }
+        tee('  ✓ Installer integrity verified (SHA-256)\n');
+      } else {
+        tee('Warning: could not fetch checksum — proceeding with unverified installer.\n');
+      }
+      try { fs.unlinkSync(tmpChecksum); } catch {}
+      const r1 = await runCaptured('bash', [tmpScript]);
       if (r1.code === 0) {
+        try { fs.unlinkSync(tmpScript); } catch {}
         await fixOpenclawPermissions();
         await succeed(); return;
       }
       if (isPermError(fullLog)) {
         tee('\nPermission error in installer — elevated access required.\n');
         const ok = await cacheSudo('Enter your system password to complete installation');
-        if (!ok) { tee('Incorrect password or cancelled.\n'); failCancelled(); return; }
+        if (!ok) { tee('Incorrect password or cancelled.\n'); try { fs.unlinkSync(tmpScript); } catch {} failCancelled(); return; }
         tee('Retrying with elevated permissions...\n');
-        const r2 = await runCaptured('sudo', ['-E', 'bash', '-c', 'curl -fsSL https://openclaw.ai/install.sh | bash']);
+        const r2 = await runCaptured('sudo', ['-E', 'bash', tmpScript]);
+        try { fs.unlinkSync(tmpScript); } catch {}
         if (r2.code === 0) {
           await fixOpenclawPermissions();
           await succeed(); return;
         }
       }
+      try { fs.unlinkSync(tmpScript); } catch {}
     }
 
     await fail();

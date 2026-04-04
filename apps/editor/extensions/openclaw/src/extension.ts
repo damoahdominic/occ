@@ -110,7 +110,9 @@ function routeHome(extensionUri: vscode.Uri, context: vscode.ExtensionContext, f
 /** Returns true if the OpenClaw web server is reachable. */
 function isWebServerReachable(portOverride?: number): Promise<boolean> {
   const port = portOverride ?? getConfiguredGatewayPort();
-  const url = `http://localhost:${port}/`;
+  // Always use 127.0.0.1 explicitly — never 0.0.0.0 or a hostname that
+  // might resolve to a non-loopback address.
+  const url = `http://127.0.0.1:${port}/`;
   return new Promise(resolve => {
     const req = http.get(url, { timeout: 3000 }, res => {
       res.resume();
@@ -279,7 +281,7 @@ async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<vo
 
 // ── Inference balance status bar ──────────────────────────────────────────────
 const BACKEND_BALANCE_KEY = 'occBackendBalanceV1'; // cached backend balance — persists across restarts
-const OCC_JWT_KEY = 'occJwtV1'; // JWT stored directly in extension storage — no renderer IPC needed
+const OCC_JWT_KEY = 'occJwtV1'; // JWT stored in SecretStorage (OS keychain) — encrypted at rest
 
 function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => void {
   // Restore cached backend balance so status bar shows the correct value immediately on startup
@@ -373,13 +375,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       // FALLBACK: if extension globalState has no JWT (e.g. user signed in before this session
       // synced, or the extension was reloaded), read from occLegacyJwt in VS Code settings and
       // backfill extension globalState so future reads work without IPC.
-      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
       if (!jwt) {
         try {
           const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
           if (legacyJwt) {
             jwt = legacyJwt;
-            await context.globalState.update(OCC_JWT_KEY, jwt);
+            await context.secrets.store(OCC_JWT_KEY, jwt);
           }
         } catch { /* renderer not ready yet — will retry on next poll */ }
       }
@@ -405,7 +407,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         const moltpilotKey = data.api_keys?.moltpilotKey ?? '';
         // Guard: only sync back if the JWT wasn't cleared while the fetch was in-flight.
         // Without this check, an in-flight poll completing after sign-out would re-log the user in.
-        const currentJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+        const currentJwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
         if (currentJwt !== jwt) { return; }
         // Sync JWT + keys to renderer settings so ocFreeModel works
         vscode.commands.executeCommand('occ.auth.setLegacyJwt', jwt);
@@ -436,7 +438,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
         }
       } else if (r.status === 401) {
         // JWT expired or invalid — clear it, clear moltpilot key, and hide bar
-        void context.globalState.update(OCC_JWT_KEY, '');
+        void context.secrets.delete(OCC_JWT_KEY);
         vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = undefined; }
         stopCountdown();
@@ -489,7 +491,7 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
     // Called from the renderer (sidebarActions.ts occ.auth.setLegacyJwt) to sync the JWT
     // into extension-host storage so fetchAndUpdateBackendBalance can read it without IPC.
     vscode.commands.registerCommand('openclaw.jwt.set', async (token: string) => {
-      await context.globalState.update(OCC_JWT_KEY, token ?? '');
+      if (token) { await context.secrets.store(OCC_JWT_KEY, token); } else { await context.secrets.delete(OCC_JWT_KEY); }
       // Stop polling immediately on sign-out so no more in-flight fetches can re-set the JWT
       if (!token && backendPollTimer) {
         clearInterval(backendPollTimer);
@@ -509,13 +511,13 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
       log('');
 
       // 1. JWT
-      let jwt = context.globalState.get<string>(OCC_JWT_KEY, '');
-      log(`[1] JWT in extension globalState (occJwtV1): ${jwt ? 'OK present (' + jwt.substring(0, 20) + '...)' : 'MISSING'}`);
+      let jwt = (await context.secrets.get(OCC_JWT_KEY)) ?? '';
+      log(`[1] JWT in SecretStorage (occJwtV1): ${jwt ? 'OK present [redacted]' : 'MISSING'}`);
       // Check what the renderer has for occLegacyJwt — this is what voidSettingsService reads
       try {
         const legacyJwt = await vscode.commands.executeCommand<string>('occ.auth.getLegacyJwt');
-        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present (' + legacyJwt.substring(0, 20) + '...)' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
-        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.globalState.update(OCC_JWT_KEY, jwt); }
+        log(`    occLegacyJwt in renderer settings: ${legacyJwt ? 'OK present [redacted]' : 'MISSING <-- this causes MoltPilot to use shared key!'}`);
+        if (!jwt && legacyJwt) { jwt = legacyJwt; await context.secrets.store(OCC_JWT_KEY, jwt); }
       } catch { log('    occLegacyJwt check: renderer not ready'); }
 
       if (!jwt) { lines.push('\nNot signed in — cannot proceed.'); }
@@ -535,8 +537,8 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
             log(`    Status: 200 OK`);
             log(`    Email:        ${d.email ?? '(not returned)'}`);
             log(`    Balance:      $${balanceBefore.toFixed(6)}`);
-            log(`    MoltpilotKey: ${moltpilotKey ? 'OK ' + moltpilotKey.substring(0, 12) + '...' : 'MISSING'}`);
-            log(`    OccKey:       ${occKey ? 'OK ' + occKey.substring(0, 12) + '...' : 'MISSING'}`);
+            log(`    MoltpilotKey: ${moltpilotKey ? 'OK [redacted]' : 'MISSING'}`);
+            log(`    OccKey:       ${occKey ? 'OK [redacted]' : 'MISSING'}`);
           } else {
             log(`    HTTP ${r.status} -- JWT may be expired`);
           }
@@ -600,10 +602,17 @@ function initBalanceBar(context: vscode.ExtensionContext): (amount?: number) => 
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<OpenClawCoreAPI> {
+  // ── One-time migration: move JWT from globalState → SecretStorage ────────────
+  const legacyJwt = context.globalState.get<string>(OCC_JWT_KEY, '');
+  if (legacyJwt) {
+    await context.secrets.store(OCC_JWT_KEY, legacyJwt);
+    await context.globalState.update(OCC_JWT_KEY, undefined);
+  }
+
   // ── MultiHost: HostRegistry + HostManager ───────────────────────────────────
-  const hostRegistry = new HostRegistry();
+  const hostRegistry = new HostRegistry(context.secrets);
   await hostRegistry.init();
-  const hostManager = new HostManager(hostRegistry);
+  const hostManager = new HostManager(hostRegistry, context.globalState);
   context.subscriptions.push(hostRegistry, hostManager);
 
   // (OPENCLAW HOSTS tree view and status bar removed — window-level binding used instead)
@@ -648,8 +657,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
           const params = new URLSearchParams(uri.query);
           const token = params.get('token');
           if (token) {
-            // Store JWT in extension-host storage immediately (no renderer IPC needed).
-            void context.globalState.update(OCC_JWT_KEY, token).then(() => {
+            // Store JWT in SecretStorage (OS keychain) — encrypted at rest.
+            void context.secrets.store(OCC_JWT_KEY, token).then(() => {
               // Also sync to renderer settings service (for chat / other renderer consumers).
               vscode.commands.executeCommand('occ.auth.setLegacyJwt', token);
             });
@@ -785,7 +794,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       if (!password) return { result: 'User cancelled the password prompt.', exitCode: 1 };
 
       return new Promise(resolve => {
-        const child = require('child_process').spawn('sudo', ['-S', 'bash', '-c', command], {
+        const child = cp.spawn('sudo', ['-S', 'bash', '-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         child.stdin?.write(password + '\n');
@@ -863,7 +872,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
       // Check if gateway is reachable
       const gatewayRunning = await new Promise<boolean>(resolve => {
-        const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+        const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
           res.resume();
           resolve(res.statusCode !== undefined && res.statusCode < 500);
         });

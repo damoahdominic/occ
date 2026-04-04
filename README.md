@@ -137,8 +137,8 @@ This project is open source. See the [LICENSE](LICENSE) file for details.
 
 ## Contributors
 
-<a href=https://github.com/damoahdominic/occ/graphs/contributors>
-  <img src=https://contrib.rocks/image?repo=damoahdominic/occ />
+<a href="https://github.com/damoahdominic/occ/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=damoahdominic/occ&anon=1" />
 </a>
 
 Made with [contrib.rocks](https://contrib.rocks).

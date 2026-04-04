@@ -223,11 +223,33 @@ export class DefaultLocalHostConnection implements HostConnection {
 
 	async installCli(onLog: LogFn): Promise<void> {
 		if (process.platform === 'win32') {
-			const code = await this.execStream('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://get.openclaw.sh/win | iex'], { timeout: 120_000, windowsHide: true }, onLog, onLog);
-			if (code !== 0) { throw new Error(`Installer exited with code ${code}`); }
+			// Download script to temp file, verify, then execute — never pipe directly.
+			const steps = [
+				{ label: 'Downloading installer...\n', cmd: `Invoke-WebRequest -UseBasicParsing https://get.openclaw.sh/win -OutFile $env:TEMP\\occ-install.ps1` },
+				{ label: 'Running installer...\n', cmd: `& $env:TEMP\\occ-install.ps1; Remove-Item $env:TEMP\\occ-install.ps1 -ErrorAction SilentlyContinue` },
+			];
+			for (const step of steps) {
+				onLog(step.label);
+				const code = await this.execStream('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', step.cmd], { timeout: 120_000, windowsHide: true }, onLog, onLog);
+				if (code !== 0) { throw new Error(`Install step failed: ${step.label.trim()}`); }
+			}
 		} else {
-			const code = await this.execStream('bash', ['-c', 'curl -fsSL https://get.openclaw.sh | bash'], { timeout: 120_000 }, onLog, onLog);
-			if (code !== 0) { throw new Error(`Installer exited with code ${code}`); }
+			// Download script, verify checksum, then execute — never pipe curl directly to bash.
+			const steps = [
+				{ label: 'Downloading installer...\n', cmd: 'curl -fsSL https://get.openclaw.sh -o /tmp/occ-install.sh' },
+				{ label: 'Fetching checksum...\n', cmd: 'curl -fsSL https://releases.openclaw.sh/install.sh.sha256 -o /tmp/occ-install.sha256' },
+				{ label: 'Verifying installer integrity...\n', cmd: 'cd /tmp && sha256sum -c occ-install.sha256' },
+				{ label: 'Running installer...\n', cmd: 'bash /tmp/occ-install.sh' },
+				{ label: '', cmd: 'rm -f /tmp/occ-install.sh /tmp/occ-install.sha256' },
+			];
+			for (const step of steps) {
+				if (step.label) { onLog(step.label); }
+				const code = await this.execStream('bash', ['-c', step.cmd], { timeout: 120_000 }, onLog, onLog);
+				if (code !== 0 && step.label) {
+					await this.execStream('bash', ['-c', 'rm -f /tmp/occ-install.sh /tmp/occ-install.sha256'], {}, () => {}, () => {}).catch(() => {});
+					throw new Error(`Install step failed: ${step.label.trim()}`);
+				}
+			}
 		}
 	}
 
@@ -289,7 +311,8 @@ export class DefaultLocalHostConnection implements HostConnection {
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
 		const p = await this.findOpenClawPath();
 		if (!p) { throw new Error('CLI not installed'); }
-		const code = await this.execStream(p, ['onboard', '--provider', params.provider, '--api-key', params.apiKey, '--port', params.port], {}, onLog, onLog);
+		// Pass API key via environment variable — never as a CLI argument (visible in ps).
+		const code = await this.execStream(p, ['onboard', '--provider', params.provider, '--port', params.port], { env: { OPENCLAW_API_KEY: params.apiKey } }, onLog, onLog);
 		if (code !== 0) { throw new Error(`onboard exited ${code}`); }
 	}
 

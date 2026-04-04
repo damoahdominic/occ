@@ -184,7 +184,15 @@ export class HomePanel {
         void vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
         void vscode.commands.executeCommand('openclaw.jwt.set', '');
       } else if (msg.command === 'openUrl') {
-        vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
+        const urlStr = msg.url as string;
+        try {
+          const parsed = new URL(urlStr);
+          const allowed = ['occ.mba.sh', 'mba.sh', 'openclaw.ai', 'openclawcode.ai', 'github.com', 'openclaw.sh'];
+          if (['https:', 'http:'].includes(parsed.protocol) &&
+              allowed.some(d => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) {
+            vscode.env.openExternal(vscode.Uri.parse(urlStr));
+          }
+        } catch { /* invalid URL — ignore */ }
       } else if (msg.command === 'openConfigFile') {
         const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(configPath));
@@ -272,8 +280,6 @@ export class HomePanel {
         }
       } else if (msg.command === 'checkHostsStatus') {
         void this._handleCheckHostsStatus();
-      } else if (msg.command) {
-        vscode.commands.executeCommand(msg.command);
       }
     }, null, this._disposables);
   }
@@ -472,7 +478,7 @@ export class HomePanel {
   private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
     const port = this._getConfiguredPort();
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
       });
@@ -650,6 +656,9 @@ export class HomePanel {
 
   // ── Version check ──────────────────────────────────────────────────────────
 
+  /** Strict semver-ish pattern to reject spoofed version strings. */
+  private static readonly _VERSION_RE = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[\w.]+)?$/;
+
   /** Fetches the latest openclaw version from the npm registry. */
   private _fetchLatestVersion(): Promise<string | null> {
     return new Promise(resolve => {
@@ -657,10 +666,17 @@ export class HomePanel {
       const req = https.get(
         { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
         res => {
+          if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
           let data = '';
           res.on('data', (c: Buffer) => (data += c));
           res.on('end', () => {
-            try { resolve(JSON.parse(data).version ?? null); } catch { resolve(null); }
+            try {
+              const version: unknown = JSON.parse(data).version;
+              if (typeof version !== 'string' || !HomePanel._VERSION_RE.test(version)) {
+                resolve(null); return;
+              }
+              resolve(version);
+            } catch { resolve(null); }
           });
         },
       );
@@ -725,7 +741,6 @@ export class HomePanel {
         'void.openChatWithMessage',
         `OpenClaw is installed but version ${installed} is not the latest (${latest}). Please update it now.\n\n` +
         `Run: openclaw update --yes --non-interactive\n\n` +
-        `If that command is not available, use: npm install -g openclaw@latest\n\n` +
         `After updating, verify with: openclaw --version`,
         'agent',
       );
@@ -734,7 +749,7 @@ export class HomePanel {
 
   private _checkPort(port: number): Promise<'running' | 'stopped'> {
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'stopped');
       });

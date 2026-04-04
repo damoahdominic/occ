@@ -109,7 +109,51 @@ export class DockerHostAdapter implements HostAdapter {
 		}
 
 		const containerId = await resolveContainerId(dockerConfig);
+
+		// Security audit: warn about dangerous container configurations
+		void this._auditContainerSecurity(containerId, dockerConfig);
+
 		return new DockerHostConnection(dockerConfig, containerId);
+	}
+
+	/**
+	 * Audits a container for dangerous security configurations and warns the user.
+	 * Checks: running as root, Docker socket mounted, privileged mode.
+	 */
+	private async _auditContainerSecurity(containerId: string, config: DockerConnection): Promise<void> {
+		try {
+			const hostArgs = config.dockerHost ? ['-H', config.dockerHost] : [];
+			const inspect = cp.spawnSync('docker', [
+				...hostArgs, 'inspect',
+				'--format', '{{.Config.User}}||{{.HostConfig.Privileged}}||{{range .Mounts}}{{.Source}}:{{end}}',
+				containerId,
+			], { timeout: 5000, windowsHide: true });
+			if (inspect.status !== 0) { return; }
+			const output = inspect.stdout.toString().trim();
+			const [user, privileged, mounts] = output.split('||');
+			const warnings: string[] = [];
+
+			// Check if running as root
+			if (!user || user === 'root' || user === '0') {
+				warnings.push('Container is running as root.');
+			}
+			// Check for privileged mode
+			if (privileged === 'true') {
+				warnings.push('Container is running in --privileged mode (near-full host access).');
+			}
+			// Check for Docker socket mount
+			if (mounts?.includes('/var/run/docker.sock')) {
+				warnings.push('Docker socket is mounted — container can control the Docker daemon.');
+			}
+
+			if (warnings.length > 0) {
+				void vscode.window.showWarningMessage(
+					`⚠ Container security: ${warnings.join(' ')} ` +
+					`This increases the risk of container escape. Consider using a non-root user and dropping capabilities.`,
+					'Dismiss',
+				);
+			}
+		} catch { /* best-effort audit */ }
 	}
 
 	async testConnection(config: HostConnectionConfig): Promise<TestResult> {

@@ -96,7 +96,7 @@ export class StatusPanel {
     }
     const panel = vscode.window.createWebviewPanel(
       'openclawStatus', 'OpenClaw Status', vscode.ViewColumn.One,
-      { enableScripts: true }
+      { enableScripts: true, localResourceRoots: [extensionUri] }
     );
     StatusPanel.currentPanel = new StatusPanel(panel);
   }

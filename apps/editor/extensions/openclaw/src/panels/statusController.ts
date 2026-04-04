@@ -10,6 +10,7 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import type { HostConnection } from '../hosts/types';
@@ -129,6 +130,58 @@ function writeLog(text: string): void {
 }
 
 
+// ── Gateway security helpers ─────────────────────────────────────────────────
+
+const DEFAULT_GATEWAY_PORT = 18789;
+
+/**
+ * Reads the gateway auth token from ~/.openclaw/openclaw.json.
+ * Returns empty string if not configured or unreadable.
+ */
+function readGatewayToken(): string {
+  try {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    const gateway = config['gateway'] as Record<string, unknown> | undefined;
+    const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
+    if (auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string') {
+      return auth['token'] as string;
+    }
+  } catch { /* non-fatal */ }
+  return '';
+}
+
+/**
+ * Checks whether a port is reachable on 0.0.0.0 (all interfaces) by
+ * attempting a TCP connection to a non-loopback IP. If reachable, the
+ * gateway is dangerously exposed to the network.
+ */
+function checkGatewayExposed(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    // Find a non-loopback IPv4 address
+    const interfaces = os.networkInterfaces();
+    let nonLoopback: string | undefined;
+    for (const addrs of Object.values(interfaces)) {
+      for (const addr of addrs ?? []) {
+        if (addr.family === 'IPv4' && !addr.internal) {
+          nonLoopback = addr.address;
+          break;
+        }
+      }
+      if (nonLoopback) { break; }
+    }
+    if (!nonLoopback) { resolve(false); return; }
+
+    const socket = new net.Socket();
+    socket.setTimeout(1500);
+    socket.on('connect', () => { socket.destroy(); resolve(true); });
+    socket.on('error', () => { socket.destroy(); resolve(false); });
+    socket.on('timeout', () => { socket.destroy(); resolve(false); });
+    socket.connect(port, nonLoopback);
+  });
+}
+
 export class StatusPanelController {
   private _disposed = false;
   private _commandAction: 'start' | 'stop' | 'restart' | null = null;
@@ -143,6 +196,7 @@ export class StatusPanelController {
   private _uninstallCloseSidebarTimer: ReturnType<typeof setTimeout> | undefined;
   private _uninstallCloseWatcher: ReturnType<typeof setInterval> | undefined;
   private _cachedGatewayPort = 18789;
+  private _exposedWarningShown = false;
   private readonly _outputChannel: vscode.OutputChannel;
 
   constructor(
@@ -321,7 +375,14 @@ export class StatusPanelController {
       void vscode.commands.executeCommand('occ.auth.setMoltpilotKey', '');
       void vscode.commands.executeCommand('openclaw.jwt.set', '');
     } else if (msg.command === 'openUrl') {
-      vscode.env.openExternal(vscode.Uri.parse(msg.url as string));
+      const urlStr = msg.url as string;
+      try {
+        const parsed = new URL(urlStr);
+        if (!['https:', 'http:'].includes(parsed.protocol)) { return true; }
+        const allowed = ['occ.mba.sh', 'mba.sh', 'openclaw.ai', 'openclawcode.ai', 'github.com', 'openclaw.sh'];
+        if (!allowed.some(d => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) { return true; }
+        vscode.env.openExternal(vscode.Uri.parse(urlStr));
+      } catch { /* invalid URL — ignore */ }
     } else if (msg.command === 'openConfigFile') {
       const configPath = this._getConfigFilePath();
       vscode.commands.executeCommand('vscode.open', vscode.Uri.file(configPath));
@@ -383,8 +444,6 @@ export class StatusPanelController {
       if (args && args.length > 0) {
         void vscode.commands.executeCommand('void.openChatWithMessage', args[0], 'agent');
       }
-    } else if (msg.command) {
-      vscode.commands.executeCommand(msg.command);
     } else {
       return false;
     }
@@ -415,7 +474,7 @@ export class StatusPanelController {
   private _checkGatewayStatusRaw(): Promise<GatewayStatus> {
     const port = this._getConfiguredPort();
     return new Promise(resolve => {
-      const req = http.get(`http://localhost:${port}/`, { timeout: 2000 }, res => {
+      const req = http.get(`http://127.0.0.1:${port}/`, { timeout: 2000 }, res => {
         res.resume();
         resolve(res.statusCode !== undefined && res.statusCode < 500 ? 'running' : 'errored');
       });
@@ -488,6 +547,25 @@ export class StatusPanelController {
         this._closeSidebarOnGatewayStart = false;
         void vscode.commands.executeCommand('void.sidebar.close');
       }
+      // Security: check if gateway is exposed on non-loopback interfaces
+      if (status === 'running' && this._host.type === 'local' && !this._exposedWarningShown) {
+        void checkGatewayExposed(this._cachedGatewayPort).then(exposed => {
+          if (exposed && !this._exposedWarningShown) {
+            this._exposedWarningShown = true;
+            void vscode.window.showWarningMessage(
+              `⚠ Security: OpenClaw gateway on port ${this._cachedGatewayPort} is reachable from your network (bound to 0.0.0.0). ` +
+              `This exposes your agents, API keys, and channel configs to anyone on your network. ` +
+              `Restart the gateway bound to 127.0.0.1 only.`,
+              'Learn More',
+            ).then(choice => {
+              if (choice === 'Learn More') {
+                void vscode.env.openExternal(vscode.Uri.parse('https://openclaw.ai/docs/security#gateway-binding'));
+              }
+            });
+          }
+        });
+      }
+      if (status !== 'running') { this._exposedWarningShown = false; }
       try { this._panel.webview.postMessage({ type: 'aiRunning', running: aiRunning }); } catch {}
       try { this._panel.webview.postMessage({ type: 'chatState', open: this._sidebarOpen }); } catch {}
       if (jwt !== this._lastJwt) {
@@ -575,21 +653,36 @@ export class StatusPanelController {
 
   // ── Version check ─────────────────────────────────────────────────────────
 
+  /** Strict semver-ish pattern to reject obviously spoofed version strings. */
+  private static readonly _VERSION_RE = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[\w.]+)?$/;
+
   private _fetchLatestVersion(): Promise<string | null> {
     return new Promise(resolve => {
       const req = https.get(
         { hostname: 'registry.npmjs.org', path: '/openclaw/latest', headers: { Accept: 'application/json' } },
         res => {
+          // Reject unexpected redirects — a spoofed DNS might redirect us
+          if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
           let data = '';
           res.on('data', (c: Buffer) => (data += c));
           res.on('end', () => {
-            try { resolve(JSON.parse(data).version ?? null); } catch { resolve(null); }
+            try {
+              const version: unknown = JSON.parse(data).version;
+              if (typeof version !== 'string' || !StatusPanelController._VERSION_RE.test(version)) {
+                resolve(null); return;
+              }
+              resolve(version);
+            } catch { resolve(null); }
           });
         },
       );
       req.setTimeout(6000, () => { req.destroy(); resolve(null); });
       req.on('error', () => resolve(null));
     });
+  }
+
+  private _escHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   private async _checkLatestVersion(): Promise<void> {
@@ -605,23 +698,25 @@ export class StatusPanelController {
       return;
     }
     const installed = cliCheck.ok ? (cliCheck.output ?? '').trim() : null;
+    const safeLatest = this._escHtml(latest);
     if (!installed) {
       const notDetectedLabel = this._host.type === 'local' ? 'not detected locally' : 'not detected in container';
-      post(`<span style="color:#60a5fa">Latest: <strong>${latest}</strong> — OpenClaw CLI ${notDetectedLabel}.</span>`);
+      post(`<span style="color:#60a5fa">Latest: <strong>${safeLatest}</strong> — OpenClaw CLI ${notDetectedLabel}.</span>`);
       return;
     }
+    const safeInstalled = this._escHtml(installed);
     const norm = (v: string) => {
       const match = v.match(/\d+\.\d+(?:\.\d+)*/);
       return match ? match[0] : v.replace(/^v/i, '').split(/[-+(]/)[0].trim();
     };
     if (norm(installed) === norm(latest)) {
-      post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${installed}</strong></span>`);
+      post(`<span style="color:#4ade80">✓ Up to date &mdash; <strong>${safeInstalled}</strong></span>`);
     } else {
       post(
-        `<span style="color:#fbbf24">Update available: <strong>${latest}</strong> &mdash; you have <strong>${installed}</strong>.</span>` +
+        `<span style="color:#fbbf24">Update available: <strong>${safeLatest}</strong> &mdash; you have <strong>${safeInstalled}</strong>.</span>` +
         `<button onclick="runUpdate()" style="margin-top:10px;display:flex;align-items:center;gap:6px;background:#f59e0b;color:#000;border:none;border-radius:6px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;width:100%;justify-content:center;" ` +
         `onmouseover="this.style.background='#fbbf24'" onmouseout="this.style.background='#f59e0b'">` +
-        `⬆ Update to ${latest} →</button>`,
+        `⬆ Update to ${safeLatest} →</button>`,
       );
     }
   }
@@ -640,7 +735,6 @@ export class StatusPanelController {
         'void.openChatWithMessage',
         `OpenClaw is installed but version ${installed} is not the latest (${latest}). Please update it now.\n\n` +
         `Run: openclaw update --yes --non-interactive\n\n` +
-        `If that command is not available, use: npm install -g openclaw@latest\n\n` +
         `After updating, verify with: openclaw --version`,
         'agent',
       );
