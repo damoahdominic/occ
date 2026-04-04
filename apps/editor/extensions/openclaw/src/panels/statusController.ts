@@ -15,7 +15,7 @@ import * as path from 'path';
 import type { HostConnection } from '../hosts/types';
 import { renderStatusHtml } from './statusHtml';
 
-type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
+type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'rebooting' | 'errored' | 'ai-fixing';
 
 // ── Workspace folder management ───────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ function writeLog(text: string): void {
 
 export class StatusPanelController {
   private _disposed = false;
-  private _commandAction: 'start' | 'stop' | 'restart' | null = null;
+  private _commandAction: 'start' | 'stop' | 'restart' | 'reboot' | null = null;
   private _sidebarOpen = false;
   private _pollingTimer: ReturnType<typeof setInterval> | undefined;
   private _lastInstalledState: boolean | undefined;
@@ -296,7 +296,7 @@ export class StatusPanelController {
   /** Route a message from the webview. Returns true if handled. */
   public handleMessage(msg: { command: string; [k: string]: unknown }): boolean {
     if (msg.command === 'gatewayAction') {
-      void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
+      void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart' | 'reboot');
     } else if (msg.command === 'checkVersion') {
       void this._checkLatestVersion();
     } else if (msg.command === 'runUpdate') {
@@ -506,13 +506,26 @@ export class StatusPanelController {
     }
   }
 
-  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart'): Promise<void> {
+  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart' | 'reboot'): Promise<void> {
     const intermediary: GatewayStatus =
-      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
+      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'rebooting';
     const expectedState: GatewayStatus = action === 'stop' ? 'stopped' : 'running';
 
     this._commandAction = action;
     try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
+
+    if (action === 'reboot') {
+      const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+      this._outputChannel.appendLine(`[reboot] Initiating machine reboot on ${osInfo}`);
+      try {
+        await this._host.gatewayReboot(line => this._outputChannel.appendLine(line));
+      } catch (err) {
+        this._outputChannel.appendLine(`[reboot] Error: ${err}`);
+      }
+      this._commandAction = null;
+      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: 'stopped' }); } catch {}
+      return;
+    }
 
     const verb = action === 'restart' ? 'restart' : action;
     const osInfo = `${process.platform} ${os.release()} (${process.arch})`;

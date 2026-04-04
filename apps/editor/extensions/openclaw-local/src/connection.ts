@@ -346,6 +346,24 @@ export class LocalHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`gateway restart exited with code ${code}`); }
 	}
 
+	async gatewayReboot(onLog: LogFn): Promise<void> {
+		const cliPath = await this.findOpenClawPath();
+		if (cliPath) {
+			try {
+				const code = await this.execStream(cliPath, ['gateway', 'reboot'], {}, onLog, onLog);
+				if (code === 0) return;
+			} catch { /* fall through to OS-level reboot */ }
+		}
+		onLog('openclaw gateway reboot unavailable — falling back to OS reboot');
+		if (process.platform === 'win32') {
+			const code = await this.execStream('shutdown', ['/r', '/t', '0'], { windowsHide: true }, onLog, onLog);
+			if (code !== 0) { throw new Error(`OS reboot command exited with code ${code}`); }
+		} else {
+			const code = await this.execStream('sudo', ['reboot'], {}, onLog, onLog);
+			if (code !== 0) { throw new Error(`OS reboot command exited with code ${code}`); }
+		}
+	}
+
 	// ── Full install + onboard ────────────────
 
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {

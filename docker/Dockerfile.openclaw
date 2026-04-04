@@ -1,0 +1,58 @@
+# OpenClaw Gateway — Docker Image
+#
+# Base: oven/bun:1.3.10-slim
+# Node.js 24 installed via fnm
+# Includes: sqlite, cron, nproc (procps), and common dev tools
+#
+# Usage:
+#   docker build -f docker/Dockerfile.openclaw -t openclaw/pod:latest .
+#
+# Or via docker-compose (automatic):
+#   OPENCLAW_DATA_DIR=~/.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+
+FROM oven/bun:1.3.10-slim
+
+# Install system dependencies
+RUN apt update && apt upgrade -yf && \
+    apt install -yf \
+        make tmux tree nano curl unzip \
+        docker-cli docker-compose bash git \
+        starship procps pipenv sqlite3 \
+        cron coreutils tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw and other CLI tools globally via bun
+RUN bun i -g openclaw opencode-ai @kilocode/cli @google/gemini-cli @anthropic-ai/claude-code @musistudio/claude-code-router
+
+# Install fnm (Fast Node Manager)
+ENV FNM_DIR=/opt/fnm
+ENV PATH=/opt/fnm:$PATH
+
+RUN curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir "/opt/fnm" --skip-shell
+
+# Set up shell profile so fnm env is loaded automatically in login shells
+RUN printf 'export FNM_DIR=/opt/fnm\nexport PATH=/opt/fnm:$PATH\neval "$(/opt/fnm/fnm env --shell bash)"\n' > /etc/profile.d/fnm.sh \
+    && chmod +x /etc/profile.d/fnm.sh
+
+# Install and activate Node.js 24 via fnm
+RUN $FNM_DIR/fnm i 24 && $FNM_DIR/fnm default 24
+
+# Create data directory
+RUN mkdir -p /root/.openclaw
+
+# Use login shell so fnm env is sourced automatically
+SHELL ["/bin/bash", "-l", "-c"]
+
+# Expose gateway port
+EXPOSE 18789
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl -f http://localhost:18789/health || exit 1
+
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["tini", "--"]
+
+# Start the OpenClaw gateway via login shell (fnm env sourced automatically)
+# --allow-unconfigured allows gateway to start without prior setup
+CMD ["bash", "-lc", "openclaw gateway run --allow-unconfigured"]

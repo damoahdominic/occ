@@ -120,6 +120,10 @@
 			{
 				"command": "openclaw.refreshHost",
 				"title": "OpenClaw: Refresh Host Status"
+			},
+			{
+				"command": "openclaw.host.setup.docker",
+				"title": "OpenClaw: Docker Setup"
 			}
 		]
 	},

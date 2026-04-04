@@ -5,6 +5,35 @@ It supersedes all older planning documents.
 
 ---
 
+## Agent Operating Protocol
+
+**All operations in this repository use agentic pair programming.**
+
+Every task is executed by two roles working in tandem:
+
+### Driver (main agent)
+The driver executes. It reads files, writes code, runs commands, and produces output. It operates within the scope defined by the current task and does not take unilateral decisions on ambiguous requirements.
+
+- Performs one logical step at a time, then yields to the navigator before proceeding.
+- Does not take destructive or irreversible actions (force push, volume removal, data deletion, CI changes) without navigator sign-off.
+- Flags blockers, conflicts, or unexpected state immediately rather than working around them silently.
+
+### Navigator (sub agent)
+The navigator reviews. It runs ahead of the driver — auditing the plan, checking assumptions, spotting edge cases, and verifying output after each step. It does not write code directly but directs the driver's next move.
+
+- Reads the PRD and surfaces ambiguities or risks before the driver starts.
+- After each driver step, verifies correctness and either approves the next step or redirects.
+- Produces the final audit/summary before any task is marked done.
+
+### Handoff protocol
+1. Navigator reads the ticket/PRD and briefs the driver on scope, risks, and acceptance criteria.
+2. Driver executes step-by-step; navigator reviews each output.
+3. On completion, navigator audits the full diff and confirms all acceptance criteria are met.
+
+When in doubt: navigator asks, driver waits.
+
+---
+
 ## Project Overview
 
 **OCcode** is a branded IDE built on the [Void editor](https://github.com/voideditor/void) fork
@@ -12,6 +41,24 @@ It supersedes all older planning documents.
 
 The old `apps/wrapper` (Electron bootstrapper that downloaded VSCodium) has been retired.
 The Void editor fork is now the main platform.
+
+---
+
+## Ticket Management
+
+All agent work is organized via tickets in `.tickets/`. See [.tickets/AGENTS.md](./.tickets/AGENTS.md) for:
+- Ticket structure and naming conventions
+- Task workflow and subtask specification
+- Commit process and verification
+
+Key scripts:
+```bash
+# Find next ticket with pending work
+bash .tickets/scripts/find_next_ticket.sh
+
+# Verify ticket statuses
+bash .tickets/scripts/verify_tickets.sh
+```
 
 ---
 
@@ -34,6 +81,136 @@ occ/
 **Root `package.json` workspaces:** `apps/web`, `packages/control-center`
 
 `apps/editor` is **intentionally excluded from workspaces** — see the npm section below.
+
+---
+
+## Docker Compose Development Workflow (PRIMARY)
+
+**Priority:** When Docker or an OCI-compatible container runtime is available on the host, **use the Docker Compose development workflow as the primary method** for implementation, testing, and verification. This is the default approach unless explicitly constrained.
+
+### Why Docker Compose First
+
+- **No local rebuilds required** — the watch process runs inside the container, picking up source changes automatically
+- **Consistent environment** — Node 20.18.2, all dependencies, and build tools are pre-configured
+- **Instant verification** — UI and functionality changes are visible through the running editor at `http://localhost:9888`
+- **Playwright testing** — browser automation tests (including MCP) run against the live editor without manual setup
+
+### Development Container
+
+The editor runs in the `occ-editor-dev` container (defined in `docker-compose.yml`):
+
+```yaml
+services:
+  editor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9888:9888"
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+The workspace is mounted as a volume, so **source changes on the host are immediately visible inside the container**.
+
+### Typical Workflow
+
+```bash
+# 1. Start the dev environment (first time builds the image)
+docker compose up -d
+
+# 2. Verify the editor is running
+curl -s http://localhost:9888/ | head -5
+
+# 3. Edit source files on the host — changes are picked up by the watch process
+#    (no rebuild needed for TypeScript/extension changes)
+
+# 4. For extension TypeScript changes, recompile inside the container:
+docker exec occ-editor-dev bash -c "cd /workspace/apps/editor/extensions/openclaw && npx tsc -p ./"
+
+# 5. For Void React changes, rebuild React bundles:
+docker exec occ-editor-dev bash -c "cd /workspace && npm run editor:build-react"
+
+# 6. For full editor rebuild (rarely needed — watch handles most cases):
+docker exec occ-editor-dev bash -c "cd /workspace/apps/editor && node --max-old-space-size=8192 ./node_modules/gulp/bin/gulp.js compile"
+
+# 7. Verify changes via Playwright or browser automation (MCP):
+npx playwright test tests/e2e/ --reporter=list
+# or use MCP tools to interact with http://localhost:9888
+```
+
+### When Rebuild Is NOT Required
+
+| Change Type | Rebuild Needed? | How to Verify |
+|-------------|----------------|---------------|
+| Extension TypeScript (`extensions/openclaw/src/**/*.ts`) | Yes — `npx tsc -p ./` inside container | Playwright tests, manual browser check |
+| Extension JavaScript (compiled `.js` in `out/`) | No — watch process handles it | Playwright tests, manual browser check |
+| Void React source (`react/src/**/*.tsx`) | Yes — `npm run editor:build-react` | Playwright tests, manual browser check |
+| Editor core TypeScript (`src/**/*.ts`) | No — watch process handles it | `Developer: Reload Window` in editor |
+| CSS/HTML in webviews | No — served directly | Playwright tests, manual browser check |
+| `docker-compose.*.yml` | No — changes apply on next `docker compose up` | `docker compose ps` |
+
+### Playwright & Browser Automation Testing
+
+Playwright tests run against the live editor at `http://localhost:9888`:
+
+```bash
+# Run all e2e tests
+npx playwright test tests/e2e/ --reporter=list
+
+# Run specific test file
+npx playwright test tests/e2e/docker-setup.spec.ts --reporter=list
+
+# Run with browser (debug mode)
+npx playwright test tests/e2e/docker-setup.spec.ts --headed
+```
+
+The editor's webview panels are accessible via iframe chains:
+```ts
+const inner = page
+  .frameLocator('iframe.webview').first()
+  .frameLocator('iframe#active-frame');
+```
+
+### Container Management
+
+```bash
+# View container logs
+docker logs occ-editor-dev --tail 50
+
+# Execute commands inside the container
+docker exec occ-editor-dev bash
+
+# Restart the container (picks up docker-compose.yml changes)
+docker compose up -d --force-recreate editor
+
+# Stop without removing
+docker compose stop
+
+# Full cleanup (removes containers and networks)
+docker compose down
+```
+
+### OpenClaw Docker Gateway
+
+The OpenClaw gateway services (postgres, redis, gateway) are managed via `docker/docker-compose.openclaw.yml`:
+
+```bash
+# Start gateway services
+OPENCLAW_DATA_DIR=~/.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+
+# Check service health
+docker compose -f docker/docker-compose.openclaw.yml ps
+
+# View gateway logs
+docker compose -f docker/docker-compose.openclaw.yml logs -f occ-gateway
+
+# Stop and clean up
+docker compose -f docker/docker-compose.openclaw.yml down
+```
+
+The gateway is accessible at `http://127.0.0.1:18789`. Postgres and Redis run on the internal Docker network only (no host port exposure).
 
 ---
 
@@ -77,7 +254,9 @@ Running `npm install` from the repo root will **not** install editor dependencie
 
 ---
 
-## Dev Cycle
+## Dev Cycle (without Docker)
+
+If Docker is not available, use the traditional local development workflow:
 
 ### Step 1 — Build React components (once, or when React source changes)
 
@@ -257,6 +436,7 @@ span the VS Code extension host API and changes risk breaking runtime behaviour.
 | `npm run dev` | `gulp watch-client` on the editor |
 | `npm run dev:react` | `watchreact` on the editor |
 | `npm run web` | Next.js dev server for `apps/web` at `http://localhost:3000` |
+
 ---
 
 ## apps/web — Marketing Site
@@ -279,3 +459,7 @@ npm run web    # dev server at http://localhost:3000
 - Requires [nvm-windows](https://github.com/coreybutler/nvm-windows).
 - `.bat` scripts hardcode `nvm use 20.18.2` — nvm-windows does not read `.nvmrc`.
 - Editor launches via `apps/editor/scripts/code.bat`.
+
+---
+
+*End of Agent Reference*

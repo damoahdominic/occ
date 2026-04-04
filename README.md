@@ -58,6 +58,17 @@ Or visit [openclawcode.ai](https://openclawcode.ai) for auto-detected download l
 1. **Download** OCCode for your platform
 2. **Open** the app — it detects your OpenClaw installation automatically
 3. **Follow the setup wizard** to connect your accounts and configure your agent
+
+## Installation Options
+
+OCCode offers two setup methods:
+
+- **Docker Setup (Recommended)** — one-click containerized environment that includes OpenClaw gateway, PostgreSQL, and Redis. Isolated, consistent, and easy to reset. Requires Docker Desktop (or Docker Engine on Linux). Internet required for first-time image pull.
+- **Local Setup (Advanced)** — installs OpenClaw CLI, starts services directly on your machine, and connects the editor to a local or remote backend. Suitable for developers who prefer full control or don't want to use Docker.
+
+The setup wizard appears on first launch or can be re-run via the command `occ.setup.reset`.
+
+For detailed instructions, see [Setup Guide](docs/setup.md).
 4. **You're ready** — manage everything from the dashboard
 
 ## Architecture

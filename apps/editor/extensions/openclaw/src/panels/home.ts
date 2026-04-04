@@ -10,7 +10,7 @@ import { DefaultLocalHostConnection } from '../hosts/localDefault';
 import { renderStatusHtml } from './statusHtml';
 import { setActiveOpenClawWorkspaceFolder, closeFilesFromDir } from './statusController';
 
-type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
+type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'rebooting' | 'errored' | 'ai-fixing';
 
 // ── Persistent diagnostics log ────────────────────────────────────────────────
 const LOG_PATH     = path.join(os.homedir(), '.openclaw', 'occ-home.log');
@@ -90,7 +90,7 @@ export class HomePanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
-  private _commandAction: 'start' | 'stop' | 'restart' | null = null;
+  private _commandAction: 'start' | 'stop' | 'restart' | 'reboot' | null = null;
   private _sidebarOpen = false; // tracks chat sidebar open state across webview reloads
   private _pollingTimer: ReturnType<typeof setInterval> | undefined;
   private readonly _outputChannel: vscode.OutputChannel;
@@ -110,11 +110,23 @@ export class HomePanel {
   private _coreAPI: OpenClawCoreAPI | undefined;
   /** When true, always show the host picker — never auto-route to a single installed host. */
   private _forcePicker = false;
+  /** When set, show the Docker/Local setup wizard instead of the install wizard. */
+  private _setupFor: 'docker' | 'local' | null = null;
+  /** True once _getSetupHtml() has been rendered — prevents onDidChangeViewState re-renders from resetting in-progress wizard state. */
+  private _setupHtmlShown = false;
+  private readonly _version: string;
+  private _dashboardAutoOpened = false;
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
+  // Docker detection cache (5-minute TTL)
+  private static _dockerDetectionCache: { timestamp: number; result: Awaited<ReturnType<typeof HomePanel.detectDockerEnvironment>> } | null = null;
+  private static readonly DOCKER_DETECTION_TTL = 5 * 60 * 1000; // 5 minutes
+
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false, setupFor?: 'docker' | 'local') {
     this._forcePicker = forcePicker;
+    this._setupFor = setupFor ?? null;
     this._panel = panel;
     this._extensionUri = extensionUri;
+    this._version = (vscode.extensions.getExtension('openclaw.home')?.packageJSON as { version?: string })?.version ?? '';
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
     // Subscribe to active host changes from the core extension if available.
     const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
@@ -132,7 +144,7 @@ export class HomePanel {
     const iconUri = this._panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, 'media', 'icon.png')
     );
-    this._panel.webview.html = this._getLoadingHtml(iconUri.toString());
+    this._panel.webview.html = this._getLoadingHtml(iconUri.toString(), this._version);
     void this._update();
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
     // Re-check installation whenever the panel becomes visible again.
@@ -155,9 +167,9 @@ export class HomePanel {
     homeWatcher.onDidCreate(() => void this._update(), null, this._disposables);
     homeWatcher.onDidDelete(() => void this._update(), null, this._disposables);
     this._disposables.push(homeWatcher);
-    this._panel.webview.onDidReceiveMessage(msg => {
+    this._panel.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'gatewayAction') {
-        void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
+        void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart' | 'reboot');
       } else if (msg.command === 'checkVersion') {
         void this._checkLatestVersion();
       } else if (msg.command === 'runUpdate') {
@@ -194,6 +206,12 @@ export class HomePanel {
         } else {
           vscode.commands.executeCommand('vscode.open', vscode.Uri.file(LOG_PATH));
         }
+      } else if (msg.command === 'localSetupCommand') {
+        const { step } = msg;
+        void this._handleLocalSetupStep(step);
+      } else if (msg.command === 'occ.setup.reset') {
+        const { full } = msg;
+        void vscode.commands.executeCommand('occ.setup.reset', { full });
       } else if (msg.command === 'openWorkspaceFile') {
         const allowed = new Set(['AGENTS.md', 'IDENTITY.md', 'USER.md', 'MEMORY.md', 'SOUL.md', 'HEARTBEAT.md']);
         const file = msg.file as string;
@@ -260,8 +278,42 @@ export class HomePanel {
         try {
           this._panel.webview.postMessage({ type: 'dockerDefaultPath', path: HomePanel.getDefaultOpenClawDataPath() });
         } catch { /* non-fatal */ }
+      } else if (msg.command === 'dockerLoadEnv') {
+        try {
+          // Read existing .env from docker directory
+          const envPath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', '.env');
+          let dataPath = '';
+          let gatewayPort = '18789';
+          if (fs.existsSync(envPath)) {
+            const content = fs.readFileSync(envPath, 'utf-8');
+            const dataDirMatch = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
+            const portMatch = content.match(/^GATEWAY_PORT=(.+)$/m);
+            if (dataDirMatch?.[1]) dataPath = dataDirMatch[1].trim();
+            if (portMatch?.[1]) gatewayPort = portMatch[1].trim();
+          }
+          this._panel.webview.postMessage({ type: 'dockerEnvLoaded', dataPath, gatewayPort });
+        } catch { /* non-fatal */ }
+      } else if (msg.command === 'dockerSaveEnv') {
+        try {
+          const dataPath = msg.dataPath as string;
+          const gatewayPort = msg.gatewayPort as string;
+          const envPath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', '.env');
+          let content = '';
+          if (fs.existsSync(envPath)) {
+            // Preserve existing content, update only our vars
+            content = fs.readFileSync(envPath, 'utf-8');
+            content = content.replace(/^OPENCLAW_DATA_DIR=.*$/m, `OPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}`);
+            content = content.replace(/^GATEWAY_PORT=.*$/m, `GATEWAY_PORT=${gatewayPort || '18789'}`);
+            if (!content.includes('OPENCLAW_DATA_DIR=')) content += `\nOPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}`;
+            if (!content.includes('GATEWAY_PORT=')) content += `\nGATEWAY_PORT=${gatewayPort || '18789'}`;
+          } else {
+            content = `OPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}\nGATEWAY_PORT=${gatewayPort || '18789'}\n`;
+          }
+          fs.writeFileSync(envPath, content, 'utf-8');
+        } catch { /* non-fatal */ }
       } else if (msg.command === 'dockerRunDoctor') {
         const dataPath = msg.dataPath as string || HomePanel.getDefaultOpenClawDataPath();
+        const gatewayPort = msg.gatewayPort as string | undefined;
         const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
         // Show spinner on all items first
         post({ type: 'doctorUpdate', items: [
@@ -273,18 +325,35 @@ export class HomePanel {
         // Store runtime for provisioning
         (this as any)._dockerRuntime = result.runtime ?? 'docker';
         (this as any)._dockerDataPath = dataPath;
+        (this as any)._dockerGatewayPort = gatewayPort;
       } else if (msg.command === 'dockerProvision') {
         const dataPath = (msg.dataPath as string) || (this as any)._dockerDataPath || HomePanel.getDefaultOpenClawDataPath();
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
+        const gatewayPort = (msg.gatewayPort as string) || (this as any)._dockerGatewayPort;
         const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
-        void HomePanel.runDockerProvision(post, dataPath, this._extensionUri.fsPath, runtime)
+        void HomePanel.runDockerProvision(post, dataPath, this._extensionUri.fsPath, runtime, gatewayPort)
           .then(() => {
-            // Re-check if openclaw is now configured
-            setTimeout(() => void this._update(), 2000);
+            // AI config panel is shown by the webview JS on provisionStatus done:ok.
+            // _update() is called after AI config is saved or skipped.
+            // Auto-open the web control panel after a short delay (guarded to prevent double-open).
+            if (!this._dashboardAutoOpened) {
+              this._dashboardAutoOpened = true;
+              setTimeout(() => void vscode.commands.executeCommand('openclaw.configure'), 2000);
+            }
           });
+      } else if (msg.command === 'saveAiConfig') {
+        const provider = msg.provider as string;
+        const apiKey = msg.apiKey as string;
+        void this._saveAiConfig(provider, apiKey);
+      } else if (msg.command === 'skipAiConfig') {
+        void this._skipAiConfig();
       } else if (msg.command === 'dockerCancel') {
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
         void HomePanel.runDockerTeardown(this._extensionUri.fsPath, runtime);
+      } else if (msg.command === 'backToHostPicker') {
+        this._setupFor = null;
+        this._setupHtmlShown = false;
+        void this._update();
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
         // Best-effort: close files from the other host's dir (non-blocking).
@@ -307,11 +376,12 @@ export class HomePanel {
     }, null, this._disposables);
   }
 
-  public static createOrShow(extensionUri: vscode.Uri, forcePicker = false) {
+  public static createOrShow(extensionUri: vscode.Uri, forcePicker = false, setupFor?: 'docker' | 'local') {
     if (HomePanel.currentPanel) {
       if (forcePicker) { HomePanel.currentPanel._forcePicker = true; }
+      if (setupFor !== undefined) { HomePanel.currentPanel._setupFor = setupFor; HomePanel.currentPanel._setupHtmlShown = false; }
       HomePanel.currentPanel._panel.reveal();
-      if (forcePicker) { void HomePanel.currentPanel._update(); }
+      if (forcePicker || setupFor !== undefined) { void HomePanel.currentPanel._update(); }
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -320,7 +390,7 @@ export class HomePanel {
         vscode.Uri.joinPath(extensionUri, 'media'),
       ] }
     );
-    HomePanel.currentPanel = new HomePanel(panel, extensionUri, forcePicker);
+    HomePanel.currentPanel = new HomePanel(panel, extensionUri, forcePicker, setupFor);
   }
 
   /** Push a live balance update to the webview popover — called from extension.ts balance poller. */
@@ -433,13 +503,25 @@ export class HomePanel {
         const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
         if (Number.isFinite(n) && n > 0 && n < 65536) { localPort = n; }
       } catch { /* use default */ }
-      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort);
+      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort, this._version);
+      return;
+    }
+
+    // Docker/Local setup wizard: setupFor is explicitly set by the user choosing
+    // Docker or Local from the host picker. Show the setup wizard regardless of
+    // whether there's an existing config - the user explicitly wants to set up that host.
+    // Only render once — subsequent _update() calls (from onDidChangeViewState,
+    // polling, etc.) must NOT replace the HTML or they'll reset in-progress
+    // wizard navigation state (panel-docker-path, panel-docker-doctor, etc.).
+    if (this._setupFor !== null && !this._setupHtmlShown) {
+      this._setupHtmlShown = true;
+      this._panel.webview.html = this._getSetupHtml(isInstalled, iconUri.toString(), occUser, this._setupFor);
       return;
     }
 
     // Show unified setup view when OpenClaw is not fully configured yet.
     if (!isConfigured) {
-      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
+      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString(), this._version);
       this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
       // Local is configured and Docker is not running — show local status.
@@ -467,7 +549,7 @@ export class HomePanel {
         }
       } catch { /* openclaw.json unreadable or missing fields */ }
 
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
+      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName, this._version);
       // One-shot version check: fires the first time the user lands on the full dashboard.
       // If the installed version is outdated, MoltPilot auto-starts the update.
       if (!this._autoUpdateTriggered) {
@@ -612,15 +694,28 @@ export class HomePanel {
    * or the timeout expires. Streams live status updates to the webview while
    * waiting so the UI stays accurate (still "Starting…" etc.).
    */
-  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart'): Promise<void> {
+  private async _handleGatewayAction(action: 'start' | 'stop' | 'restart' | 'reboot'): Promise<void> {
     const intermediary: GatewayStatus =
-      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
+      action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'rebooting';
     const expectedState: GatewayStatus = action === 'stop' ? 'stopped' : 'running';
 
     this._commandAction = action;
     try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
 
-    // Hand off to AI — it will run the command and handle any errors
+    // Hand off to AI for start/stop/restart, but reboot is direct (machine goes down)
+    if (action === 'reboot') {
+      const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
+      this._outputChannel.appendLine(`[reboot] Initiating machine reboot on ${osInfo}`);
+      try {
+        await this._host.gatewayReboot(line => this._outputChannel.appendLine(line));
+      } catch (err) {
+        this._outputChannel.appendLine(`[reboot] Error: ${err}`);
+      }
+      this._commandAction = null;
+      try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: 'stopped' }); } catch {}
+      return;
+    }
+
     const verb = action === 'restart' ? 'restart' : action;
     const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
     const port = this._getConfiguredPort();
@@ -675,6 +770,119 @@ export class HomePanel {
       }
     };
     setTimeout(tick, 4000);
+  }
+
+  // ── Reset/Teardown handler ─────────────────────────────────────────────────
+  public async resetSetup(full: boolean = false): Promise<void> {
+    const dataDir = path.join(os.homedir(), '.openclaw');
+    const composePath = path.join(this._extensionUri.fsPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
+
+    // 1. Tear down Docker environment if it exists
+    try {
+      const resolvedCompose = fs.existsSync(composePath) ? fs.realpathSync(composePath) : null;
+      if (resolvedCompose) {
+        const cliCmd = 'docker';
+        await new Promise<void>((resolve, reject) => {
+          const args = ['compose', '-f', resolvedCompose, 'down'];
+          if (full) args.push('-v'); // also remove volumes
+          const child = cp.spawn(cliCmd, args, { stdio: 'ignore' });
+          child.on('close', code => code === 0 ? resolve() : reject(new Error(`docker compose down exited ${code}`)));
+          child.on('error', err => reject(err));
+        });
+      }
+    } catch (e) {
+      this._outputChannel.appendLine(`Docker teardown failed (non-fatal): ${e}`);
+    }
+
+    // 2. If full reset, remove data directory contents BUT preserve openclaw.json
+    if (full) {
+      try {
+        if (fs.existsSync(dataDir)) {
+          const configPath = path.join(dataDir, 'openclaw.json');
+          // Read and preserve openclaw.json
+          let savedConfig: string | null = null;
+          if (fs.existsSync(configPath)) {
+            savedConfig = fs.readFileSync(configPath, 'utf-8');
+          }
+          // Remove everything in the data directory
+          fs.rmSync(dataDir, { recursive: true, force: true });
+          // Recreate the directory and restore openclaw.json
+          fs.mkdirSync(dataDir, { recursive: true });
+          if (savedConfig) {
+            fs.writeFileSync(configPath, savedConfig, 'utf-8');
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // 3. Refresh panel to show wizard
+    void this._update();
+  }
+
+  // ── Local Setup step handler ───────────────────────────────────────────────
+  private async _handleLocalSetupStep(step: number): Promise<void> {
+    // Define commands per step
+    const home = os.homedir();
+    const commands: Record<number, { cmd: string; args?: string[]; cwd?: string; shell?: boolean }> = {
+      1: {
+        cmd: 'npm',
+        args: ['install', '-g', '@openclaw/cli'],
+        // May require sudo; we'll try without and if fails, show error
+      },
+      2: {
+        cmd: process.platform === 'win32' ? 'powershell' : 'bash',
+        args: process.platform === 'win32'
+          ? ['-Command', 'Start-Service -Name postgresql -ErrorAction SilentlyContinue']
+          : ['-c', `mkdir -p "${home}/.openclaw" && echo "{\\"gateway\\": {\\"host\\": \\"127.0.0.1\\", \\"port\\": 3001}}" > "${home}/.openclaw/openclaw.json"`],
+        shell: true
+      },
+      3: {
+        cmd: 'git',
+        args: ['clone', '--depth', '1', 'https://github.com/openclaw/backend', path.join(home, '.openclaw', 'backend')],
+        cwd: home
+      },
+      4: {
+        cmd: process.platform === 'win32' ? 'cmd' : 'open',
+        args: process.platform === 'win32'
+          ? ['/c', 'start', '"OCcode"', path.join(home, '.openclaw', 'backend', 'README.md')]
+          : ['-a', 'TextEdit'], // placeholder; could launch editor script
+        shell: false
+      }
+    };
+
+    const { cmd, args = [], cwd } = commands[step] || { cmd: '' };
+    if (!cmd) return;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = cp.spawn(cmd, args, {
+          cwd: cwd || os.homedir(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: process.platform === 'win32' // use shell on Windows for built-in commands
+        });
+        let output = '';
+        child.stdout?.on('data', (d: Buffer) => {
+          output += d.toString();
+          this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
+        });
+        child.stderr?.on('data', (d: Buffer) => {
+          output += d.toString();
+          this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
+        });
+        child.on('close', code => {
+          if (code === 0) {
+            this._panel.webview.postMessage({ type: 'localStatus', step, status: 'done' });
+            resolve();
+          } else {
+            reject(new Error(`Command exited with code ${code}`));
+          }
+        });
+        child.on('error', err => reject(err));
+      });
+    } catch (err) {
+      this._panel.webview.postMessage({ type: 'localStatus', step, status: 'failed' });
+      this._outputChannel.appendLine(`Local setup step ${step} failed: ${err}`);
+    }
   }
 
   // ── Version check ──────────────────────────────────────────────────────────
@@ -797,7 +1005,117 @@ export class HomePanel {
     } catch { /* ignore */ }
   }
 
-  private _getHostsOverviewHtml(iconUri: string, localPort: number): string {
+  // ── AI Config after Docker provision ─────────────────────────────
+
+  /**
+   * Writes the selected AI provider and API key into openclaw.json,
+   * then transitions to the IDE experience.
+   */
+  private async _saveAiConfig(provider: string, apiKey: string): Promise<void> {
+    const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    try {
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      }
+
+      // Provider model defaults
+      const defaultModels: Record<string, string> = {
+        anthropic: 'anthropic/claude-sonnet-4-20250514',
+        openai: 'openai/gpt-4.1',
+        google: 'google/gemini-2.5-pro',
+        groq: 'groq/llama-3.3-70b-versatile',
+        openrouter: 'openrouter/anthropic/claude-sonnet-4-20250514',
+      };
+
+      // Ensure models.providers structure exists
+      const models = (config['models'] as Record<string, unknown> | undefined) ?? {};
+      const providers = (models['providers'] as Record<string, unknown> | undefined) ?? {};
+
+      // Add the selected provider's API key
+      providers[provider] = { apiKey };
+      models['providers'] = providers;
+      config['models'] = models;
+
+      // Set the primary model
+      const agents = (config['agents'] as Record<string, unknown> | undefined) ?? {};
+      const defaults = (agents['defaults'] as Record<string, unknown> | undefined) ?? {};
+      const model = (defaults['model'] as Record<string, string> | undefined) ?? {};
+      model['primary'] = defaultModels[provider] ?? `${provider}/default`;
+      defaults['model'] = model;
+      agents['defaults'] = defaults;
+      config['agents'] = agents;
+
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      writeLog(`[ai-config] saved provider=${provider}\n`);
+    } catch (err) {
+      writeLog(`[ai-config] failed to save: ${err}\n`);
+    }
+
+    void this._transitionToIde(true);
+  }
+
+  /**
+   * Skips AI configuration and proceeds to the IDE experience.
+   */
+  private async _skipAiConfig(): Promise<void> {
+    writeLog('[ai-config] skipped by user\n');
+    void this._transitionToIde(false);
+  }
+
+   /**
+    * After setup is complete (Docker running + AI configured or skipped),
+    * transition the user into the actual IDE experience:
+    *  1. Close the OCC Home panel
+    *  2. Open the OpenClaw workspace folder (from openclaw.json)
+    *  3. Open the AI chat sidebar (only if AI was configured)
+    *
+    * @param aiConfigured - true if the user configured an AI provider
+    */
+   private async _transitionToIde(aiConfigured: boolean): Promise<void> {
+     // Verify Docker is running
+     let dockerRunning = false;
+     try {
+       const dc = cp.spawnSync(
+         'docker',
+         ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
+         { timeout: 3000, windowsHide: true },
+       );
+       const st = (dc.stdout?.toString() ?? '').trim();
+       dockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
+     } catch { /* docker not available */ }
+
+     if (!dockerRunning) {
+       writeLog('[ide-transition] docker not running, falling back to _update()\n');
+       setTimeout(() => void this._update(), 500);
+       return;
+     }
+
+     // Close the Home panel
+     this.dispose();
+
+     // Open the workspace folder from openclaw.json if configured
+     const workspaceDir = getOpenClawWorkspaceDir();
+     if (fs.existsSync(workspaceDir)) {
+       try {
+         await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(workspaceDir), { forceNewWindow: false });
+       } catch { /* non-fatal — sidebar still opens */ }
+     }
+
+     // Open the AI chat sidebar only if AI was configured
+     if (aiConfigured) {
+       try {
+         await vscode.commands.executeCommand('workbench.view.extension.void');
+         // Show a welcome notification in the editor
+         void vscode.window.showInformationMessage(
+           'OpenClaw is ready! Start chatting with your AI assistant in the sidebar.',
+           { modal: false },
+         );
+       } catch { /* sidebar view may not be registered yet */ }
+     }
+   }
+
+  private _getHostsOverviewHtml(iconUri: string, localPort: number, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -811,7 +1129,8 @@ export class HomePanel {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       min-height: 100vh; padding: 32px 20px 48px; text-align: center;
     }
-    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 12px; }
+    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 4px; }
+    .version-label { font-size: 11px; color: #555; margin-bottom: 12px; letter-spacing: 0.03em; }
     h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
     h1 .accent { color: #dc2828; }
     .tagline { color: #666; font-size: 12px; margin-bottom: 32px; }
@@ -855,6 +1174,7 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>OCC <span class="accent">Home</span></h1>
   <p class="tagline">Choose a host to open</p>
 
@@ -937,7 +1257,7 @@ export class HomePanel {
 </html>`;
   }
 
-  private _getHostTypeSelectionHtml(iconUri: string): string {
+  private _getHostTypeSelectionHtml(iconUri: string, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -954,9 +1274,10 @@ export class HomePanel {
     }
     .logo {
       width: clamp(44px,10vw,68px); height: clamp(44px,10vw,68px);
-      margin-bottom: clamp(10px,2.5vw,16px);
+      margin-bottom: clamp(4px,1vw,6px);
       filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); flex-shrink: 0;
     }
+    .version-label { font-size: 11px; color: #555; margin-bottom: clamp(10px,2vw,14px); letter-spacing: 0.03em; }
     h1 { font-size: clamp(17px,4vw,26px); font-weight: 700; color: #fff; margin-bottom: 6px; line-height: 1.2; }
     h1 .accent { color: #dc2828; }
     .tagline { color: #666; font-size: clamp(11px,2.5vw,13px); margin-bottom: clamp(24px,5vw,40px); max-width: 44ch; line-height: 1.5; }
@@ -996,11 +1317,12 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to <span class="accent">OpenClaw</span></h1>
   <p class="tagline">Choose where OpenClaw runs. You can always switch later.</p>
   <div class="cards">
 
-    <button class="card" onclick="pick('local')">
+    <button class="card" data-card="local" onclick="pick('local')">
       <div class="card-header">
         <span class="card-icon">💻</span>
       </div>
@@ -1015,7 +1337,7 @@ export class HomePanel {
       </ul>
     </button>
 
-    <button class="card" onclick="pick('docker')">
+    <button class="card" data-card="docker" onclick="pick('docker')">
       <div class="card-header">
         <span class="card-icon">🐳</span>
         <span class="badge-rec">Recommended</span>
@@ -1031,7 +1353,7 @@ export class HomePanel {
       </ul>
     </button>
 
-    <button class="card disabled" title="Coming soon" onclick="return false">
+    <button class="card disabled" data-card="ssh" title="Coming soon" onclick="return false">
       <div class="card-header">
         <span class="card-icon">🌐</span>
         <span class="badge-soon">Soon</span>
@@ -1057,7 +1379,7 @@ export class HomePanel {
 </html>`;
   }
 
-  private _getLoadingHtml(iconUri: string): string {
+  private _getLoadingHtml(iconUri: string, version: string): string {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -1081,11 +1403,12 @@ export class HomePanel {
     .logo {
       width: clamp(56px, 14vw, 96px);
       height: clamp(56px, 14vw, 96px);
-      margin-bottom: clamp(14px, 3vw, 24px);
+      margin-bottom: clamp(4px, 1vw, 8px);
       filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3));
       animation: pulse 2s ease-in-out infinite;
       flex-shrink: 0;
     }
+    .version-label { font-size: 11px; color: #555; margin-bottom: clamp(12px, 2.5vw, 20px); letter-spacing: 0.03em; }
     @keyframes pulse {
       0%, 100% { opacity: 1; filter: drop-shadow(0 4px 12px rgba(220, 40, 40, 0.3)); }
       50% { opacity: 0.75; filter: drop-shadow(0 4px 20px rgba(220, 40, 40, 0.6)); }
@@ -1144,6 +1467,7 @@ export class HomePanel {
 </head>
 <body>
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <p class="version-label">v${version}</p>
   <h1>Welcome to OpenClaw <span class="accent">Code</span></h1>
   <p class="tagline">Cursor for OpenClaw</p>
   <div class="spinner-wrap">
@@ -1327,7 +1651,7 @@ export class HomePanel {
     // Phase 2 — Hand off to MoltPilot for AI-assisted installation
     // ══════════════════════════════════════════════════════════════════════════
 
-    post({ type: 'wizardLog', text: '\n✅ Download complete — handing off to MoltPilot for installation...\n', done: true, ok: true });
+    post({ type: 'wizardLog', text: '\n✅ Download complete — handing off to AI assistant for installation...\n', done: true, ok: true });
 
     const binaryName = isWin ? 'cass.exe' : 'cass';
     const handoffMessage = isWin
@@ -1365,10 +1689,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
 
-private _getSetupHtml(
+ private _getSetupHtml(
     isInstalled: boolean,
     iconUri: string,
-    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null
+    occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
+    setupFor: 'docker' | 'local' | null = null
   ): string {
     // Render user area statically (avoids JS innerHTML escaping issues)
     let userAreaHtml: string;
@@ -1431,6 +1756,12 @@ private _getSetupHtml(
       min-height: 100vh; padding: 32px 20px 40px; text-align: center;
     }
 
+    /* Focus styles for keyboard navigation */
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid #7c8cf8;
+      outline-offset: 2px;
+    }
+
     /* ── Header ── */
     .header-bar {
       position: fixed; top: 12px; right: 12px; z-index: 200;
@@ -1452,6 +1783,11 @@ private _getSetupHtml(
       padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: background 0.15s;
     }
     .sign-in-btn:hover { background: rgba(220,40,40,0.16); }
+    .reset-setup-btn {
+      font-size: 11px; color: #888; background: transparent; border: none;
+      cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    }
+    .reset-setup-btn:hover { color: #fff; background: rgba(255,255,255,0.06); }
     .user-popover-wrap { position: relative; }
     .user-popover {
       display: none; position: absolute; top: calc(100% + 8px); right: 0;
@@ -1675,8 +2011,13 @@ private _getSetupHtml(
   </style>
 </head>
 <body>
+  <!-- Skip link for accessibility -->
+  <a href="#main-content" class="skip-link" style="position:absolute;top:-40px;left:0;padding:8px;background:#fff;color:#000;z-index:2000;transition:top .2s;">Skip to content</a>
   <!-- Header -->
-  <div class="header-bar">${userAreaHtml}</div>
+  <div class="header-bar">
+    ${userAreaHtml}
+    <button class="reset-setup-btn" onclick="confirmResetSetup()" title="Reset setup to factory defaults">Reset Setup</button>
+  </div>
 
   <!-- Logo + title -->
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
@@ -1684,14 +2025,14 @@ private _getSetupHtml(
   <div class="setup-sub">Follow the steps below to get started</div>
 
   <!-- Step timeline -->
-  <div class="steps" id="steps-timeline">
-    <div class="step-item ${isInstalled ? 'done' : 'active'}" id="step-install">
-      <div class="step-dot">${isInstalled ? '✓' : '1'}</div>
-      <div class="step-label-text">Install<br>OpenClaw</div>
+  <div class="steps" id="main-content" tabindex="-1">
+    <div class="step-item ${setupFor === 'docker' ? 'done' : (isInstalled ? 'done' : 'active')}" id="step-install">
+      <div class="step-dot">${setupFor === 'docker' ? '✓' : (isInstalled ? '✓' : '1')}</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Docker<br>Selected' : 'Install<br>OpenClaw'}</div>
     </div>
-    <div class="step-item ${isInstalled ? 'active' : 'pending'}" id="step-configure">
-      <div class="step-dot">2</div>
-      <div class="step-label-text">Configure<br>AI Model</div>
+    <div class="step-item ${setupFor === 'docker' ? 'active' : (isInstalled ? 'active' : 'pending')}" id="step-configure">
+      <div class="step-dot">${setupFor === 'docker' ? '2' : '2'}</div>
+      <div class="step-label-text">${setupFor === 'docker' ? 'Provision<br>Compose' : 'Configure<br>AI Model'}</div>
     </div>
     <div class="step-item pending" id="step-ready">
       <div class="step-dot">3</div>
@@ -1699,8 +2040,9 @@ private _getSetupHtml(
     </div>
   </div>
 
-  <!-- Panel A0: Bootstrap choice (shown first when not installed) -->
-  <div class="panel" id="panel-bootstrap-choice" style="display:${isInstalled ? 'none' : 'flex'};flex-direction:column;align-items:center;gap:14px;">
+  <!-- Panel A0: Bootstrap choice (shown first when not installed, hidden for docker direct flow) -->
+  <div class="panel" id="panel-bootstrap-choice" style="display:${setupFor === 'docker' ? 'none' : (isInstalled ? 'none' : 'flex')};flex-direction:column;align-items:center;gap:14px;">
+    <button class="btn-back" onclick="goBack()">← Back</button>
     <div class="panel-title" style="margin-bottom:2px;">How would you like to set up OpenClaw?</div>
     <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">Choose your installation method. Docker is recommended for a consistent, isolated environment.</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;width:100%;max-width:380px;">
@@ -1712,7 +2054,7 @@ private _getSetupHtml(
       <button class="setup-choice-card" id="btn-choose-local" onclick="chooseLocal()">
         <span style="font-size:28px;">💻</span>
         <span class="setup-choice-title">Local Setup</span>
-        <span class="setup-choice-sub">Advanced · Install directly on host</span>
+        <span class="setup-choice-sub">Advanced · Manual on-host install</span>
       </button>
     </div>
   </div>
@@ -1734,6 +2076,11 @@ private _getSetupHtml(
     <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
       <input type="text" id="docker-path-input" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:13px;padding:10px 14px;font-family:monospace;outline:none;" placeholder="~/Desktop/occ/.openclaw" />
       <div style="font-size:11px;color:#555;text-align:center;">A shortcut will also be created at <code style="color:#888;">~/Desktop/occ</code></div>
+      <div class="port-row" style="margin-top:8px;">
+        <span class="port-label">Gateway port</span>
+        <input id="docker-port-input" class="port-input" type="text" value="18789" placeholder="18789" style="width:100px;" />
+        <span style="font-size:11px;color:#555;">(auto)</span>
+      </div>
     </div>
     <button class="btn-primary" onclick="confirmDockerPath()">
       Continue →
@@ -1744,16 +2091,110 @@ private _getSetupHtml(
   <div class="panel" id="panel-docker-doctor" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:400px;width:100%;">
     <div class="panel-title" style="margin-bottom:2px;">Checking Requirements</div>
     <div id="doctor-checklist" style="width:100%;display:flex;flex-direction:column;gap:6px;"></div>
-    <div id="doctor-install-guide" style="display:none;width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;font-size:12px;color:#ccc;line-height:1.7;"></div>
+    <div id="doctor-install-guide" role="status" aria-live="polite" style="display:none;width:100%;background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:14px;font-size:12px;color:#ccc;line-height:1.7;"></div>
     <div id="doctor-actions" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:4px;"></div>
   </div>
 
   <!-- Panel Docker: Provisioning -->
-  <div class="panel" id="panel-docker-provision" style="display:none;flex-direction:column;align-items:center;gap:10px;max-width:420px;width:100%;">
+  <div class="panel" id="panel-docker-provision" style="display:${setupFor === 'docker' ? 'flex' : 'none'};flex-direction:column;align-items:center;gap:10px;max-width:420px;width:100%;">
     <div class="panel-title" style="margin-bottom:2px;">Starting Docker Environment</div>
     <div id="provision-log" style="width:100%;height:180px;overflow-y:auto;background:#0d0d0d;border:1px solid #222;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#a0a0a0;white-space:pre-wrap;word-break:break-all;"></div>
-    <div id="provision-status" style="font-size:12px;color:#888;text-align:center;"></div>
-    <div id="provision-actions" style="display:none;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
+    <div id="provision-status" role="status" aria-live="polite" style="font-size:12px;color:#888;text-align:center;"></div>
+    <div id="provision-actions" style="display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;justify-content:center;"></div>
+  </div>
+
+  <!-- Panel: AI Config (shown after Docker provision succeeds) -->
+  <div class="panel" id="panel-ai-config" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:420px;width:100%;">
+    <div class="panel-title" style="margin-bottom:2px;">Configure AI Model</div>
+    <div class="panel-desc">Select your AI provider and enter your API key to power agent conversations.</div>
+    <div style="width:100%;display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <div class="field-label">Provider</div>
+        <select id="ai-provider-select" style="width:100%;background:#111;border:1px solid #2b2b2b;border-radius:6px;color:#e0e0e0;font-size:13px;padding:9px 12px;outline:none;box-sizing:border-box;cursor:pointer;" onchange="onAiConfigChange()">
+          <option value="">Select a provider...</option>
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="openai">OpenAI</option>
+          <option value="google">Google Gemini</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+      </div>
+      <div>
+        <div class="field-label">API Key</div>
+        <div style="position:relative;">
+          <input id="ai-api-key" class="key-input" type="password" placeholder="Enter your API key" autocomplete="off" oninput="onAiConfigChange()" style="padding-right:40px;" />
+          <button id="ai-key-toggle" onclick="toggleAiKeyVisibility()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px;" type="button">&#x1F441;</button>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row" style="width:100%;justify-content:space-between;">
+      <button class="btn-link" onclick="skipAiConfig()">Skip for now</button>
+      <button class="btn-primary" id="btn-finish-setup" onclick="saveAiConfig()" disabled>Finish Setup</button>
+    </div>
+  </div>
+
+  <!-- Panel Local: Multi-step setup guide -->
+  <div class="panel" id="panel-local-setup" style="display:none;flex-direction:column;align-items:center;gap:12px;max-width:420px;width:100%;">
+    <button class="btn-link" style="margin-bottom:-4px;align-self:flex-start;" onclick="showBootstrapChoice()">← Back</button>
+    <div class="panel-title" style="margin-bottom:2px;">Local Development Setup</div>
+    <div class="panel-desc" style="color:#a0a0a0;font-size:12px;text-align:center;max-width:300px;line-height:1.5;">For developers who want to run services directly on the host. Follow these steps in order.</div>
+    <div id="local-steps" style="width:100%;display:flex;flex-direction:column;gap:8px;">
+      <!-- Step 1 -->
+      <div class="local-step" id="local-step-1">
+        <div class="local-step-header" onclick="toggleLocalStep(1)">
+          <span class="local-step-num">1</span>
+          <span class="local-step-title">Install OpenClaw CLI</span>
+          <span class="local-step-status" id="local-status-1">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Runs <code>npm install -g @openclaw/cli</code>. Requires Node.js 20+ and sudo/administrator rights.</div>
+          <button class="btn-primary" id="btn-local-1" onclick="runLocalStep(1)">Run</button>
+          <div id="local-log-1" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 2 -->
+      <div class="local-step" id="local-step-2">
+        <div class="local-step-header" onclick="toggleLocalStep(2)">
+          <span class="local-step-num">2</span>
+          <span class="local-step-title">Start Database (PostgreSQL)</span>
+          <span class="local-step-status" id="local-status-2">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Starts PostgreSQL service and creates <code>openclaw</code> database. Requires <code>sudo</code> on Linux/macOS or Administrator on Windows.</div>
+          <button class="btn-primary" id="btn-local-2" onclick="runLocalStep(2)">Run</button>
+          <div id="local-log-2" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 3 -->
+      <div class="local-step" id="local-step-3">
+        <div class="local-step-header" onclick="toggleLocalStep(3)">
+          <span class="local-step-num">3</span>
+          <span class="local-step-title">Run Backend API</span>
+          <span class="local-step-status" id="local-status-3">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Clones and starts the OpenClaw backend (or runs a local mock). This may take a minute.</div>
+          <button class="btn-primary" id="btn-local-3" onclick="runLocalStep(3)">Run</button>
+          <div id="local-log-3" class="local-log"></div>
+        </div>
+      </div>
+      <!-- Step 4 -->
+      <div class="local-step" id="local-step-4">
+        <div class="local-step-header" onclick="toggleLocalStep(4)">
+          <span class="local-step-num">4</span>
+          <span class="local-step-title">Launch Editor</span>
+          <span class="local-step-status" id="local-status-4">Pending</span>
+        </div>
+        <div class="local-step-body">
+          <div class="local-step-desc">Starts the OCcode editor and connects to the local backend.</div>
+          <button class="btn-primary" id="btn-local-4" onclick="runLocalStep(4)">Run</button>
+          <div id="local-log-4" class="local-log"></div>
+        </div>
+      </div>
+    </div>
+    <div id="local-final-actions" style="display:none;flex-direction:row;gap:10px;margin-top:8px;">
+      <button class="btn-primary" onclick="finishLocalSetup()">Go to Dashboard →</button>
+    </div>
   </div>
 
   <!-- Panel: Xcode CLI required (macOS only) -->
@@ -1783,7 +2224,7 @@ private _getSetupHtml(
     <div class="panel-desc">Choose how you want to power the AI gateway.</div>
     <button class="btn-primary" id="btn-start-free" onclick="chooseFree()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      Start Free
+      Create Account
     </button>
     <button class="btn-link" onclick="chooseBYOK()">Use my own API key →</button>
   </div>
@@ -1822,7 +2263,7 @@ private _getSetupHtml(
     <div class="log-status dots" id="log-status">Working</div>
     <button class="molt-help" id="molt-help" onclick="askMoltPilot()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-      Ask MoltPilot to fix this
+      Ask AI to fix this
     </button>
     <button class="molt-help" id="show-error-logs" onclick="cmd('openLogs');closeMoreMenu&&closeMoreMenu()">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
@@ -1887,6 +2328,20 @@ private _getSetupHtml(
     })();
     ` : ''}
 
+    // ── Auto-provision Docker (direct flow from Docker card) ───────
+    ${setupFor === 'docker' ? `
+    (function() {
+      var dataPath = '${HomePanel.getDefaultOpenClawDataPath()}';
+      setTimeout(function() {
+        var log = document.getElementById('provision-log');
+        if (log) log.textContent = '▶ Initializing Docker environment...\\n';
+        var status = document.getElementById('provision-status');
+        if (status) status.textContent = 'Preparing Docker compose…';
+        vscode.postMessage({ command: 'dockerProvision', dataPath: dataPath });
+      }, 400);
+    })();
+    ` : ''}
+
     // ── Install ────────────────────────────────────────────────────
     function startInstall() {
       document.getElementById('panel-install').style.display = 'none';
@@ -1903,7 +2358,7 @@ private _getSetupHtml(
     // ── Configure: choose mode ─────────────────────────────────────
     function chooseFree() {
       document.getElementById('panel-cfg-b0').style.display = 'none';
-      showLog('Installing Inference for MoltPilot...\\nInstalling Inference for your new OpenClaw...');
+      showLog('Installing Inference for your new OpenClaw...');
       vscode.postMessage({ command: 'runSetup', provider: 'free', apiKey: (_occUser && _occUser.api_keys && _occUser.api_keys.occKey) || '', port: '18789' });
     }
 
@@ -1955,6 +2410,11 @@ private _getSetupHtml(
       vscode.postMessage({ command: 'runSetup', provider: selectedProvider, apiKey: apiKey, port: port });
     }
 
+    // ── Back to host picker ────────────────────────────────────────
+    function goBack() {
+      vscode.postMessage({ command: 'backToHostPicker' });
+    }
+
     // ── Docker Bootstrap ───────────────────────────────────────────
     function showBootstrapChoice() {
       ['panel-install','panel-docker-path','panel-docker-doctor','panel-docker-provision','panel-xcode-required'].forEach(function(id) {
@@ -1964,36 +2424,95 @@ private _getSetupHtml(
     }
     function chooseLocal() {
       document.getElementById('panel-bootstrap-choice').style.display = 'none';
-      document.getElementById('panel-install').style.display = 'flex';
+      document.getElementById('panel-local-setup').style.display = 'flex';
     }
     function chooseDocker() {
       document.getElementById('panel-bootstrap-choice').style.display = 'none';
-      // Pre-fill default path
-      vscode.postMessage({ command: 'dockerGetDefaultPath' });
+      // Load existing .env values if present and pre-fill
+      vscode.postMessage({ command: 'dockerLoadEnv' });
       document.getElementById('panel-docker-path').style.display = 'flex';
     }
     function confirmDockerPath() {
       var pathVal = document.getElementById('docker-path-input').value.trim();
       if (!pathVal) pathVal = document.getElementById('docker-path-input').placeholder;
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      // Persist to .env immediately
+      vscode.postMessage({ command: 'dockerSaveEnv', dataPath: pathVal, gatewayPort: portVal });
       document.getElementById('panel-docker-path').style.display = 'none';
       document.getElementById('panel-docker-doctor').style.display = 'flex';
-      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal });
+      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerRetry() {
       document.getElementById('panel-docker-doctor').style.display = 'flex';
       document.getElementById('panel-docker-provision').style.display = 'none';
       var pathVal = document.getElementById('docker-path-input').value.trim() || document.getElementById('docker-path-input').placeholder;
-      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal });
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerProvision() {
       document.getElementById('panel-docker-doctor').style.display = 'none';
       document.getElementById('panel-docker-provision').style.display = 'flex';
       var pathVal = document.getElementById('docker-path-input').value.trim() || document.getElementById('docker-path-input').placeholder;
-      vscode.postMessage({ command: 'dockerProvision', dataPath: pathVal });
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      vscode.postMessage({ command: 'dockerProvision', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerCancel() {
       vscode.postMessage({ command: 'dockerCancel' });
       showBootstrapChoice();
+    }
+
+    // ── Local Setup helpers ───────────────────────────────────────────────
+    function toggleLocalStep(num) {
+      var body = document.querySelector('#local-step-' + num + ' .local-step-body');
+      if (body) { body.style.display = body.style.display === 'none' ? 'block' : 'none'; }
+    }
+
+    function runLocalStep(num) {
+      var statusEl = document.getElementById('local-status-' + num);
+      var logEl = document.getElementById('local-log-' + num);
+      var btn = document.getElementById('btn-local-' + num);
+      if (statusEl) statusEl.textContent = 'Running…';
+      if (btn) btn.disabled = true;
+      if (logEl) logEl.textContent = '';
+      // Stream logs via postMessage to extension, which will run the script
+      vscode.postMessage({ command: 'localSetupCommand', step: num });
+    }
+
+    function finishLocalSetup() {
+      vscode.postMessage({ command: 'openclaw.configure' });
+    }
+
+    // ── AI Config helpers ──────────────────────────────────────────
+    function toggleAiKeyVisibility() {
+      var inp = document.getElementById('ai-api-key');
+      var btn = document.getElementById('ai-key-toggle');
+      if (inp.type === 'password') {
+        inp.type = 'text';
+        btn.textContent = '\uD83D\uDC41\u200D\uD83D\uDDE8';
+      } else {
+        inp.type = 'password';
+        btn.textContent = '\uD83D\uDC41';
+      }
+    }
+
+    function onAiConfigChange() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var key = document.getElementById('ai-api-key').value.trim();
+      var btn = document.getElementById('btn-finish-setup');
+      if (btn) btn.disabled = !(provider && key.length >= 8);
+    }
+
+    function saveAiConfig() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var apiKey = document.getElementById('ai-api-key').value.trim();
+      if (!provider || !apiKey) return;
+      var btn = document.getElementById('btn-finish-setup');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spin"></span> Saving…'; }
+      vscode.postMessage({ command: 'saveAiConfig', provider: provider, apiKey: apiKey });
+    }
+
+    function skipAiConfig() {
+      vscode.postMessage({ command: 'skipAiConfig' });
     }
 
     // ── Log helpers ────────────────────────────────────────────────
@@ -2162,6 +2681,11 @@ private _getSetupHtml(
       if (d.type === 'dockerDefaultPath') {
         var inp = document.getElementById('docker-path-input');
         if (inp && !inp.value) inp.value = d.path;
+      } else if (d.type === 'dockerEnvLoaded') {
+        var pathInp = document.getElementById('docker-path-input');
+        var portInp = document.getElementById('docker-port-input');
+        if (pathInp && d.dataPath) pathInp.value = d.dataPath;
+        if (portInp && d.gatewayPort) portInp.value = d.gatewayPort;
       } else if (d.type === 'doctorUpdate') {
         var cl = document.getElementById('doctor-checklist');
         if (!cl) return;
@@ -2174,7 +2698,7 @@ private _getSetupHtml(
         var actions = document.getElementById('doctor-actions');
         actions.innerHTML = '';
         if (d.allPassed) {
-          actions.innerHTML = '<button class="btn-primary" onclick="dockerProvision()">🚀 Start Docker Environment</button>';
+          actions.innerHTML = '<button class="btn-primary" onclick="dockerProvision()">🚀 Retry Docker Environment</button>';
         } else if (d.canRetry) {
           actions.innerHTML = '<button class="btn-secondary" onclick="dockerRetry()">↻ Retry Check</button><button class="btn-link" onclick="showBootstrapChoice()">← Back</button>';
         }
@@ -2189,16 +2713,67 @@ private _getSetupHtml(
           if (pa) {
             pa.style.display = 'flex';
             if (d.ok) {
-              pa.innerHTML = '<button class="btn-primary" onclick="cmd(\'openclaw.configure\')">Open Dashboard →</button>';
+              // Hide provision panel, show AI config panel
+              document.getElementById('panel-docker-provision').style.display = 'none';
+              document.getElementById('panel-ai-config').style.display = 'flex';
+              document.getElementById('step-configure').className = 'step-item done';
+              document.getElementById('step-ready').className = 'step-item active';
             } else {
               pa.innerHTML = '<button class="btn-secondary" onclick="dockerRetry()">↻ Retry</button><button class="btn-link" onclick="showBootstrapChoice()">← Back</button>';
             }
           }
         }
+      } else if (d.type === 'localLog') {
+        var logEl = document.getElementById('local-log-' + d.step);
+        if (logEl) logEl.textContent += d.text;
+      } else if (d.type === 'localStatus') {
+        var statusEl = document.getElementById('local-status-' + d.step);
+        var btn = document.getElementById('btn-local-' + d.step);
+        if (statusEl) statusEl.textContent = d.status === 'done' ? 'Completed' : d.status === 'failed' ? 'Failed' : 'Running…';
+        if (btn) btn.disabled = d.status === 'running';
+        if (d.status === 'done' || d.status === 'failed') {
+          // Check if all steps are completed
+          [1,2,3,4].forEach(function(s) {
+            var el = document.getElementById('local-status-' + s);
+            if (el) el.textContent = el.textContent.trim();
+          });
+          var allDone = [1,2,3,4].every(function(s) {
+            var el = document.getElementById('local-status-' + s);
+            return el && (el.textContent === 'Completed' || el.textContent === 'Failed');
+          });
+          if (allDone) document.getElementById('local-final-actions').style.display = 'flex';
+        }
       }
     });
+
+    // Reset modal and helper functions
+    function confirmResetSetup() {
+      document.getElementById('reset-modal').style.display = 'flex';
+    }
+    function closeResetModal() {
+      document.getElementById('reset-modal').style.display = 'none';
+    }
+    function performFullReset() {
+      closeResetModal();
+      vscode.postMessage({ command: 'occ.setup.reset', full: true });
+    }
   </script>
-</body>
+
+    <!-- Reset Confirmation Modal -->
+    <div id="reset-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;">
+      <div class="modal-box" style="background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:20px;max-width:360px;width:90%;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,0.6);">
+        <div id="reset-modal-title" style="font-size:15px;font-weight:600;margin-bottom:8px;">Reset Setup?</div>
+        <div style="color:#aaa;font-size:12px;line-height:1.6;margin-bottom:16px;">
+          This will stop any running containers and remove the OpenClaw configuration.<br><br>
+          <strong style="color:#dc2828;">Warning:</strong> Checking "Also delete all data" will permanently delete your OpenClaw data directory and Docker volumes.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn-secondary" onclick="closeResetModal()" style="padding:8px 14px;border-radius:8px;border:1px solid #444;background:transparent;color:#ddd;cursor:pointer;">Cancel</button>
+          <button class="btn-primary" onclick="performFullReset()" style="padding:8px 14px;border-radius:8px;border:none;background:#dc2828;color:#fff;cursor:pointer;">Reset Everything</button>
+        </div>
+      </div>
+    </div>
+  </body>
 </html>`;
 }
 
@@ -2405,7 +2980,7 @@ private _getSetupHtml(
     <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
       <button class="btn-primary" id="btn-start-free" onclick="chooseFree()">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        Start Free
+        Create Account
       </button>
       <button class="btn-link" onclick="chooseBYOK()">Use my own API key →</button>
     </div>
@@ -2552,9 +3127,10 @@ private _getSetupHtml(
     occJwt: string = '',
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
     emojiBaseUri: string = '',
-    aiModelName = ''
+    aiModelName = '',
+    version = ''
   ): string {
-    return renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri, occJwt, occUser, emojiBaseUri, aiModelName);
+    return renderStatusHtml(isInstalled, dirExists, cliCheck, iconUri, occJwt, occUser, emojiBaseUri, aiModelName, 'local', version);
   }
 
 
@@ -2819,11 +3395,31 @@ private _getSetupHtml(
   // ── Docker Bootstrap ──────────────────────────────────────────────────────────
 
   /**
-   * Returns the default .openclaw data directory: ~/Desktop/occ/.openclaw
+   * Returns the default .openclaw data directory.
+   * Priority:
+   * 1. Read OPENCLAW_DATA_DIR from docker/.env.openclaw if it exists
+   * 2. Fall back to ~/Desktop/occ/.openclaw
    * This keeps OpenClaw data co-located with the OCC workspace on the Desktop,
    * making it easy to find and back up. Consistent across all platforms.
    */
   public static getDefaultOpenClawDataPath(): string {
+    // Try to read from docker/.env.openclaw first
+    const envPath = path.join(__dirname, '..', '..', '..', 'docker', '.env');
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, 'utf-8');
+        const match = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
+        if (match && match[1]?.trim()) {
+          const envValue = match[1].trim();
+          // Resolve relative paths (like ./openclaw_docker_data) relative to the workspace
+          if (!path.isAbsolute(envValue)) {
+            const workspaceRoot = path.join(__dirname, '..', '..', '..');
+            return path.resolve(workspaceRoot, envValue);
+          }
+          return envValue;
+        }
+      } catch { /* ignore errors, fall back to default */ }
+    }
     return path.join(os.homedir(), 'Desktop', 'occ', '.openclaw');
   }
 
@@ -2873,6 +3469,12 @@ private _getSetupHtml(
     guide?: string;
     runtime?: 'docker' | 'podman';
   }> {
+    // Check cache first (5-minute TTL)
+    const now = Date.now();
+    if (HomePanel._dockerDetectionCache && (now - HomePanel._dockerDetectionCache.timestamp) < HomePanel.DOCKER_DETECTION_TTL) {
+      return HomePanel._dockerDetectionCache.result;
+    }
+
     const items: Array<{ label: string; detail?: string; status: 'ok' | 'fail' | 'warn' | 'pending' }> = [];
     let allPassed = true;
     let guide: string | undefined;
@@ -2969,21 +3571,44 @@ private _getSetupHtml(
         : 'Docker Compose should be included with Docker Desktop. Please reinstall Docker Desktop.';
     }
 
-    return { items, allPassed, canRetry: !allPassed, guide, runtime };
+    const result = { items, allPassed, canRetry: !allPassed, guide, runtime };
+    // Cache the detection result for 5 minutes
+    HomePanel._dockerDetectionCache = { timestamp: Date.now(), result };
+    return result;
+  }
+
+  /**
+   * Finds an available port starting from the given port, checking up to maxPort.
+   * Returns the first available port, or defaultPort if none found.
+   */
+  public static async findAvailablePort(startPort: number, maxTries = 100): Promise<number> {
+    const net = await import('net');
+    for (let i = 0; i < maxTries; i++) {
+      const port = startPort + i;
+      const available = await new Promise<boolean>(resolve => {
+        const server = net.createServer();
+        server.once('error', () => resolve(false));
+        server.once('listening', () => { server.close(); resolve(true); });
+        server.listen(port, '127.0.0.1');
+      });
+      if (available) return port;
+    }
+    return startPort; // fallback to start port
   }
 
   /**
    * Runs `docker compose up -d` using the bundled compose file and streams output to the panel.
-   * Writes a .env file with OPENCLAW_DATA_DIR before running.
+   * Writes a .env file with OPENCLAW_DATA_DIR and GATEWAY_PORT before running.
    */
   public static async runDockerProvision(
     post: (msg: object) => void,
     dataPath: string,
     extensionPath: string,
     runtime: 'docker' | 'podman' = 'docker',
+    gatewayPort?: string,
   ): Promise<void> {
     const tee = (text: string) => { post({ type: 'provisionLog', text }); writeLog(text); };
-    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
+    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
 
     // Resolve real compose file path (handle symlinks/relative)
     let resolvedCompose = composeFile;
@@ -2991,7 +3616,7 @@ private _getSetupHtml(
 
     if (!fs.existsSync(resolvedCompose)) {
       // Fallback: look relative to extension directory
-      const altCompose = path.join(extensionPath, 'docker', 'docker-compose.full.yml');
+      const altCompose = path.join(extensionPath, 'docker', 'docker-compose.openclaw.yml');
       if (fs.existsSync(altCompose)) resolvedCompose = altCompose;
       else {
         post({ type: 'provisionStatus', text: '❌ Compose file not found. Cannot provision.', done: true, ok: false });
@@ -3007,22 +3632,55 @@ private _getSetupHtml(
     // Ensure data directory exists
     try { fs.mkdirSync(expandedDataPath, { recursive: true }); } catch { /* non-fatal */ }
 
+    // Determine effective port: use user-provided, or find an available one
+    const DEFAULT_PORT = 18789;
+    let effectivePort = DEFAULT_PORT;
+    if (gatewayPort && gatewayPort.trim()) {
+      const parsed = parseInt(gatewayPort.trim(), 10);
+      if (!isNaN(parsed) && parsed > 0 && parsed < 65536) {
+        effectivePort = parsed;
+      }
+    } else {
+      // Auto-select: check if default port is available, otherwise find next available
+      const available = await HomePanel.findAvailablePort(DEFAULT_PORT);
+      if (available !== DEFAULT_PORT) {
+        tee(`⚠️  Port ${DEFAULT_PORT} in use — auto-selected port ${available}\n`);
+        effectivePort = available;
+      }
+    }
+
     // Write .env file alongside compose
     const envFile = path.join(path.dirname(resolvedCompose), '.env');
-    try { fs.writeFileSync(envFile, `OPENCLAW_DATA_DIR=${expandedDataPath}\n`, 'utf8'); } catch { /* non-fatal */ }
+    const envContent = `OPENCLAW_DATA_DIR=${expandedDataPath}\nGATEWAY_PORT=${effectivePort}\n`;
+    try { fs.writeFileSync(envFile, envContent, 'utf8'); } catch { /* non-fatal */ }
 
     tee(`▶ Using compose file: ${resolvedCompose}\n`);
     tee(`▶ Data directory: ${expandedDataPath}\n`);
+    tee(`▶ Gateway port: ${effectivePort}\n`);
     tee(`▶ Runtime: ${runtime}\n\n`);
 
-    post({ type: 'provisionStatus', text: 'Pulling images (this may take a few minutes)…' });
+    post({ type: 'provisionStatus', text: 'Cleaning up any existing containers…' });
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
+    // Pass only OPENCLAW_DATA_DIR as env var - compose reads .env.openclaw via env_file directive
     const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath };
 
-    // Pull images first
-    const pullResult = await new Promise<number>(resolve => {
-      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'pull'], {
+    // Tear down any previous compose stack first (non-fatal — may not exist yet)
+    await new Promise<number>(resolve => {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'down'], {
+        env, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
+      child.stderr?.on('data', (d: Buffer) => tee(d.toString()));
+      child.on('close', code => resolve(code ?? 0)); // non-fatal, always resolve ok
+      child.on('error', () => resolve(0));
+    });
+
+    post({ type: 'provisionStatus', text: 'Building images (this may take a few minutes)…' });
+
+    // Build images (occ-gateway uses build: from Dockerfile.openclaw, not a registry image)
+    const buildResult = await new Promise<number>(resolve => {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'build'], {
         env, stdio: ['ignore', 'pipe', 'pipe'],
       });
       child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
@@ -3031,15 +3689,17 @@ private _getSetupHtml(
       child.on('error', err => { tee(`\nError: ${err.message}\n`); resolve(1); });
     });
 
-    if (pullResult !== 0) {
-      tee('\n⚠️  Image pull had warnings (may be ok if images are cached)\n');
+    if (buildResult !== 0) {
+      tee('\n❌ Image build failed.\n');
+      post({ type: 'provisionStatus', text: '❌ Failed to build images. See log above.', done: true, ok: false });
+      return;
     }
 
     tee('\n▶ Starting services…\n');
     post({ type: 'provisionStatus', text: 'Starting containers…' });
 
     const upResult = await new Promise<number>(resolve => {
-      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'up', '-d', '--remove-orphans'], {
+      const child = cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'up', '-d', '--build', '--remove-orphans'], {
         env, stdio: ['ignore', 'pipe', 'pipe'],
       });
       child.stdout?.on('data', (d: Buffer) => tee(d.toString()));
@@ -3058,7 +3718,7 @@ private _getSetupHtml(
     post({ type: 'provisionStatus', text: 'Waiting for gateway to become healthy…' });
 
     // Poll health for up to 60s
-    const gatewayUrl = 'http://127.0.0.1:18789/health';
+    const gatewayUrl = `http://127.0.0.1:${effectivePort}/health`;
     let healthy = false;
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 2000));
@@ -3080,9 +3740,9 @@ private _getSetupHtml(
     if (!fs.existsSync(openclawJson)) {
       try {
         fs.writeFileSync(openclawJson, JSON.stringify({
-          gateway: { host: '127.0.0.1', port: 18789 },
+          gateway: { host: '127.0.0.1', port: effectivePort },
         }, null, 2), 'utf8');
-        tee('✅ Created openclaw.json with gateway config\n');
+        tee(`✅ Created openclaw.json with gateway config (port ${effectivePort})\n`);
       } catch (e) {
         tee(`⚠️  Could not write openclaw.json: ${e}\n`);
       }
@@ -3097,15 +3757,17 @@ private _getSetupHtml(
   /**
    * Tears down the Docker environment: `docker compose down`.
    */
-  public static async runDockerTeardown(extensionPath: string, runtime: 'docker' | 'podman' = 'docker'): Promise<void> {
-    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.full.yml');
+  public static async runDockerTeardown(extensionPath: string, runtime: 'docker' | 'podman' = 'docker', volumes = false): Promise<void> {
+    const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
     let resolvedCompose = composeFile;
     try { resolvedCompose = fs.realpathSync(composeFile); } catch { /* use original */ }
     if (!fs.existsSync(resolvedCompose)) return;
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
+    const args = ['compose', '-f', resolvedCompose, 'down'];
+    if (volumes) args.push('-v');
     await new Promise<void>(resolve => {
-      cp.spawn(cliCmd, ['compose', '-f', resolvedCompose, 'down'], {
+      cp.spawn(cliCmd, args, {
         stdio: 'ignore',
       }).on('close', () => resolve()).on('error', () => resolve());
     });
