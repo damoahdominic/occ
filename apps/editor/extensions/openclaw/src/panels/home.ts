@@ -90,7 +90,7 @@ export class HomePanel {
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
   private _disposables: vscode.Disposable[] = [];
-  private _commandAction: 'start' | 'stop' | 'restart' | null = null;
+  private _commandAction: 'start' | 'stop' | 'restart' | 'reboot' | null = null;
   private _sidebarOpen = false; // tracks chat sidebar open state across webview reloads
   private _pollingTimer: ReturnType<typeof setInterval> | undefined;
   private readonly _outputChannel: vscode.OutputChannel;
@@ -278,8 +278,42 @@ export class HomePanel {
         try {
           this._panel.webview.postMessage({ type: 'dockerDefaultPath', path: HomePanel.getDefaultOpenClawDataPath() });
         } catch { /* non-fatal */ }
+      } else if (msg.command === 'dockerLoadEnv') {
+        try {
+          // Read existing .env from docker directory
+          const envPath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', '.env');
+          let dataPath = '';
+          let gatewayPort = '18789';
+          if (fs.existsSync(envPath)) {
+            const content = fs.readFileSync(envPath, 'utf-8');
+            const dataDirMatch = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
+            const portMatch = content.match(/^GATEWAY_PORT=(.+)$/m);
+            if (dataDirMatch?.[1]) dataPath = dataDirMatch[1].trim();
+            if (portMatch?.[1]) gatewayPort = portMatch[1].trim();
+          }
+          this._panel.webview.postMessage({ type: 'dockerEnvLoaded', dataPath, gatewayPort });
+        } catch { /* non-fatal */ }
+      } else if (msg.command === 'dockerSaveEnv') {
+        try {
+          const dataPath = msg.dataPath as string;
+          const gatewayPort = msg.gatewayPort as string;
+          const envPath = path.join(this._extensionUri.fsPath, '..', '..', '..', 'docker', '.env');
+          let content = '';
+          if (fs.existsSync(envPath)) {
+            // Preserve existing content, update only our vars
+            content = fs.readFileSync(envPath, 'utf-8');
+            content = content.replace(/^OPENCLAW_DATA_DIR=.*$/m, `OPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}`);
+            content = content.replace(/^GATEWAY_PORT=.*$/m, `GATEWAY_PORT=${gatewayPort || '18789'}`);
+            if (!content.includes('OPENCLAW_DATA_DIR=')) content += `\nOPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}`;
+            if (!content.includes('GATEWAY_PORT=')) content += `\nGATEWAY_PORT=${gatewayPort || '18789'}`;
+          } else {
+            content = `OPENCLAW_DATA_DIR=${dataPath || './openclaw_docker_data'}\nGATEWAY_PORT=${gatewayPort || '18789'}\n`;
+          }
+          fs.writeFileSync(envPath, content, 'utf-8');
+        } catch { /* non-fatal */ }
       } else if (msg.command === 'dockerRunDoctor') {
         const dataPath = msg.dataPath as string || HomePanel.getDefaultOpenClawDataPath();
+        const gatewayPort = msg.gatewayPort as string | undefined;
         const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
         // Show spinner on all items first
         post({ type: 'doctorUpdate', items: [
@@ -291,11 +325,13 @@ export class HomePanel {
         // Store runtime for provisioning
         (this as any)._dockerRuntime = result.runtime ?? 'docker';
         (this as any)._dockerDataPath = dataPath;
+        (this as any)._dockerGatewayPort = gatewayPort;
       } else if (msg.command === 'dockerProvision') {
         const dataPath = (msg.dataPath as string) || (this as any)._dockerDataPath || HomePanel.getDefaultOpenClawDataPath();
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
+        const gatewayPort = (msg.gatewayPort as string) || (this as any)._dockerGatewayPort;
         const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
-        void HomePanel.runDockerProvision(post, dataPath, this._extensionUri.fsPath, runtime)
+        void HomePanel.runDockerProvision(post, dataPath, this._extensionUri.fsPath, runtime, gatewayPort)
           .then(() => {
             // AI config panel is shown by the webview JS on provisionStatus done:ok.
             // _update() is called after AI config is saved or skipped.
@@ -2040,6 +2076,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     <div style="width:100%;display:flex;flex-direction:column;gap:8px;">
       <input type="text" id="docker-path-input" style="width:100%;box-sizing:border-box;background:#111;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:13px;padding:10px 14px;font-family:monospace;outline:none;" placeholder="~/Desktop/occ/.openclaw" />
       <div style="font-size:11px;color:#555;text-align:center;">A shortcut will also be created at <code style="color:#888;">~/Desktop/occ</code></div>
+      <div class="port-row" style="margin-top:8px;">
+        <span class="port-label">Gateway port</span>
+        <input id="docker-port-input" class="port-input" type="text" value="18789" placeholder="18789" style="width:100px;" />
+        <span style="font-size:11px;color:#555;">(auto)</span>
+      </div>
     </div>
     <button class="btn-primary" onclick="confirmDockerPath()">
       Continue →
@@ -2387,28 +2428,33 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     }
     function chooseDocker() {
       document.getElementById('panel-bootstrap-choice').style.display = 'none';
-      // Pre-fill default path
-      vscode.postMessage({ command: 'dockerGetDefaultPath' });
+      // Load existing .env values if present and pre-fill
+      vscode.postMessage({ command: 'dockerLoadEnv' });
       document.getElementById('panel-docker-path').style.display = 'flex';
     }
     function confirmDockerPath() {
       var pathVal = document.getElementById('docker-path-input').value.trim();
       if (!pathVal) pathVal = document.getElementById('docker-path-input').placeholder;
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      // Persist to .env immediately
+      vscode.postMessage({ command: 'dockerSaveEnv', dataPath: pathVal, gatewayPort: portVal });
       document.getElementById('panel-docker-path').style.display = 'none';
       document.getElementById('panel-docker-doctor').style.display = 'flex';
-      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal });
+      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerRetry() {
       document.getElementById('panel-docker-doctor').style.display = 'flex';
       document.getElementById('panel-docker-provision').style.display = 'none';
       var pathVal = document.getElementById('docker-path-input').value.trim() || document.getElementById('docker-path-input').placeholder;
-      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal });
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      vscode.postMessage({ command: 'dockerRunDoctor', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerProvision() {
       document.getElementById('panel-docker-doctor').style.display = 'none';
       document.getElementById('panel-docker-provision').style.display = 'flex';
       var pathVal = document.getElementById('docker-path-input').value.trim() || document.getElementById('docker-path-input').placeholder;
-      vscode.postMessage({ command: 'dockerProvision', dataPath: pathVal });
+      var portVal = document.getElementById('docker-port-input').value.trim();
+      vscode.postMessage({ command: 'dockerProvision', dataPath: pathVal, gatewayPort: portVal });
     }
     function dockerCancel() {
       vscode.postMessage({ command: 'dockerCancel' });
@@ -2635,6 +2681,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       if (d.type === 'dockerDefaultPath') {
         var inp = document.getElementById('docker-path-input');
         if (inp && !inp.value) inp.value = d.path;
+      } else if (d.type === 'dockerEnvLoaded') {
+        var pathInp = document.getElementById('docker-path-input');
+        var portInp = document.getElementById('docker-port-input');
+        if (pathInp && d.dataPath) pathInp.value = d.dataPath;
+        if (portInp && d.gatewayPort) portInp.value = d.gatewayPort;
       } else if (d.type === 'doctorUpdate') {
         var cl = document.getElementById('doctor-checklist');
         if (!cl) return;
@@ -3344,11 +3395,31 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   // ── Docker Bootstrap ──────────────────────────────────────────────────────────
 
   /**
-   * Returns the default .openclaw data directory: ~/Desktop/occ/.openclaw
+   * Returns the default .openclaw data directory.
+   * Priority:
+   * 1. Read OPENCLAW_DATA_DIR from docker/.env.openclaw if it exists
+   * 2. Fall back to ~/Desktop/occ/.openclaw
    * This keeps OpenClaw data co-located with the OCC workspace on the Desktop,
    * making it easy to find and back up. Consistent across all platforms.
    */
   public static getDefaultOpenClawDataPath(): string {
+    // Try to read from docker/.env.openclaw first
+    const envPath = path.join(__dirname, '..', '..', '..', 'docker', '.env');
+    if (fs.existsSync(envPath)) {
+      try {
+        const content = fs.readFileSync(envPath, 'utf-8');
+        const match = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
+        if (match && match[1]?.trim()) {
+          const envValue = match[1].trim();
+          // Resolve relative paths (like ./openclaw_docker_data) relative to the workspace
+          if (!path.isAbsolute(envValue)) {
+            const workspaceRoot = path.join(__dirname, '..', '..', '..');
+            return path.resolve(workspaceRoot, envValue);
+          }
+          return envValue;
+        }
+      } catch { /* ignore errors, fall back to default */ }
+    }
     return path.join(os.homedir(), 'Desktop', 'occ', '.openclaw');
   }
 
@@ -3507,14 +3578,34 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
   }
 
   /**
+   * Finds an available port starting from the given port, checking up to maxPort.
+   * Returns the first available port, or defaultPort if none found.
+   */
+  public static async findAvailablePort(startPort: number, maxTries = 100): Promise<number> {
+    const net = await import('net');
+    for (let i = 0; i < maxTries; i++) {
+      const port = startPort + i;
+      const available = await new Promise<boolean>(resolve => {
+        const server = net.createServer();
+        server.once('error', () => resolve(false));
+        server.once('listening', () => { server.close(); resolve(true); });
+        server.listen(port, '127.0.0.1');
+      });
+      if (available) return port;
+    }
+    return startPort; // fallback to start port
+  }
+
+  /**
    * Runs `docker compose up -d` using the bundled compose file and streams output to the panel.
-   * Writes a .env file with OPENCLAW_DATA_DIR before running.
+   * Writes a .env file with OPENCLAW_DATA_DIR and GATEWAY_PORT before running.
    */
   public static async runDockerProvision(
     post: (msg: object) => void,
     dataPath: string,
     extensionPath: string,
     runtime: 'docker' | 'podman' = 'docker',
+    gatewayPort?: string,
   ): Promise<void> {
     const tee = (text: string) => { post({ type: 'provisionLog', text }); writeLog(text); };
     const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
@@ -3541,17 +3632,37 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     // Ensure data directory exists
     try { fs.mkdirSync(expandedDataPath, { recursive: true }); } catch { /* non-fatal */ }
 
+    // Determine effective port: use user-provided, or find an available one
+    const DEFAULT_PORT = 18789;
+    let effectivePort = DEFAULT_PORT;
+    if (gatewayPort && gatewayPort.trim()) {
+      const parsed = parseInt(gatewayPort.trim(), 10);
+      if (!isNaN(parsed) && parsed > 0 && parsed < 65536) {
+        effectivePort = parsed;
+      }
+    } else {
+      // Auto-select: check if default port is available, otherwise find next available
+      const available = await HomePanel.findAvailablePort(DEFAULT_PORT);
+      if (available !== DEFAULT_PORT) {
+        tee(`⚠️  Port ${DEFAULT_PORT} in use — auto-selected port ${available}\n`);
+        effectivePort = available;
+      }
+    }
+
     // Write .env file alongside compose
     const envFile = path.join(path.dirname(resolvedCompose), '.env');
-    try { fs.writeFileSync(envFile, `OPENCLAW_DATA_DIR=${expandedDataPath}\n`, 'utf8'); } catch { /* non-fatal */ }
+    const envContent = `OPENCLAW_DATA_DIR=${expandedDataPath}\nGATEWAY_PORT=${effectivePort}\n`;
+    try { fs.writeFileSync(envFile, envContent, 'utf8'); } catch { /* non-fatal */ }
 
     tee(`▶ Using compose file: ${resolvedCompose}\n`);
     tee(`▶ Data directory: ${expandedDataPath}\n`);
+    tee(`▶ Gateway port: ${effectivePort}\n`);
     tee(`▶ Runtime: ${runtime}\n\n`);
 
     post({ type: 'provisionStatus', text: 'Cleaning up any existing containers…' });
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
+    // Pass only OPENCLAW_DATA_DIR as env var - compose reads .env.openclaw via env_file directive
     const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath };
 
     // Tear down any previous compose stack first (non-fatal — may not exist yet)
@@ -3607,7 +3718,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     post({ type: 'provisionStatus', text: 'Waiting for gateway to become healthy…' });
 
     // Poll health for up to 60s
-    const gatewayUrl = 'http://127.0.0.1:18789/health';
+    const gatewayUrl = `http://127.0.0.1:${effectivePort}/health`;
     let healthy = false;
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 2000));
@@ -3629,9 +3740,9 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     if (!fs.existsSync(openclawJson)) {
       try {
         fs.writeFileSync(openclawJson, JSON.stringify({
-          gateway: { host: '127.0.0.1', port: 18789 },
+          gateway: { host: '127.0.0.1', port: effectivePort },
         }, null, 2), 'utf8');
-        tee('✅ Created openclaw.json with gateway config\n');
+        tee(`✅ Created openclaw.json with gateway config (port ${effectivePort})\n`);
       } catch (e) {
         tee(`⚠️  Could not write openclaw.json: ${e}\n`);
       }
