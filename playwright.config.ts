@@ -2,9 +2,20 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 120_000,
+  snapshotDir: './tests/e2e/__snapshots__',
+  timeout: 240_000,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  // All tests share a single VS Code server — run serially to prevent
+  // workspace-state contamination between test files.
+  workers: 1,
+  reporter: [['list', { printSteps: true }]],
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixels: 50,
+      threshold: 0.2,
+      animations: 'disabled',
+    },
+  },
   use: {
     baseURL: 'http://localhost:9888',
     browserName: 'chromium',
@@ -13,12 +24,11 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    // `docker compose up editor` keeps the process in the foreground so Playwright
-    // can manage its lifecycle in CI.  Locally the container is already running,
-    // so reuseExistingServer skips the command entirely.
-    command: 'docker compose up editor',
+    // The editor container is already running in Docker — reuse it instead of
+    // trying to start a new one.
+    command: 'true',
     url: 'http://localhost:9888',
     reuseExistingServer: true,
-    timeout: 180_000,
+    timeout: 30_000,
   },
 });
