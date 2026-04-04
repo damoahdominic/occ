@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   editor:
     build:
@@ -8,27 +6,35 @@ services:
     image: occ-build-linux:latest
     container_name: occ-editor-dev
     working_dir: /workspace
-    volumes:
-      - .:/workspace
     ports:
       - "9888:9888"
     environment:
       NODE_ENV: development
-      NODE_OPTIONS: --max-old-space-size=7168
+      NODE_OPTIONS: --max-old-space-size=7096
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
-    entrypoint: bash -lc -
-    command:
-      - "npm i --ignore-scripts && npm run dev:editor"
+    entrypoint: ['/workspace/scripts/docker-dev.sh']
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Anonymous volumes for gitignored large build artefacts — prevents
+      # downloaded/extracted VS Code distributions from landing on the host.
+      - /workspace/apps/VSCode-linux-x64
+      - /workspace/apps/VSCode-darwin-x64
+      - /workspace/apps/VSCode-darwin-arm64
+      - /workspace/apps/VSCode-win32-x64
+      - /workspace/apps/VSCode-win32-arm64
+      - /workspace/apps/VSCode-win32-ia32
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9888/"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 600s    # cold start: ~9 min for full client compilation
     networks:
       dev-network: null
     mem_limit: ${MEM_LIMIT:-0.0}
     restart: unless-stopped
+    privileged: true
 
   web:
     build:
