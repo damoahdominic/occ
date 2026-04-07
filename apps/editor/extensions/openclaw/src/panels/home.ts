@@ -114,6 +114,8 @@ export class HomePanel {
   private _setupFor: 'docker' | 'local' | null = null;
   /** True once _getSetupHtml() has been rendered — prevents onDidChangeViewState re-renders from resetting in-progress wizard state. */
   private _setupHtmlShown = false;
+  /** When true, _getSetupHtml() will auto-open the docker config modal on load. */
+  private _openDockerConfigOnLoad = false;
   private readonly _version: string;
   private _dashboardAutoOpened = false;
 
@@ -379,9 +381,16 @@ export class HomePanel {
         }
       } else if (msg.command === 'checkHostsStatus') {
         void this._handleCheckHostsStatus();
+      } else if (msg.command === 'chooseDockerSetup') {
+        // User clicked Docker card — switch to setup wizard and open config modal
+        this._setupFor = 'docker';
+        this._setupHtmlShown = false;
+        this._openDockerConfigOnLoad = true;
+        void this._update();
       } else if (msg.command === 'dockerOpenConfig') {
-        // Initialize Docker config flow - show Step 1
-        this._panel.webview.postMessage({ type: 'dockerConfigStep', step: 1 });
+        // Initialize Docker config flow - load config and send to webview
+        const config = await HomePanel.loadDockerConfig(this._extensionUri.fsPath);
+        this._panel.webview.postMessage({ type: 'dockerConfigData', ...config });
       } else if (msg.command === 'dockerBrowseDir') {
         // Open native folder picker
         const uri = await vscode.window.showOpenDialog({
@@ -537,7 +546,9 @@ export class HomePanel {
     // selecting Docker shows the wizard even if local is already configured.
     if (this._setupFor !== null && !this._setupHtmlShown) {
       this._setupHtmlShown = true;
-      this._panel.webview.html = this._getSetupHtml(isInstalled, iconUri.toString(), occUser, this._setupFor);
+      const openDockerConfig = this._openDockerConfigOnLoad;
+      this._openDockerConfigOnLoad = false;
+      this._panel.webview.html = this._getSetupHtml(isInstalled, iconUri.toString(), occUser, this._setupFor, openDockerConfig);
       return;
     }
 
@@ -1249,7 +1260,7 @@ export class HomePanel {
       </div>
     </button>
 
-    <button class="card" onclick="pick('docker')">
+    <button class="card" data-card="docker" onclick="chooseDocker()">
       <div class="card-header">
         <span class="card-icon">&#x1F433;</span>
         <div style="display:flex;align-items:center;gap:6px;">
@@ -1277,6 +1288,9 @@ export class HomePanel {
     const vscode = acquireVsCodeApi();
     function pick(hostType) {
       vscode.postMessage({ command: 'chooseHostType', hostType });
+    }
+    function chooseDocker() {
+      vscode.postMessage({ command: 'chooseDockerSetup' });
     }
     function applyStatus(pill, textEl, status) {
       pill.className = 'status-pill ' + status;
@@ -1423,6 +1437,9 @@ export class HomePanel {
     const vscode = acquireVsCodeApi();
     function pick(hostType) {
       vscode.postMessage({ command: 'chooseHostType', hostType });
+    }
+    function chooseDocker() {
+      vscode.postMessage({ command: 'chooseDockerSetup' });
     }
   </script>
 </body>
@@ -1743,7 +1760,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     isInstalled: boolean,
     iconUri: string,
     occUser: { email: string; picture: string | null; balance_usd: number; api_keys?: { moltpilotKey?: string; occKey?: string } | null } | null = null,
-    setupFor: 'docker' | 'local' | null = null
+    setupFor: 'docker' | 'local' | null = null,
+    openDockerConfigOnLoad = false
   ): string {
     // Render user area statically (avoids JS innerHTML escaping issues)
     let userAreaHtml: string;
@@ -3037,8 +3055,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
    </script>
 
    <script>
-     // Auto-open Docker config if setupFor is docker (initialization)
-     ${setupFor === 'docker' ? 'openDockerConfig();' : ''}
+     // Auto-open Docker config modal when launched from the Docker card
+     ${openDockerConfigOnLoad ? 'openDockerConfig();' : ''}
    </script>
 
     <!-- Reset Confirmation Modal -->
