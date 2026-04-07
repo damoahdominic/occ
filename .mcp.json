@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "playwright-novnc": {
+       "command": "docker",
+        "args": [
+          "run",
+          "--rm",
+          "-i",
+          "--network=host",
+          "ghcr.io/xtr-dev/mcp-playwright-novnc",
+          "mcp-proxy",
+          "http://localhost:3080/sse"
+        ]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--browserUrl", "http://localhost:9222"
+      ]
+    }
+  }
+}
