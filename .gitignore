@@ -11,6 +11,10 @@ apps/VSCode-linux-x64/
 apps/VSCode-darwin-*/
 apps/VSCode-win32-*/
 
+# Temporary directories
+.tmp/
+test-results/
+tmp/
 
 # Internal infrastructure docs — keep private
 APPLE.md
