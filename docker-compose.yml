@@ -33,6 +33,7 @@ services:
     networks:
       dev-network: null
     mem_limit: ${MEM_LIMIT:-0.0}
+    cpus: ${CPUS:-0.0}
     restart: unless-stopped
     privileged: true
 
