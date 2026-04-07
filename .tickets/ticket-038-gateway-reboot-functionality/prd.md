@@ -201,7 +201,7 @@ Docker adapter (openclaw-docker/src/connection.ts)
       - **Objective**: Add GATEWAY_PORT=18789 to .env file so users can override it.
       - **Test**: .env file contains GATEWAY_PORT setting
 
-- [ ] Task 8: Add port configuration UI and auto-port selection
+- [x] Task 8: Add port configuration UI and auto-port selection
   - **Problem**: Users need to configure the gateway port in the Docker setup wizard, with option for auto-port selection if default is unavailable.
   - **Test**: Verify port can be configured via UI, and auto selection works when left empty.
   - **Subtasks**:
@@ -217,3 +217,6 @@ Docker adapter (openclaw-docker/src/connection.ts)
     - [x] Subtask 8.4: Update health check and config to use dynamic port
       - **Objective**: Use effectivePort for health check URL and openclaw.json port configuration.
       - **Test**: Gateway health check uses correct port, openclaw.json has correct port
+    - [x] Subtask 8.5: Fix Docker setup wizard to show config panel before auto-provisioning
+      - **Objective**: When `setupFor === 'docker'`, show the `panel-docker-path` (data directory + port config) first instead of jumping straight to provisioning. Pre-fill from `docker/.env` via `dockerLoadEnv`.
+      - **Test**: Docker setup wizard shows path/port inputs, user can override before proceeding.
