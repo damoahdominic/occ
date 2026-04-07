@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  occ-gateway:
+    image: bunny:latest
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-18789}:18789"
+    volumes:
+      - ${OPENCLAW_DATA_DIR:-./openclaw_docker_data}:/root/.openclaw
