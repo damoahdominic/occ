@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  playwright-display:
+    image: ghcr.io/xtr-dev/mcp-playwright-novnc:latest
+    container_name: playwright-display
+    ports:
+      - "6080:6080"  # noVNC web interface
+      - "3080:3080"  # MCP SSE endpoint
+    environment:
+      - SCREEN_WIDTH=1920
+      - SCREEN_HEIGHT=1080
+      - MCP_BROWSER=chromium
+    networks:
+      - playwright-network
+    # Use host networking for Chrome to access localhost:9888
+    # network_mode: "host"
+
+networks:
+  playwright-network:
+    name: playwright-network
+    driver: bridge
