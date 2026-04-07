@@ -1387,7 +1387,7 @@ export class HomePanel {
       </ul>
     </button>
 
-    <button class="card" data-card="docker" onclick="pick('docker')">
+     <button class="card" data-card="docker" onclick="chooseDocker()">
       <div class="card-header">
         <span class="card-icon">🐳</span>
         <span class="badge-rec">Recommended</span>
