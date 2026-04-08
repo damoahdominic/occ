@@ -2,17 +2,15 @@
  * Docker card setup TDD tests — ticket-030 + ticket-040.
  *
  * OLD Flow (ticket-030): click Docker card → provision panel appears → auto-start compose → done
- * NEW Flow (ticket-040): click Docker card → 3-step config modal → confirm → provision
+ * NEW Flow (ticket-040): click Docker card → 3-step config page → confirm → provision
  *   - Step 1: Config form (image, port, data dir, fresh build checkbox)
  *   - Step 2: Confirm read-only values
  *   - Step 3: Provision with docker compose
+ *
+ * Implementation: each step is a full-page render (no modal, no hidden panels).
+ * The stepper is always visible at the top showing progress.
  */
 
-/**
- * Import from cdp-fixtures when running with playwright.remote-debugging.config.ts
- * (CDP-connected browser via noVNC container on port 9222).
- * Falls back to @playwright/test fixtures for standard headless runs.
- */
 import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures';
 
 // ---------------------------------------------------------------------------
@@ -40,8 +38,8 @@ function getInnerFrame(page: Page): FrameLocator {
 
 /**
  * Navigate to the home panel and click the Docker card.
- * Returns the new inner frame after the panel has been recreated.
- * With the new flow, this opens the config modal (Step 1).
+ * With the new flow, clicking Docker renders the full-page docker config (Step 1)
+ * in-place — no panel dispose/recreate.
  */
 async function clickDockerCard(page: Page): Promise<FrameLocator> {
   await page.goto('/');
@@ -54,19 +52,17 @@ async function clickDockerCard(page: Page): Promise<FrameLocator> {
   await page.locator('.quick-input-list .monaco-list-row').first().click();
 
   await waitForHomePanelTab(page);
-  const initialFrame = getInnerFrame(page);
+  const frame = getInnerFrame(page);
 
   // Click the Docker card in host picker
-  const dockerCard = initialFrame.locator('[data-card="docker"]');
+  const dockerCard = frame.locator('[data-card="docker"]');
   await dockerCard.waitFor({ timeout: 20_000 });
   await dockerCard.click();
 
-  // Wait for panel dispose/recreate
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-  await tab.waitFor({ state: 'hidden', timeout: 20_000 }).catch(() => null);
-  await tab.waitFor({ state: 'visible', timeout: 30_000 });
+  // Wait for step 1 content to appear (full-page render, no panel recreate)
+  await frame.locator('#docker-config-step-1').waitFor({ timeout: 20_000 });
 
-  return getInnerFrame(page);
+  return frame;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,150 +88,132 @@ test('docker card is visible in host picker', async ({ page }) => {
   await expect(dockerCard).toContainText('Recommended');
 });
 
-test('clicking docker card shows 3-step config modal (ticket-040)', async ({ page }) => {
+test('clicking docker card shows 3-step config page (ticket-040)', async ({ page }) => {
   // Capture browser console logs via CDP to aid debugging
   const getLogs = await withCDP(page);
 
   const innerFrame = await clickDockerCard(page);
 
-  // Config modal should be visible at Step 1
-  const configPanel = innerFrame.locator('#panel-docker-config');
-  await configPanel.waitFor({ state: 'visible', timeout: 20_000 }).catch(err => {
+  // Step 1 config content should be visible (full-page render, not a modal)
+  const step1 = innerFrame.locator('#docker-config-step-1');
+  await step1.waitFor({ state: 'visible', timeout: 20_000 }).catch(err => {
     console.error('CDP console logs at failure:\n', getLogs().join('\n'));
     throw err;
   });
-  await expect(configPanel).toBeVisible();
-
-  // Step 1 should be active (Config)
-  const step1 = innerFrame.locator('#config-step-1-indicator');
   await expect(step1).toBeVisible();
-  await expect(step1).toContainText('1. Config');
 
-  // Step 2 and Step 3 should not be visible yet
-  const step2 = innerFrame.locator('#docker-config-step-2');
-  await expect(step2).toHaveCSS('display', 'none');
-  const step3 = innerFrame.locator('#docker-config-step-3');
-  await expect(step3).toHaveCSS('display', 'none');
+  // Stepper should show all 3 step indicators
+  const step1Ind = innerFrame.locator('#config-step-1-indicator');
+  await expect(step1Ind).toBeVisible();
+  await expect(step1Ind).toContainText('1. Config');
 
-  // Old provision panel should NOT be visible
-  const provisionPanel = innerFrame.locator('#panel-docker-provision');
-  await expect(provisionPanel).not.toBeVisible();
+  const step2Ind = innerFrame.locator('#config-step-2-indicator');
+  await expect(step2Ind).toBeVisible();
+  await expect(step2Ind).toContainText('2. Confirm');
+
+  const step3Ind = innerFrame.locator('#config-step-3-indicator');
+  await expect(step3Ind).toBeVisible();
+  await expect(step3Ind).toContainText('3. Start');
+
+  // Step 2 and 3 content should NOT be in the DOM (full-page render)
+  await expect(innerFrame.locator('#docker-config-step-2')).toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-3')).toHaveCount(0);
 });
 
-test('config modal step 1 shows all 4 fields', async ({ page }) => {
+test('config page step 1 shows all 4 fields', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // Check all 4 config fields are visible
-  const imageInput = innerFrame.locator('#config-gateway-image');
-  await expect(imageInput).toBeVisible();
-
-  const portInput = innerFrame.locator('#config-gateway-port');
-  await expect(portInput).toBeVisible();
-
-  const dataDirInput = innerFrame.locator('#config-data-dir');
-  await expect(dataDirInput).toBeVisible();
-
-  const freshBuildCheckbox = innerFrame.locator('#config-fresh-build');
-  await expect(freshBuildCheckbox).toBeVisible();
+  await expect(innerFrame.locator('#config-gateway-image')).toBeVisible();
+  await expect(innerFrame.locator('#config-gateway-port')).toBeVisible();
+  await expect(innerFrame.locator('#config-data-dir')).toBeVisible();
+  await expect(innerFrame.locator('#config-fresh-build')).toBeVisible();
 
   // Browse button should be visible
-  const browseBtn = innerFrame.locator('button:has-text("Browse")');
-  await expect(browseBtn).toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Browse")')).toBeVisible();
 
   // Next and Cancel buttons should be visible
-  const nextBtn = innerFrame.locator('button:has-text("Next")');
-  await expect(nextBtn).toBeVisible();
-  const cancelBtn = innerFrame.locator('button:has-text("Cancel")');
-  await expect(cancelBtn).toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Next")')).toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Cancel")')).toBeVisible();
 });
 
-test('config modal step indicators show correct state', async ({ page }) => {
+test('step indicators show correct active state', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
-  // Step 1 should be active (blue background)
+  // Step 1 indicator should be active (blue background #2563eb → rgb(37, 99, 235))
   const step1Indicator = innerFrame.locator('#config-step-1-indicator');
-  await expect(step1Indicator).toHaveCSS('background-color', /rgb\(37\)|#2563eb/i);
+  await expect(step1Indicator).toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
 
-  // Step 2 and 3 should be inactive (dark background)
+  // Step 2 and 3 should be inactive (dark background #1a1a1a → rgb(26, 26, 26))
   const step2Indicator = innerFrame.locator('#config-step-2-indicator');
-  await expect(step2Indicator).toHaveCSS('background-color', /rgb\(26\)|#1a1a1a/i);
+  await expect(step2Indicator).toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
+
   const step3Indicator = innerFrame.locator('#config-step-3-indicator');
-  await expect(step3Indicator).toHaveCSS('background-color', /rgb\(26\)|#1a1a1a/i);
+  await expect(step3Indicator).toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
 });
 
-test('clicking Next shows Step 2 confirm screen', async ({ page }) => {
+test('clicking Next renders Step 2 confirm page', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // Click Next button to advance to Step 2
   const nextBtn = innerFrame.locator('button:has-text("Next")');
   await nextBtn.click();
 
-  // Wait for Step 2 to appear
+  // Wait for Step 2 content to appear (full-page re-render)
   const step2 = innerFrame.locator('#docker-config-step-2');
-  await step2.waitFor({ state: 'visible', timeout: 10_000 });
+  await step2.waitFor({ state: 'visible', timeout: 20_000 });
 
-  // Step 2 should show confirmation with read-only values
-  const confirmImage = innerFrame.locator('#confirm-image');
-  await expect(confirmImage).toBeVisible();
-  const confirmPort = innerFrame.locator('#confirm-port');
-  await expect(confirmPort).toBeVisible();
-  const confirmDataDir = innerFrame.locator('#confirm-data-dir');
-  await expect(confirmDataDir).toBeVisible();
-  const confirmFreshBuild = innerFrame.locator('#confirm-fresh-build');
-  await expect(confirmFreshBuild).toBeVisible();
+  // Step 2 should show read-only confirm values
+  await expect(innerFrame.locator('#confirm-image')).toBeVisible();
+  await expect(innerFrame.locator('#confirm-port')).toBeVisible();
+  await expect(innerFrame.locator('#confirm-data-dir')).toBeVisible();
+  await expect(innerFrame.locator('#confirm-fresh-build')).toBeVisible();
 
   // Confirm button should be visible
-  const confirmBtn = innerFrame.locator('#btn-confirm-config');
-  await expect(confirmBtn).toBeVisible();
+  await expect(innerFrame.locator('#btn-confirm-config')).toBeVisible();
+
+  // Step 1 and 3 content should NOT be in DOM
+  await expect(innerFrame.locator('#docker-config-step-1')).toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-3')).toHaveCount(0);
+
+  // Stepper: step 2 indicator should be active
+  const step2Indicator = innerFrame.locator('#config-step-2-indicator');
+  await expect(step2Indicator).toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
 });
 
 test('clicking Back from Step 2 returns to Step 1', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // Advance to Step 2
-  const nextBtn = innerFrame.locator('button:has-text("Next")');
-  await nextBtn.click();
-
-  // Wait for Step 2
-  const step2 = innerFrame.locator('#docker-config-step-2');
-  await step2.waitFor({ state: 'visible', timeout: 10_000 });
+  await innerFrame.locator('button:has-text("Next")').click();
+  await innerFrame.locator('#docker-config-step-2').waitFor({ state: 'visible', timeout: 20_000 });
 
   // Click Back
-  const backBtn = innerFrame.locator('button:has-text("Back")');
-  await backBtn.click();
+  await innerFrame.locator('button:has-text("Back")').click();
 
-  // Step 1 should be visible again
-  const step1 = innerFrame.locator('#docker-config-step-1');
-  await step1.waitFor({ state: 'visible', timeout: 10_000 });
+  // Step 1 should be visible again (full-page re-render)
+  await innerFrame.locator('#docker-config-step-1').waitFor({ state: 'visible', timeout: 20_000 });
+  await expect(innerFrame.locator('#docker-config-step-2')).toHaveCount(0);
 });
 
-test('cancel button returns to bootstrap choice', async ({ page }) => {
+test('cancel returns to host picker', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // Click Cancel
-  const cancelBtn = innerFrame.locator('button:has-text("Cancel")');
-  await cancelBtn.click();
+  await innerFrame.locator('button:has-text("Cancel")').click();
 
-  // Config panel should be hidden
-  const configPanel = innerFrame.locator('#panel-docker-config');
-  await expect(configPanel).not.toBeVisible();
-
-  // Bootstrap choice should be visible again
-  const bootstrapChoice = innerFrame.locator('#panel-bootstrap-choice');
-  await bootstrapChoice.waitFor({ state: 'visible', timeout: 10_000 });
+  // Should return to the host picker (Docker/Local/SSH cards)
+  const dockerCard = innerFrame.locator('[data-card="docker"]');
+  await dockerCard.waitFor({ state: 'visible', timeout: 20_000 });
+  await expect(innerFrame.locator('[data-card="local"]')).toBeVisible();
 });
 
-test('step timeline shows docker flow (Configure → Confirm → Start)', async ({ page }) => {
+test('step timeline shows docker flow (1. Config → 2. Confirm → 3. Start)', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // All 3 step indicators should be visible in the stepper
-  const stepper = innerFrame.locator('.stepper');
-  await expect(stepper).toBeVisible();
-
-  const step1 = innerFrame.locator('#config-step-1-indicator');
-  await expect(step1).toContainText('1. Config');
-  const step2 = innerFrame.locator('#config-step-2-indicator');
-  await expect(step2).toContainText('2. Confirm');
-  const step3 = innerFrame.locator('#config-step-3-indicator');
-  await expect(step3).toContainText('3. Start');
+  await expect(innerFrame.locator('.stepper')).toBeVisible();
+  await expect(innerFrame.locator('#config-step-1-indicator')).toContainText('1. Config');
+  await expect(innerFrame.locator('#config-step-2-indicator')).toContainText('2. Confirm');
+  await expect(innerFrame.locator('#config-step-3-indicator')).toContainText('3. Start');
 });
