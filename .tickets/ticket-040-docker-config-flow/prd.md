@@ -102,11 +102,10 @@ docker compose -f docker/docker-compose.openclaw.yml up -d
   - **Test**: Can configure, confirm, and provision Docker services
   - **Status**: Playwright tests require system dependencies (libglib, etc.) to run
 
-- [x] Task 7: Wire Docker card to config modal (bug fix)
-   - **Objective**: The Docker card in host picker should call `chooseDocker()` to show config modal, not `pick('docker')` which opens separate panel
-   - **Test**: Clicking Docker card shows the 3-step config modal (test: `clicking docker card shows 3-step config modal`)
-   - **Depends on**: Task 1 (modal must exist)
-   - **Status**: Fixed - Docker card now has `data-card="docker"` and `onclick="chooseDocker()`. Verified implementation and test flow.
+- [x] Task 7: Wire Docker card to full-page 3-step config flow (no modal)
+   - **Objective**: Docker card opens a dedicated full-page config flow. Each step is a complete page rendered by the extension — no modal, no hidden panels.
+   - **Implementation**: `_getDockerConfigHtml(step, draft)` renders step 1/2/3 as full pages. Extension owns all state via `_dockerStep` and `_dockerDraft`. Cancel returns to host picker via `_update()`.
+   - **Test**: All 8 playwright tests in `docker-setup.spec.ts` pass (verified headless)
 
 ## Testing Notes
 
