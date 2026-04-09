@@ -197,3 +197,12 @@ container-build-linux:
 		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
 		editor build-linux PROJECT_ROOT=/workspace | tee ./.tmp/container-build-linux-$(shell date +%Y-%m-%d_%H-%M-%S).log
+
+## launch: Launch the compiled editor (run after watch-editor.sh)
+launch:
+	@if [ ! -f "$(PROJECT_ROOT)/launch-editor.sh" ]; then \
+		echo "Error: launch-editor.sh not found"; \
+		exit 1; \
+	fi
+	@echo "Launching OCcode editor..."
+	@./launch-editor.sh
