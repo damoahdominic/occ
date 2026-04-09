@@ -6,8 +6,8 @@ services:
     image: occ-build-linux:latest
     container_name: occ-editor-dev
     working_dir: /workspace
-    ports:
-      - "9888:9888"
+#    ports:
+#      - "9888:9888"
     environment:
       NODE_ENV: development
       NODE_OPTIONS: --max-old-space-size=7096
@@ -30,8 +30,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 600s    # cold start: ~9 min for full client compilation
-    networks:
-      dev-network: null
+    network_mode: host
     mem_limit: ${MEM_LIMIT:-0.0}
     cpus: ${CPUS:-0.0}
     restart: unless-stopped
@@ -64,9 +63,4 @@ services:
     depends_on:
       editor:
         condition: service_healthy
-    networks:
-      dev-network: null
 
-networks:
-  dev-network:
-    driver: bridge

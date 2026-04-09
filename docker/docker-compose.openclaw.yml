@@ -6,13 +6,13 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.openclaw
     image: openclaw/pod:latest
+    command: bash -lc "mkdir -p /root/.openclaw && echo '{\"gateway\":{\"controlUi\":{\"dangerouslyAllowHostHeaderOriginFallback\":true}}}' > /root/.openclaw/openclaw.json; bun i -g @buape/carbon @larksuiteoapi/node-sdk @slack/web-api grammy && openclaw gateway run --allow-unconfigured --bind lan"
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${GATEWAY_PORT:-18789}:18789"
+      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_PORT:-18789}:18789"
     environment:
       DATABASE_URL: postgresql://openclaw:occdev@occ-postgres:5432/openclaw
       REDIS_URL: redis://occ-redis:6379
-      GATEWAY_PORT: "${GATEWAY_PORT:-18789}"
     volumes:
       - ${OPENCLAW_DATA_DIR}:/root/.openclaw
     networks:
