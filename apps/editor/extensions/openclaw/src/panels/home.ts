@@ -406,6 +406,7 @@ export class HomePanel {
           freshBuild: Boolean(msg.freshBuild),
           bindHost: (msg.bindHost as string) === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
         };
+        this._outputChannel.appendLine(`[dockerNext] Draft set: dataDir="${this._dockerDraft.dataDir}"`);
         this._dockerStep = 2;
         void this._update();
       } else if (msg.command === 'dockerBack') {
@@ -1948,6 +1949,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
     } else if (step === 2) {
       const esc = (s: string) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      console.log('Step 2 rendering with draft:', draft);
       contentHtml = `
     <div id="docker-config-step-2" style="width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;">
       <div style="text-align:center;margin-bottom:4px;">
