@@ -93,7 +93,7 @@ occ/
 - **No local rebuilds required** — the watch process runs inside the container, picking up source changes automatically
 - **Consistent environment** — Node 20.18.2, all dependencies, and build tools are pre-configured
 - **Instant verification** — UI and functionality changes are visible through the running editor at `http://localhost:9888`
-- **Playwright testing** — browser automation tests (including MCP) run against the live editor without manual setup
+- **Playwright testing** — browser automation tests (including MCP) run against the live editor; browser setup requires checking for existing connections and user approval
 
 ### Development Container
 
@@ -105,8 +105,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "9888:9888"
+    network_mode: host
     volumes:
       - .:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -167,6 +166,8 @@ curl -s http://localhost:9888/ | head -5
 
 **Required for headed UI testing.** Use this when tests need a real browser with a visible display — e.g. webview interactions, visual verification, or MCP-driven ad-hoc automation. The container provides a virtual X11 display so Chromium runs headed without a local display server.
 
+⚠️ **User approval required** before installing any testing browser. Always check for existing browser connections first.
+
 - Virtual X11 display (Xvfb) — headed browser, no local display required
 - noVNC web interface to watch the browser in real-time at http://localhost:6080/vnc.html
 - MCP server on port 3080 for browser automation
@@ -186,13 +187,17 @@ docker run -d --name playwright-novnc \
 sleep 5
 ```
 
-**First-time setup — install Playwright inside the container if needed:**
+**First-time setup — check for existing browser connection:**
 
 ```bash
-docker exec playwright-novnc playwright --version 2>/dev/null \
-  || docker exec playwright-novnc npm install -g playwright
+# Test if noVNC container is already running and accessible
+docker exec playwright-novnc playwright --version 2>/dev/null && echo "✓ Playwright ready"
 
-# Install browser binaries if needed
+# If the above fails, get user approval before installing:
+# 1. Confirm container is running: docker ps | grep playwright-novnc
+# 2. Ask user: "Install Playwright and browser binaries in the noVNC container?"
+# 3. If approved, run:
+docker exec playwright-novnc npm install -g playwright
 docker exec playwright-novnc playwright install chromium
 ```
 
@@ -201,7 +206,7 @@ docker exec playwright-novnc playwright install chromium
 
 **Using MCP for testing:**
 
-Two MCP servers are configured in `.mcp.json` (Claude Code) and `.opencode.json` (OpenCode):
+Two MCP servers are configured in `.mcp.json` (Claude Code) and `opencode.json` (OpenCode):
 
 **1. `playwright-novnc`** — full browser automation via the noVNC container:
 ```json
@@ -216,14 +221,80 @@ Two MCP servers are configured in `.mcp.json` (Claude Code) and `.opencode.json`
 ```json
 {
   "command": "npx",
-  "args": ["chrome-devtools-mcp@latest","--browserUrl","http://localhost:9222"]
+  "args": ["chrome-devtools-mcp@latest", "--autoConnect", "--channel", "beta"]
 }
 ```
-Connects to a Chrome already running with `--remote-debugging-port=9222`. Chrome is always remote — start it via the noVNC container (see VNC mode above) or any other headless/headed Chrome with CDP exposed on port 9222.
+`--autoConnect` reads Chrome Beta's user data directory directly (Chrome 144+). No `--remote-debugging-port` flag needed. Requires remote debugging to be enabled once via `chrome://inspect/#remote-debugging` in Chrome Beta.
 
-> **ℹ️ Port 9222:** `playwright-novnc` does not use port 9222 — it only exposes 3080, 5900, 6080.
-> Port 9222 is free for Chrome CDP regardless of whether the container is running.
-> If the port appears busy, check for stale processes: `lsof -i :9222`.
+**Alternative (wrapper):** If `--autoConnect` stops working, `/usr/local/bin/chrome-devtools-mcp-wrapper` reads `DevToolsActivePort` and passes `--wsEndpoint` directly. Chrome 136+ deprecated `/json/version` so `--browserUrl` is unusable. Do not combine `--wsEndpoint` with `--autoConnect` or `--channel` — they conflict and cause the MCP to print help and exit.
+
+**Test for existing Chrome CDP connection first:**
+
+```bash
+# Check if Chrome is already running with remote debugging enabled
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    echo "✓ Chrome CDP endpoint found at $candidate"
+    exit 0
+  fi
+done
+
+echo "✗ No Chrome CDP connection found"
+echo "Chrome not running with remote debugging. User approval required to set up."
+```
+
+**One-time setup — create the wrapper (if user approves):**
+
+```bash
+sudo tee /usr/local/bin/chrome-devtools-mcp-wrapper > /dev/null << 'EOF'
+#!/bin/bash
+# Reads DevToolsActivePort to get the current Chrome CDP WebSocket URL
+# and passes it to chrome-devtools-mcp via --wsEndpoint.
+
+ACTIVE_PORT_FILE=""
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    ACTIVE_PORT_FILE="$candidate"
+    break
+  fi
+done
+
+if [ -z "$ACTIVE_PORT_FILE" ]; then
+  exec npx chrome-devtools-mcp@latest "$@"
+fi
+
+CDP_PORT=$(sed -n '1p' "$ACTIVE_PORT_FILE")
+CDP_PATH=$(sed -n '2p' "$ACTIVE_PORT_FILE")
+WS_ENDPOINT="ws://127.0.0.1:${CDP_PORT}${CDP_PATH}"
+
+exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS_ENDPOINT" "$@"
+EOF
+sudo chmod +x /usr/local/bin/chrome-devtools-mcp-wrapper
+```
+
+The wrapper automatically detects a running Chrome instance. If `DevToolsActivePort` is missing (Chrome not running with remote debugging), ask the user before proceeding.
+
+For available flags and options, run:
+```bash
+npx chrome-devtools-mcp@latest --help
+```
+
+Connects to Chrome already running with `--remote-debugging-port=9222 --user-data-dir=<path>` (see Chrome 136+ note below). Chrome is always remote — start it from the desktop or any headed environment.
+
+> **⚠️ Port 9222 conflict:** `playwright-novnc` runs with `--network=host` and its internal
+> Chromium binds to `127.0.0.1:9222`. While the container is running, Chrome cannot bind there.
+> Stop the container before using `chrome-devtools` MCP:
+> ```bash
+> docker kill playwright-novnc
+> ```
 
 **Available MCP tools:**
 - `browser_navigate` - Navigate to URL
@@ -257,17 +328,14 @@ docker rm playwright-novnc
 
 #### Playwright E2E Testing (Local)
 
-If your local environment has system dependencies (X11, libglib), you can run Playwright tests directly:
+Run tests against the running editor:
 
 ```bash
-# Install dependencies (one-time)
-npx playwright install-deps chromium
+# Start the dev environment
+docker compose up -d
 
-# Run tests against the running editor
+# Run tests
 npx playwright test tests/e2e/ --reporter=list
-
-# Run specific test file
-npx playwright test tests/e2e/docker-setup.spec.ts --reporter=list
 ```
 
 **Prerequisites:**
@@ -286,7 +354,7 @@ const inner = page
 
 ---
 
-#### Playwright Test Modes (Standard / VNC / CDP)
+#### Playwright Test Modes
 
 All test files use one import that never changes:
 
@@ -294,7 +362,7 @@ All test files use one import that never changes:
 import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures';
 ```
 
-`fixtures.ts` is the strategy selector — mode is controlled entirely by env vars.
+`fixtures.ts` selects mode based on environment variables:
 
 | Mode | Env vars | When to use |
 |------|----------|-------------|
@@ -302,217 +370,38 @@ import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures'
 | **VNC** | `USE_VNC=1` | Watch tests live in noVNC at `localhost:6080` |
 | **CDP** | `CDP_ENDPOINT=<url>` | Custom Chrome endpoint |
 
-**Standard mode — local headless Chromium:**
+**Usage:**
 
 ```bash
+# Standard (local Chromium)
 npx playwright test --config=playwright.config.ts
-```
 
-**VNC mode — headed browser inside the noVNC container:**
-
-```bash
-# 1. Start the noVNC container with host networking (exposes Chrome on port 9222)
-docker run -d --name playwright-novnc --network host \
-  -e MCP_BROWSER=chromium \
-  ghcr.io/xtr-dev/mcp-playwright-novnc:latest
-
-# 2. Open http://localhost:6080/vnc.html to watch the browser
-
-# 3. Run tests — --ui is the default for VNC runs so you control pacing
-USE_VNC=1 npx playwright test --ui \
-  --config=playwright.remote-debugging.config.ts \
-  tests/e2e/docker-setup.spec.ts
-
-# Full suite via VNC
-USE_VNC=1 npx playwright test --ui \
+# VNC mode
+USE_VNC=1 npx playwright test \
   --config=playwright.remote-debugging.config.ts
+
+# CDP mode (connect to existing Chrome)
+CDP_ENDPOINT=http://127.0.0.1:9222 npx playwright test \
+  --config=playwright.config.ts
 ```
-
-**CDP mode — arbitrary remote Chrome endpoint:**
-
-> **ℹ️ Port 9222:** `playwright-novnc` does NOT use port 9222 — confirmed via the image's
-> Dockerfile and supervisord config (only ports 3080, 5900, 6080 are used). Port 9222 is
-> free for Chrome CDP whether or not the container is running. If it appears busy, check
-> for stale processes: `lsof -i :9222`.
->
-> To get a real Chrome CDP endpoint alongside the noVNC container, launch Chrome directly inside it:
-> ```bash
-> docker exec playwright-novnc bash -c "
->   DISPLAY=:99 /ms-playwright/chromium-1200/chrome-linux64/chrome \
->     --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
->     --no-sandbox --user-data-dir=/tmp/cdp-chrome http://localhost:9888/ &"
-> ```
-
-```bash
-# Headless (CI)
-CDP_ENDPOINT=http://localhost:9222 \
-  npx playwright test --config=playwright.remote-debugging.config.ts \
-  tests/e2e/docker-setup.spec.ts
-
-# Interactive (with UI)
-CDP_ENDPOINT=http://localhost:9222 \
-  npx playwright test --ui --config=playwright.remote-debugging.config.ts
-```
-
-`cdp-fixtures.ts` is a thin backward-compat alias — always import from `./fixtures` in new code.
 
 ---
 
 ### Chrome DevTools Protocol (CDP) with Playwright
 
-Playwright can connect to an **externally-launched Chrome instance** via the Chrome DevTools Protocol (CDP). This is useful for debugging with a manually-opened browser, reusing logged-in sessions, or keeping DevTools open while automating.
+Playwright can connect to an externally-launched Chrome instance via CDP for debugging.
 
-#### Chrome 136+ Breaking Change
+⚠️ **User approval required** before launching Chrome with debugging flags.
 
-**Important:** Starting with Chrome 136 (March 2025), Google disabled remote debugging for the default user data directory. You **must** use `--user-data-dir` with a custom profile directory for CDP to work.
+#### Chrome 136+ Note
+Starting with Chrome 136, you **must** use `--user-data-dir` with a custom profile for CDP to work.
 
-Without `--user-data-dir`, Chrome will silently ignore `--remote-debugging-port` and won't enter debug mode.
+#### Basic Usage
+1. Start Chrome with debugging: `chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug`
+2. Run tests: `CDP_ENDPOINT=http://127.0.0.1:9222 npx playwright test --config=playwright.config.ts`
+3. **Important:** Close only test contexts/pages, not the browser itself
 
-#### How It Works
-
-```
-Chrome (manual) --remote-debugging-port=9222 --user-data-dir=remote-debug-profile → 
-  http://localhost:9222/json → 
-  playwright.chromium.connectOverCDP('http://localhost:9222')
-```
-
-#### Step 1: Launch Chrome with Remote Debugging
-
-```bash
-# macOS (zsh)
-open -a "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir=remote-debug-profile
-
-# Linux
-google-chrome --remote-debugging-port=9222 --user-data-dir=remote-debug-profile
-
-# Windows
-chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\path\to\remote-debug-profile
-```
-
-The `--user-data-dir` creates a fresh profile isolated from your normal Chrome data. This is required for CDP to function in Chrome 136+.
-
-#### Step 2: Verify the Debugging Endpoint
-
-Open http://localhost:9222/json to confirm Chrome is listening (note: `/json/version` is deprecated in Chrome 136+):
-
-```json
-[
-  {
-    "id": "...",
-    "type": "page",
-    "url": "...",
-    "webSocketDebuggerUrl": "ws://localhost:9222/devtools/browser/..."
-  }
-]
-```
-
-#### Step 3: Connect Playwright to External Chrome
-
-```typescript
-// tests/e2e/example.spec.ts
-import { test, expect } from '@playwright/test';
-
-test('connect to external Chrome via CDP', async () => {
-  // Connect to external Chrome instance
-  const browser = await chromium.connectOverCDP('http://localhost:9222');
-  
-  // Option A: Work with existing contexts/pages
-  const existingContexts = browser.contexts();
-  if (existingContexts.length > 0) {
-    const pages = existingContexts[0].pages();
-    if (pages.length > 0) {
-      await pages[0].bringToFront();
-      console.log('Connected to existing tab:', pages[0].url());
-    }
-  }
-  
-  // Option B: Create a new context (recommended for automation)
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  
-  await page.goto('http://localhost:9888');
-  // ... your test actions ...
-  
-  await context.close();
-  // Note: do NOT call browser.close() — that would close your external Chrome!
-});
-```
-
-#### Step 4: Check for Existing Instance Before Creating New One
-
-To avoid launching a duplicate Chrome when one is already running with debugging enabled:
-
-```typescript
-// utils/browser.ts
-import { chromium, Browser } from '@playwright/test';
-
-const CDP_ENDPOINT = 'http://localhost:9222';
-
-export async function getOrLaunchChrome(): Promise<Browser> {
-  try {
-    // Try to connect to existing instance
-    const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
-    console.log('Connected to existing Chrome instance');
-    return browser;
-  } catch {
-    // Launch new instance if none exists
-    console.log('No existing instance found, launching Chrome');
-    return await chromium.launch({
-      args: [
-        '--remote-debugging-port=9222',
-        '--user-data-dir=remote-debug-profile',  // Required for Chrome 136+
-      ],
-    });
-  }
-}
-```
-
-**Usage in tests:**
-
-```typescript
-import { test, expect } from '@playwright/test';
-import { getOrLaunchChrome } from '../utils/browser';
-
-test('reuse or launch Chrome', async () => {
-  const browser = await getOrLaunchChrome();
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  
-  await page.goto('http://localhost:9888');
-  // ... test actions ...
-  
-  await context.close();
-  // Do NOT close browser — keep it running for future tests
-});
-```
-
-#### Alternative: Connect via WebSocket
-
-If you prefer using the WebSocket endpoint directly (get it from http://localhost:9222/json):
-
-```typescript
-const browser = await chromium.connect({
-  wsEndpoint: 'ws://localhost:9222/devtools/browser/...', // from /json
-});
-```
-
-#### Key Methods
-
-| Method | Purpose |
-|--------|---------|
-| `chromium.connectOverCDP(endpoint)` | Connect to external Chrome via CDP |
-| `chromium.connect({ wsEndpoint })` | Connect via WebSocket |
-| `browser.contexts()` | List existing browser contexts |
-| `browser.newContext()` | Create new isolated context |
-
-#### Best Practices
-
-- **Close contexts, not the browser** — When done, close only the automation context. Calling `browser.close()` would shut down your external Chrome.
-- **Separate contexts for automation** — Create a new context even when reusing an existing browser to avoid interfering with manual tabs.
-- **Use for development only** — Connecting to external Chrome is great for debugging; use clean launches for CI/full test suites.
-- **Keep DevTools open** — While connected, you can keep DevTools open to inspect DOM, network, and performance in real time.
-
-**Config file:** Tests use the configuration defined in `playwright.remote-debugging.config.ts` (at repo root).
+**Config file:** Tests use `playwright.config.ts` which handles CDP when `CDP_ENDPOINT` is set.
 
 ---
 
@@ -541,7 +430,7 @@ The OpenClaw gateway services (postgres, redis, gateway) are managed via `docker
 
 ```bash
 # Start gateway services
-OPENCLAW_DATA_DIR=~/.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+OPENCLAW_DATA_DIR=./.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
 
 # Check service health
 docker compose -f docker/docker-compose.openclaw.yml ps
@@ -553,7 +442,7 @@ docker compose -f docker/docker-compose.openclaw.yml logs -f occ-gateway
 docker compose -f docker/docker-compose.openclaw.yml down
 ```
 
-The gateway is accessible at `http://127.0.0.1:18789`. Postgres and Redis run on the internal Docker network only (no host port exposure).
+The gateway is accessible at `http://127.0.0.1:${GATEAWY_HOST_PORT:-18789}`. Postgres and Redis run on the internal Docker network only (no host port exposure).
 
 ---
 
