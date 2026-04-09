@@ -7,9 +7,8 @@ apps/editor/extensions/**/package-lock.json
 .DS_Store
 apps/editor/.build/
 apps/editor/core.*
-apps/VSCode-linux-x64/
-apps/VSCode-darwin-*/
-apps/VSCode-win32-*/
+apps/VSCode-*/
+app/web/
 
 # Temporary directories
 .tmp/
@@ -32,3 +31,5 @@ occ-backend
 .worktrees/
 
 package-lock.json
+
+core.*

@@ -962,11 +962,13 @@ export class HomePanel {
           shell: process.platform === 'win32' // use shell on Windows for built-in commands
         });
         let output = '';
+        let stderr = '';
         child.stdout?.on('data', (d: Buffer) => {
           output += d.toString();
           this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
         });
         child.stderr?.on('data', (d: Buffer) => {
+          stderr += d.toString();
           output += d.toString();
           this._panel.webview.postMessage({ type: 'localLog', step, text: d.toString() });
         });
@@ -975,14 +977,20 @@ export class HomePanel {
             this._panel.webview.postMessage({ type: 'localStatus', step, status: 'done' });
             resolve();
           } else {
-            reject(new Error(`Command exited with code ${code}`));
+            reject(new Error(`Command exited with code ${code}\n${stderr || output}`));
           }
         });
         child.on('error', err => reject(err));
       });
     } catch (err) {
-      this._panel.webview.postMessage({ type: 'localStatus', step, status: 'failed' });
-      this._outputChannel.appendLine(`Local setup step ${step} failed: ${err}`);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this._panel.webview.postMessage({ 
+        type: 'localStatus', 
+        step, 
+        status: 'failed',
+        error: errorMessage 
+      });
+      this._outputChannel.appendLine(`Local setup step ${step} failed: ${errorMessage}`);
     }
   }
 
@@ -3190,8 +3198,18 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       } else if (d.type === 'localStatus') {
         var statusEl = document.getElementById('local-status-' + d.step);
         var btn = document.getElementById('btn-local-' + d.step);
+        var errorEl = document.getElementById('local-error-' + d.step);
+        
+        // Update status text
         if (statusEl) statusEl.textContent = d.status === 'done' ? 'Completed' : d.status === 'failed' ? 'Failed' : 'Running…';
         if (btn) btn.disabled = d.status === 'running';
+        
+        // Display error message if provided
+        if (d.status === 'failed' && d.error && errorEl) {
+          errorEl.textContent = d.error;
+          errorEl.style.display = 'block';
+        }
+        
         if (d.status === 'done' || d.status === 'failed') {
           // Check if all steps are completed
           [1,2,3,4].forEach(function(s) {
