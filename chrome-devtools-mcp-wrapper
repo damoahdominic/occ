@@ -1,0 +1,18 @@
+#!/bin/bash
+# Dynamic CDP launcher — tries port 9225 (local Playwright Chromium) then 9222 (novnc container)
+for PORT in 9225 9222; do
+  RAW=$(curl -s "http://localhost:${PORT}/json/version" 2>/dev/null)
+  if [ -z "$RAW" ]; then continue; fi
+  WS=$(python3 -c "
+import sys, json, re
+d = json.loads(sys.argv[1])
+ws = d.get('webSocketDebuggerUrl', '')
+ws = re.sub(r'://localhost/', '://localhost:${PORT}/', ws)
+print(ws)
+" "$RAW" 2>/dev/null)
+  if [ -n "$WS" ]; then
+    exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS" "$@"
+  fi
+done
+# Fallback: let chrome-devtools-mcp auto-detect
+exec npx chrome-devtools-mcp@latest "$@"

@@ -14,10 +14,7 @@
     },
     "chrome-devtools": {
       "command": "npx",
-      "args": [
-        "chrome-devtools-mcp@latest",
-        "--browserUrl", "http://localhost:9222"
-      ]
+      "args": ["chrome-devtools-mcp@latest", "--autoConnect"]
     }
   }
 }
