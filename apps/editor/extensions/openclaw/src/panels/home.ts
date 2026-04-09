@@ -117,7 +117,7 @@ export class HomePanel {
   /** Current step in the Docker config flow (0 = not active, 1-3 = steps). */
   private _dockerStep: 0 | 1 | 2 | 3 = 0;
   /** Draft config values collected from Step 1, used to render Step 2. */
-  private _dockerDraft: { image: string; port: string; dataDir: string; freshBuild: boolean } | null = null;
+  private _dockerDraft: { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string } | null = null;
   private readonly _version: string;
   private _dashboardAutoOpened = false;
 
@@ -348,18 +348,16 @@ export class HomePanel {
           .then(() => {
             // AI config panel is shown by the webview JS on provisionStatus done:ok.
             // _update() is called after AI config is saved or skipped.
-            // Auto-open the web control panel after a short delay (guarded to prevent double-open).
-            if (!this._dashboardAutoOpened) {
-              this._dashboardAutoOpened = true;
-              setTimeout(() => void vscode.commands.executeCommand('openclaw.configure'), 2000);
-            }
+            // Gateway dashboard auto-open is handled after AI config (see saveAiConfig / skipAiConfig).
           });
       } else if (msg.command === 'saveAiConfig') {
         const provider = msg.provider as string;
         const apiKey = msg.apiKey as string;
-        void this._saveAiConfig(provider, apiKey);
+        const openDashboard = (msg.openDashboard as boolean) !== false;
+        void this._saveAiConfig(provider, apiKey, openDashboard);
       } else if (msg.command === 'skipAiConfig') {
-        void this._skipAiConfig();
+        const openDashboard = (msg.openDashboard as boolean) !== false;
+        void this._skipAiConfig(openDashboard);
       } else if (msg.command === 'dockerCancel') {
         const runtime: 'docker' | 'podman' = (this as any)._dockerRuntime ?? 'docker';
         void HomePanel.runDockerTeardown(this._extensionUri.fsPath, runtime);
@@ -406,6 +404,7 @@ export class HomePanel {
           port: (msg.port as string) || '18789',
           dataDir: (msg.dataDir as string) || '',
           freshBuild: Boolean(msg.freshBuild),
+          bindHost: (msg.bindHost as string) === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
         };
         this._dockerStep = 2;
         void this._update();
@@ -417,7 +416,7 @@ export class HomePanel {
         // User confirmed Step 2 — write config, render Step 3, start provisioning
         const draft = this._dockerDraft!;
         try {
-          await HomePanel.saveDockerConfig(this._extensionUri.fsPath, draft.image, draft.port, draft.dataDir, draft.freshBuild);
+          await HomePanel.saveDockerConfig(this._extensionUri.fsPath, draft.image, draft.port, draft.dataDir, draft.freshBuild, draft.bindHost);
           (this as any)._dockerRuntime = 'docker';
           (this as any)._dockerDataPath = draft.dataDir;
           (this as any)._dockerGatewayPort = draft.port;
@@ -426,16 +425,23 @@ export class HomePanel {
           void this._update();
           // Start provisioning after page renders
           const post = (m: object) => { try { this._panel.webview.postMessage(m); } catch {} };
-          void HomePanel.runDockerProvision(post, draft.dataDir, this._extensionUri.fsPath, 'docker', draft.port, draft.freshBuild)
+          void HomePanel.runDockerProvision(post, draft.dataDir, this._extensionUri.fsPath, 'docker', draft.port, draft.freshBuild, draft.bindHost)
             .then(() => {
-              if (!this._dashboardAutoOpened) {
-                this._dashboardAutoOpened = true;
-                setTimeout(() => void vscode.commands.executeCommand('openclaw.configure'), 2000);
-              }
+              // AI config panel shown by webview JS on provisionStatus done:ok.
             });
         } catch (err) {
           this._panel.webview.postMessage({ type: 'dockerConfigError', message: String(err) });
         }
+      } else if (msg.command === 'dockerGoHome') {
+        // Return to host picker after provisioning completes (or at any time)
+        this._dockerStep = 0;
+        this._dockerDraft = null;
+        this._setupFor = null;
+        this._setupHtmlShown = false;
+        void this._update();
+      } else if (msg.command === 'dockerOpenDashboard') {
+        // Open the gateway connection / configure panel
+        void vscode.commands.executeCommand('openclaw.configure');
       } else if (msg.command === 'dockerCancelConfig') {
         // Cancel — reset docker step state and return to host picker
         this._dockerStep = 0;
@@ -562,7 +568,7 @@ export class HomePanel {
     // Docker config flow: 3-step full-page wizard (step 1 = config, 2 = confirm, 3 = provision).
     // Takes priority over everything — user explicitly entered this flow.
     if (this._dockerStep > 0) {
-      this._panel.webview.html = this._getDockerConfigHtml(this._dockerStep, this._dockerDraft ?? { image: 'openclaw/pod:latest', port: '18789', dataDir: '', freshBuild: false });
+      this._panel.webview.html = this._getDockerConfigHtml(this._dockerStep, this._dockerDraft ?? { image: 'openclaw/pod:latest', port: '18789', dataDir: '', freshBuild: false, bindHost: '127.0.0.1' });
       return;
     }
 
@@ -1097,7 +1103,7 @@ export class HomePanel {
    * Writes the selected AI provider and API key into openclaw.json,
    * then transitions to the IDE experience.
    */
-  private async _saveAiConfig(provider: string, apiKey: string): Promise<void> {
+  private async _saveAiConfig(provider: string, apiKey: string, openDashboard = true): Promise<void> {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
     try {
       let config: Record<string, unknown> = {};
@@ -1138,14 +1144,20 @@ export class HomePanel {
       writeLog(`[ai-config] failed to save: ${err}\n`);
     }
 
+    if (openDashboard) {
+      void vscode.commands.executeCommand('openclaw.configure');
+    }
     void this._transitionToIde(true);
   }
 
   /**
    * Skips AI configuration and proceeds to the IDE experience.
    */
-  private async _skipAiConfig(): Promise<void> {
+  private async _skipAiConfig(openDashboard = true): Promise<void> {
     writeLog('[ai-config] skipped by user\n');
+    if (openDashboard) {
+      void vscode.commands.executeCommand('openclaw.configure');
+    }
     void this._transitionToIde(false);
   }
 
@@ -1788,12 +1800,18 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
    */
   private _getDockerConfigHtml(
     step: 1 | 2 | 3 | number,
-    draft: { image: string; port: string; dataDir: string; freshBuild: boolean }
+    draft: { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string }
   ): string {
     const pill = (n: number) => {
       const active = n === step;
+      const done = n < step;
       const labels: Record<number, string> = { 1: '1. Config', 2: '2. Confirm', 3: '3. Start' };
-      return `<div id="config-step-${n}-indicator" style="padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;background:${active ? '#2563eb' : '#1a1a1a'};color:${active ? '#fff' : '#888'};">${labels[n]}</div>`;
+      // Step 1 is clickable from step 2 (go back); no pill nav during provisioning (step 3)
+      const clickable = step === 2 && n === 1;
+      const onclick = clickable ? ` onclick="vscode.postMessage({command:'dockerBack'})"` : '';
+      const bg = active ? '#2563eb' : done ? '#1a4a2a' : '#1a1a1a';
+      const color = active ? '#fff' : done ? '#4ade80' : '#888';
+      return `<div id="config-step-${n}-indicator"${onclick} style="padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;background:${bg};color:${color};${clickable ? 'text-decoration:underline;cursor:pointer;' : ''}">${labels[n]}</div>`;
     };
 
     const stepperHtml = `
@@ -1829,6 +1847,22 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
             style="width:120px;box-sizing:border-box;background:#111;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:13px;padding:10px 12px;font-family:monospace;outline:none;" />
         </div>
         <div>
+          <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Bind Address</div>
+          <div style="display:flex;gap:8px;">
+            <button id="bind-localhost" onclick="setBindHost('127.0.0.1')"
+              style="flex:1;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${draft.bindHost === '0.0.0.0' ? '#333' : '#2563eb'};background:${draft.bindHost === '0.0.0.0' ? '#111' : '#1a2a4a'};color:${draft.bindHost === '0.0.0.0' ? '#888' : '#7eb6ff'};">
+              127.0.0.1 <span style="font-weight:400;font-size:11px;">(localhost)</span>
+            </button>
+            <button id="bind-all" onclick="setBindHost('0.0.0.0')"
+              style="flex:1;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${draft.bindHost === '0.0.0.0' ? '#b45309' : '#333'};background:${draft.bindHost === '0.0.0.0' ? '#2a1a00' : '#111'};color:${draft.bindHost === '0.0.0.0' ? '#fbbf24' : '#888'};">
+              0.0.0.0 <span style="font-weight:400;font-size:11px;">(all interfaces)</span>
+            </button>
+          </div>
+          <div id="bind-disclaimer" style="display:${draft.bindHost === '0.0.0.0' ? 'block' : 'none'};margin-top:6px;padding:8px 10px;background:#2a1a00;border:1px solid #92400e;border-radius:6px;font-size:11px;color:#fbbf24;line-height:1.5;">
+            ⚠️ Exposes the gateway to your local network. Only use in trusted environments.
+          </div>
+        </div>
+        <div>
           <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Data Directory</div>
           <div style="display:flex;gap:8px;">
             <input type="text" id="config-data-dir" value="${esc(draft.dataDir)}" placeholder="Select a directory..."
@@ -1854,12 +1888,28 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
 
       scriptHtml = `
     const vscode = acquireVsCodeApi();
+    var _bindHost = ${JSON.stringify(draft.bindHost || '127.0.0.1')};
+    function setBindHost(v) {
+      _bindHost = v;
+      var locBtn = document.getElementById('bind-localhost');
+      var allBtn = document.getElementById('bind-all');
+      var disc = document.getElementById('bind-disclaimer');
+      if (v === '0.0.0.0') {
+        locBtn.style.border = '1px solid #333'; locBtn.style.background = '#111'; locBtn.style.color = '#888';
+        allBtn.style.border = '1px solid #b45309'; allBtn.style.background = '#2a1a00'; allBtn.style.color = '#fbbf24';
+        disc.style.display = 'block';
+      } else {
+        locBtn.style.border = '1px solid #2563eb'; locBtn.style.background = '#1a2a4a'; locBtn.style.color = '#7eb6ff';
+        allBtn.style.border = '1px solid #333'; allBtn.style.background = '#111'; allBtn.style.color = '#888';
+        disc.style.display = 'none';
+      }
+    }
     function goNext() {
       var image = document.getElementById('config-gateway-image').value.trim() || 'openclaw/pod:latest';
       var port = document.getElementById('config-gateway-port').value.trim() || '18789';
       var dataDir = document.getElementById('config-data-dir').value.trim();
       var freshBuild = document.getElementById('config-fresh-build').checked;
-      vscode.postMessage({ command: 'dockerNext', image: image, port: port, dataDir: dataDir, freshBuild: freshBuild });
+      vscode.postMessage({ command: 'dockerNext', image: image, port: port, dataDir: dataDir, freshBuild: freshBuild, bindHost: _bindHost });
     }
     window.addEventListener('message', function(evt) {
       var d = evt.data;
@@ -1892,6 +1942,11 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
             <span style="color:#666;flex-shrink:0;">Data Directory</span>
             <span id="confirm-data-dir" style="color:#e0e0e0;font-family:monospace;word-break:break-all;text-align:right;">${esc(draft.dataDir) || '(default)'}</span>
+          </div>
+          <div style="height:1px;background:rgba(255,255,255,0.05);"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#666;flex-shrink:0;">Bind Address</span>
+            <span id="confirm-bind-host" style="color:${draft.bindHost === '0.0.0.0' ? '#fbbf24' : '#e0e0e0'};font-family:monospace;">${esc(draft.bindHost || '127.0.0.1')}</span>
           </div>
           <div style="height:1px;background:rgba(255,255,255,0.05);"></div>
           <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -1937,6 +1992,54 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       </div>
       <div id="provision-log" style="width:100%;height:220px;overflow-y:auto;background:#0a0a0a;border:1px solid #222;border-radius:8px;padding:12px;font-size:11px;font-family:monospace;color:#a0a0a0;white-space:pre-wrap;word-break:break-all;box-sizing:border-box;"></div>
       <div id="provision-status" role="status" aria-live="polite" style="font-size:13px;color:#888;text-align:center;min-height:20px;"></div>
+      <div id="provision-error-actions" style="display:none;flex-direction:column;gap:10px;width:100%;align-items:center;">
+        <button onclick="vscode.postMessage({command:'dockerGoHome'})"
+          style="background:none;border:none;color:#666;cursor:pointer;font-size:13px;padding:4px 8px;">
+          ← Back to Home
+        </button>
+      </div>
+    </div>
+
+    <!-- AI Config panel — shown automatically after Docker provision succeeds (ticket-043) -->
+    <div id="panel-ai-config" style="display:none;flex-direction:column;align-items:center;gap:14px;width:100%;max-width:500px;">
+      <div style="text-align:center;margin-bottom:4px;">
+        <div style="font-size:18px;font-weight:700;color:#fff;margin-bottom:4px;">Configure AI Model</div>
+        <div style="font-size:12px;color:#666;line-height:1.5;">Docker is running. Set up your AI provider to start chatting.</div>
+      </div>
+      <div style="width:100%;display:flex;flex-direction:column;gap:10px;">
+        <div>
+          <div style="font-size:12px;color:#888;margin-bottom:6px;">Provider</div>
+          <select id="ai-provider-select" onchange="onAiConfigChange()"
+            style="width:100%;background:#111;border:1px solid #2b2b2b;border-radius:6px;color:#e0e0e0;font-size:13px;padding:9px 12px;outline:none;box-sizing:border-box;cursor:pointer;">
+            <option value="">Select a provider…</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openai">OpenAI</option>
+            <option value="google">Google Gemini</option>
+            <option value="groq">Groq</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:12px;color:#888;margin-bottom:6px;">API Key</div>
+          <div style="position:relative;">
+            <input id="ai-api-key" type="password" placeholder="Enter your API key" autocomplete="off"
+              oninput="onAiConfigChange()"
+              style="width:100%;background:#111;border:1px solid #2b2b2b;border-radius:6px;color:#e0e0e0;font-size:13px;padding:9px 40px 9px 12px;outline:none;box-sizing:border-box;" />
+            <button id="ai-key-toggle" type="button" onclick="toggleAiKeyVisibility()"
+              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:4px;">&#x1F441;</button>
+          </div>
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#888;cursor:pointer;align-self:flex-start;">
+        <input id="chk-open-dashboard" type="checkbox" checked style="cursor:pointer;" />
+        Open Gateway Dashboard automatically
+      </label>
+      <div style="display:flex;gap:10px;width:100%;justify-content:space-between;margin-top:4px;">
+        <button onclick="skipAiConfig()"
+          style="background:none;border:none;color:#666;cursor:pointer;font-size:13px;padding:8px 12px;">Skip for now</button>
+        <button id="btn-finish-setup" onclick="saveAiConfig()" disabled
+          style="background:#dc2828;color:#fff;border:none;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;opacity:0.5;">Finish Setup</button>
+      </div>
     </div>`;
 
       scriptHtml = `
@@ -1950,10 +2053,45 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
         log.scrollTop = log.scrollHeight;
       } else if (d.type === 'provisionStatus' && status) {
         status.textContent = d.text;
-        if (d.done && d.ok) { status.style.color = '#4ade80'; }
-        else if (d.done && !d.ok) { status.style.color = '#f87171'; }
+        if (d.done && d.ok) {
+          status.style.color = '#4ade80';
+          // Turn all stepper pills green
+          [1,2,3].forEach(function(n) {
+            var pill = document.getElementById('config-step-' + n + '-indicator');
+            if (pill) { pill.style.background = '#1a4a2a'; pill.style.color = '#4ade80'; }
+          });
+          // Transition to AI config panel
+          document.getElementById('docker-config-step-3').style.display = 'none';
+          var ai = document.getElementById('panel-ai-config');
+          if (ai) ai.style.display = 'flex';
+        } else if (d.done && !d.ok) {
+          status.style.color = '#f87171';
+          var errActions = document.getElementById('provision-error-actions');
+          if (errActions) errActions.style.display = 'flex';
+        }
       }
-    });`;
+    });
+    function onAiConfigChange() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var key = document.getElementById('ai-api-key').value.trim();
+      var btn = document.getElementById('btn-finish-setup');
+      if (btn) { btn.disabled = !(provider && key); btn.style.opacity = (provider && key) ? '1' : '0.5'; }
+    }
+    function toggleAiKeyVisibility() {
+      var input = document.getElementById('ai-api-key');
+      if (input) input.type = input.type === 'password' ? 'text' : 'password';
+    }
+    function saveAiConfig() {
+      var provider = document.getElementById('ai-provider-select').value;
+      var apiKey = document.getElementById('ai-api-key').value.trim();
+      if (!provider || !apiKey) return;
+      var openDashboard = document.getElementById('chk-open-dashboard').checked;
+      vscode.postMessage({ command: 'saveAiConfig', provider: provider, apiKey: apiKey, openDashboard: openDashboard });
+    }
+    function skipAiConfig() {
+      var openDashboard = document.getElementById('chk-open-dashboard').checked;
+      vscode.postMessage({ command: 'skipAiConfig', openDashboard: openDashboard });
+    }`;
     }
 
     return `<!DOCTYPE html>
@@ -3732,8 +3870,8 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
    * Loads Docker configuration from docker/.env.openclaw (user config) or
    * docker/.env.openclaw.example (defaults). Returns object with image, port, dataDir, freshBuild.
    */
-  public static async loadDockerConfig(extensionPath: string): Promise<{ image: string; port: string; dataDir: string; freshBuild: boolean }> {
-    const defaults = { image: 'openclaw/pod:latest', port: '18789', dataDir: './openclaw_docker_data', freshBuild: false };
+  public static async loadDockerConfig(extensionPath: string): Promise<{ image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string }> {
+    const defaults = { image: 'openclaw/pod:latest', port: '18789', dataDir: './openclaw_docker_data', freshBuild: false, bindHost: '127.0.0.1' };
     const userEnvPath = path.join(extensionPath, '..', '..', '..', 'docker', '.env.openclaw');
     const examplePath = path.join(extensionPath, '..', '..', '..', 'docker', '.env.openclaw.example');
 
@@ -3753,12 +3891,15 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
     const portMatch = content.match(/^GATEWAY_PORT=(.+)$/m);
     const dataDirMatch = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
     const freshBuildMatch = content.match(/^FRESH_BUILD=(.+)$/m);
+    const bindHostMatch = content.match(/^GATEWAY_BIND_HOST=(.+)$/m);
 
     const image = imageMatch?.[1]?.trim() ?? defaults.image;
     const port = portMatch?.[1]?.trim() ?? defaults.port;
     let dataDir = dataDirMatch?.[1]?.trim() ?? defaults.dataDir;
     const freshBuildStr = freshBuildMatch?.[1]?.trim() ?? 'false';
     const freshBuild = freshBuildStr.toLowerCase() === 'true';
+    const bindHostRaw = bindHostMatch?.[1]?.trim() ?? defaults.bindHost;
+    const bindHost = bindHostRaw === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
 
     // Resolve relative dataDir paths to absolute for display
     if (!path.isAbsolute(dataDir) && !dataDir.startsWith('~')) {
@@ -3767,14 +3908,14 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       dataDir = path.join(os.homedir(), dataDir.slice(2));
     }
 
-    return { image, port, dataDir, freshBuild };
+    return { image, port, dataDir, freshBuild, bindHost };
   }
 
   /**
    * Saves Docker configuration to docker/.env.openclaw.
    * Writes atomically using temp file + rename.
    */
-  public static async saveDockerConfig(extensionPath: string, image: string, port: string, dataDir: string, freshBuild: boolean): Promise<void> {
+  public static async saveDockerConfig(extensionPath: string, image: string, port: string, dataDir: string, freshBuild: boolean, bindHost: string = '127.0.0.1'): Promise<void> {
     const envPath = path.join(extensionPath, '..', '..', '..', 'docker', '.env.openclaw');
     const dir = path.dirname(envPath);
     if (!fs.existsSync(dir)) {
@@ -3800,6 +3941,9 @@ OPENCLAW_DATA_DIR=${relativeDataDir}
 
 # Gateway port (default: 18789)
 GATEWAY_PORT=${port}
+
+# Bind address: 127.0.0.1 (localhost only, default) or 0.0.0.0 (all interfaces)
+GATEWAY_BIND_HOST=${bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1'}
 
 # Docker image for the gateway
 GATEWAY_IMAGE=${image}
@@ -3998,6 +4142,7 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
     runtime: 'docker' | 'podman' = 'docker',
     gatewayPort?: string,
     freshBuild: boolean = false,
+    bindHost: string = '127.0.0.1',
   ): Promise<void> {
     const tee = (text: string) => { post({ type: 'provisionLog', text }); writeLog(text); };
     const composeFile = path.join(extensionPath, '..', '..', '..', '..', 'docker', 'docker-compose.openclaw.yml');
@@ -4043,19 +4188,20 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
 
     // Write .env file alongside compose
     const envFile = path.join(path.dirname(resolvedCompose), '.env');
-    const envContent = `OPENCLAW_DATA_DIR=${expandedDataPath}\nGATEWAY_PORT=${effectivePort}\n`;
+    const envContent = `OPENCLAW_DATA_DIR=${expandedDataPath}\nGATEWAY_PORT=${effectivePort}\nGATEWAY_BIND_HOST=${bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1'}\n`;
     try { fs.writeFileSync(envFile, envContent, 'utf8'); } catch { /* non-fatal */ }
 
     tee(`▶ Using compose file: ${resolvedCompose}\n`);
     tee(`▶ Data directory: ${expandedDataPath}\n`);
     tee(`▶ Gateway port: ${effectivePort}\n`);
+    tee(`▶ Bind address: ${bindHost === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : '127.0.0.1 (localhost)'}\n`);
     tee(`▶ Runtime: ${runtime}\n\n`);
 
     post({ type: 'provisionStatus', text: 'Cleaning up any existing containers…' });
 
     const cliCmd = runtime === 'podman' ? 'podman' : 'docker';
-    // Pass only OPENCLAW_DATA_DIR as env var - compose reads .env.openclaw via env_file directive
-    const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath };
+    // Pass key vars to compose process env (compose also reads the .env file we wrote above)
+    const env = { ...process.env, OPENCLAW_DATA_DIR: expandedDataPath, GATEWAY_BIND_HOST: bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1' };
 
     // Tear down any previous compose stack first (non-fatal — may not exist yet)
     await new Promise<number>(resolve => {
@@ -4133,17 +4279,33 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
       tee('\n✅ Gateway is healthy!\n');
     }
 
-    // Write openclaw.json with gateway config if it doesn't already have one
-    const openclawJson = path.join(expandedDataPath, 'openclaw.json');
-    if (!fs.existsSync(openclawJson)) {
-      try {
-        fs.writeFileSync(openclawJson, JSON.stringify({
-          gateway: { host: '127.0.0.1', port: effectivePort },
-        }, null, 2), 'utf8');
-        tee(`✅ Created openclaw.json with gateway config (port ${effectivePort})\n`);
-      } catch (e) {
-        tee(`⚠️  Could not write openclaw.json: ${e}\n`);
-      }
+    // Write openclaw.json with gateway config to both locations:
+    // 1. Inside data directory (mounted in container)
+    // 2. In ~/.openclaw on host (so Configure panel can find it)
+    const dataJsonPath = path.join(expandedDataPath, 'openclaw.json');
+    const hostJsonPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    const configContent = JSON.stringify({
+      gateway: { host: bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1', port: effectivePort },
+    }, null, 2);
+
+    // Ensure ~/.openclaw directory exists
+    const hostDir = path.dirname(hostJsonPath);
+    if (!fs.existsSync(hostDir)) {
+      fs.mkdirSync(hostDir, { recursive: true });
+    }
+
+    try {
+      fs.writeFileSync(hostJsonPath, configContent, 'utf8');
+      tee(`✅ Created ~/.openclaw/openclaw.json with gateway config (port ${effectivePort})\n`);
+    } catch (e) {
+      tee(`⚠️  Could not write ~/.openclaw/openclaw.json: ${e}\n`);
+    }
+
+    try {
+      fs.writeFileSync(dataJsonPath, configContent, 'utf8');
+      tee(`✅ Created data directory openclaw.json with gateway config\n`);
+    } catch (e) {
+      tee(`⚠️  Could not write data directory openclaw.json: ${e}\n`);
     }
 
     // Create Desktop shortcut
