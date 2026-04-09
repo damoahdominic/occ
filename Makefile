@@ -85,8 +85,6 @@ build-core:
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor + build dependencies (parallel)" && \
 	( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ) && \
-	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
-	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \
@@ -198,4 +196,4 @@ container-build-linux:
 	docker compose run --rm \
 		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
-		editor build-linux PROJECT_ROOT=/workspace
+		editor build-linux PROJECT_ROOT=/workspace | tee ./.tmp/container-build-linux-$(shell date +%Y-%m-%d_%H-%M-%S).log

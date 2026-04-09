@@ -12,18 +12,16 @@ services:
       NODE_ENV: development
       NODE_OPTIONS: --max-old-space-size=7096
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
-    entrypoint: ['/workspace/scripts/docker-dev.sh']
+    command: ['bash','-lc','/workspace/scripts/docker-dev.sh']
     volumes:
       - .:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
-      # Anonymous volumes for gitignored large build artefacts — prevents
-      # downloaded/extracted VS Code distributions from landing on the host.
-      - /workspace/apps/VSCode-linux-x64
-      - /workspace/apps/VSCode-darwin-x64
-      - /workspace/apps/VSCode-darwin-arm64
-      - /workspace/apps/VSCode-win32-x64
-      - /workspace/apps/VSCode-win32-arm64
-      - /workspace/apps/VSCode-win32-ia32
+      #- vscode-linux-x64:/workspace/apps/VSCode-linux-x64
+      #- vscode-darwin-x64:/workspace/apps/VSCode-darwin-x64
+      #- vscode-darwin-arm64:/workspace/apps/VSCode-darwin-arm64
+      #- vscode-win32-x64:/workspace/apps/VSCode-win32-x64
+      #- vscode-win32-arm64:/workspace/apps/VSCode-win32-arm64
+      #- vscode-win32-ia32:/workspace/apps/VSCode-win32-ia32
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9888/"]
       interval: 15s
@@ -63,4 +61,12 @@ services:
     depends_on:
       editor:
         condition: service_healthy
+
+volumes:
+  vscode-linux-x64:
+  vscode-darwin-x64:
+  vscode-darwin-arm64:
+  vscode-win32-x64:
+  vscode-win32-arm64:
+  vscode-win32-ia32:
 
