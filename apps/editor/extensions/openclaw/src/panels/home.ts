@@ -1935,11 +1935,13 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
       var port = document.getElementById('config-gateway-port').value.trim() || '18789';
       var dataDir = document.getElementById('config-data-dir').value.trim();
       var freshBuild = document.getElementById('config-fresh-build').checked;
+      console.log('goNext: dataDir =', dataDir);
       vscode.postMessage({ command: 'dockerNext', image: image, port: port, dataDir: dataDir, freshBuild: freshBuild, bindHost: _bindHost });
     }
     window.addEventListener('message', function(evt) {
       var d = evt.data;
       if (d.type === 'dockerBrowseResult') {
+        console.log('dockerBrowseResult received, setting path to:', d.path);
         document.getElementById('config-data-dir').value = d.path;
       }
     });`;
@@ -1967,7 +1969,7 @@ The binary is already downloaded — do NOT re-download or compile anything.`;
           <div style="height:1px;background:rgba(255,255,255,0.05);"></div>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
             <span style="color:#666;flex-shrink:0;">Data Directory</span>
-            <span id="confirm-data-dir" style="color:#e0e0e0;font-family:monospace;word-break:break-all;text-align:right;">${esc(draft.dataDir) || '(default)'}</span>
+            <span id="confirm-data-dir" style="color:#e0e0e0;font-family:monospace;word-break:break-all;text-align:right;max-width:260px;">${esc(draft.dataDir) || '(default)'}</span>
           </div>
           <div style="height:1px;background:rgba(255,255,255,0.05);"></div>
           <div style="display:flex;justify-content:space-between;align-items:center;">
