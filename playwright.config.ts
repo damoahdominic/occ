@@ -21,12 +21,26 @@ export default defineConfig({
   },
   use: {
     baseURL: 'http://localhost:9888',
-    // Use bundled Playwright Chromium (no external Chrome required)
-    browserName: 'chromium',
-    headless: true,
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // Connect to existing Chrome via CDP when CDP_ENDPOINT is set
+    // Otherwise use bundled Playwright Chromium
+    ...(process.env.CDP_ENDPOINT ? {
+      // In CDP mode, we don't specify browserName or launchOptions
+      // The browser connection is handled in the test fixtures (fixtures.ts)
+      // We still need to set up the use object with baseURL etc.
+    } : {
+      // Standard mode - launch local Chromium
+      browserName: 'chromium',
+      headless: true,
+      ...devices['Desktop Chrome'],
+      // Required when running inside Docker as root (no sandbox available)
+      launchOptions: {
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
+    }),
   },
+  // Always use the chromium project - fixtures.ts handles the browser connection
   projects: [
     {
       name: 'chromium',
@@ -36,9 +50,12 @@ export default defineConfig({
         launchOptions: {
           args: ['--no-sandbox', '--disable-setuid-sandbox'],
         },
+        // In CDP mode, the fixtures.ts will override the browser connection
+        // so these launchOptions are only used in standard mode
       },
     },
   ],
+  // No global setup needed - the fixtures.ts handles browser connection
   webServer: {
     // The editor container is already running in Docker — reuse it instead of
     // trying to start a new one.
