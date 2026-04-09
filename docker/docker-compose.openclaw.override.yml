@@ -3,7 +3,8 @@ version: "3.9"
 services:
   occ-gateway:
     image: bunny:latest
+    command: bash -lc "mkdir -p /root/.openclaw && echo '{\"gateway\":{\"controlUi\":{\"dangerouslyAllowHostHeaderOriginFallback\":true}}}' > /root/.openclaw/openclaw.json; bun i -g @buape/carbon @larksuiteoapi/node-sdk @slack/web-api grammy && openclaw gateway run --allow-unconfigured --bind lan"
     ports:
-      - "127.0.0.1:${GATEWAY_PORT:-18789}:18789"
+      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_PORT:-18789}:18789"
     volumes:
       - ${OPENCLAW_DATA_DIR:-./openclaw_docker_data}:/root/.openclaw
