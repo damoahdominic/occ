@@ -1,15 +1,18 @@
 {
-  "mcpServers": {
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
     "playwright-novnc": {
-       "command": "bash",
-       "args": [
+       "type": "local",
+       "command": [
+         "bash",
          "-c",
          "docker ps -q -f name=playwright-novnc || docker run -d --name playwright-novnc --network host ghcr.io/xtr-dev/mcp-playwright-novnc; docker exec -i playwright-novnc mcp-proxy http://localhost:3080/sse"
        ]
     },
     "chrome-devtools": {
-      "command": "bash",
-      "args": [
+      "type": "local",
+      "command": [
+        "bash",
         "-c",
         "exec npx chrome-devtools-mcp@latest --wsEndpoint \"$(curl -s -H 'Host: localhost' http://localhost:9222/json/version | awk '/Socket/{print $2}' | tr -d '\"' | sed 's|://localhost/|://localhost:9222/|')\""
       ]
