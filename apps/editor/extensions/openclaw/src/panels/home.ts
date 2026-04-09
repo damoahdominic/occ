@@ -118,7 +118,7 @@ export class HomePanel {
   private _dockerStep: 0 | 1 | 2 | 3 = 0;
   /** Draft config values collected from Step 1, used to render Step 2. */
   private _dockerDraft: { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string } | null = null;
-  private readonly _version: string;
+  private _version: string;
   private _dashboardAutoOpened = false;
 
   // Docker detection cache (5-minute TTL)
@@ -130,7 +130,7 @@ export class HomePanel {
     this._setupFor = setupFor ?? null;
     this._panel = panel;
     this._extensionUri = extensionUri;
-    this._version = (vscode.extensions.getExtension('openclaw.home')?.packageJSON as { version?: string })?.version ?? '';
+    this._version = '';
     this._outputChannel = vscode.window.createOutputChannel('OpenClaw Gateway');
     // Subscribe to active host changes from the core extension if available.
     const coreExt = vscode.extensions.getExtension<OpenClawCoreAPI>('openclaw.home');
@@ -498,7 +498,25 @@ export class HomePanel {
     this._disposables.forEach(d => d.dispose());
   }
 
+  private async _loadVersion(): Promise<void> {
+    try {
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders || workspaceFolders.length === 0) {
+        return;
+      }
+      const workspaceRoot = workspaceFolders[0].uri;
+      const versionFilePath = vscode.Uri.joinPath(workspaceRoot, 'version.txt');
+      const fileContent = await vscode.workspace.fs.readFile(versionFilePath);
+      this._version = new TextDecoder().decode(fileContent).trim();
+    } catch {
+      this._version = '';
+    }
+  }
+
   private async _update() {
+    // Load product version from version.txt at workspace root.
+    await this._loadVersion();
+
     // Get config path and check existence via the active host.
     const configFile = await this._host.getConfigPath();
     const isConfigured = await this._host.exists(configFile);
