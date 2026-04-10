@@ -12,6 +12,17 @@ if [ "$(id -u)" = "0" ]; then
         chown root:root "$SANDBOX"
         chmod 4755 "$SANDBOX"
     fi
+    
+    # Priority 1: Resolve npm path before re-execution as bun user
+    # This ensures preLaunch.js can find npm (avoids ENOENT errors)
+    NPM_PATH=""
+    if command -v npm >/dev/null 2>&1; then
+        NPM_PATH="$(command -v npm)"
+    fi
+    
+    # Export NPM for use by preLaunch.js in bun user context
+    export NPM="$NPM_PATH"
+    
     exec su bun -s /bin/bash -- "$ROOT/launch-editor.sh" "$@"
 fi
 
