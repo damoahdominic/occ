@@ -9,6 +9,8 @@ import type { HostConnection, OpenClawCoreAPI } from '../hosts/types';
 import { DefaultLocalHostConnection } from '../hosts/localDefault';
 import { renderStatusHtml } from './statusHtml';
 import { setActiveOpenClawWorkspaceFolder, closeFilesFromDir } from './statusController';
+import { ErrorCode, errorCodeMessages } from '../errorCodes';
+import { ErrorReporter } from '../errorReporting';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'rebooting' | 'errored' | 'ai-fixing';
 
@@ -399,10 +401,13 @@ export class HomePanel {
         }
       } else if (msg.command === 'dockerNext') {
         // User clicked Next on Step 1 — save draft and render Step 2
+        const inputDataDir = (msg.dataDir as string) || '';
+        // If user didn't provide a custom data directory, use the default
+        const defaultDataDir = HomePanel.getDefaultOpenClawDataPath();
         this._dockerDraft = {
           image: (msg.image as string) || 'openclaw/pod:latest',
           port: (msg.port as string) || '18789',
-          dataDir: (msg.dataDir as string) || '',
+          dataDir: inputDataDir || defaultDataDir,
           freshBuild: Boolean(msg.freshBuild),
           bindHost: (msg.bindHost as string) === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
         };
@@ -4196,7 +4201,11 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
       const altCompose = path.join(extensionPath, 'docker', 'docker-compose.openclaw.yml');
       if (fs.existsSync(altCompose)) resolvedCompose = altCompose;
       else {
-        post({ type: 'provisionStatus', text: '❌ Compose file not found. Cannot provision.', done: true, ok: false });
+        const errCode = ErrorCode.ERR_FILE_NOT_FOUND;
+        const msg = errorCodeMessages[errCode];
+        post({ type: 'provisionStatus', text: `❌ ${msg.message}`, done: true, ok: false });
+        // Send error report (fire-and-forget)
+        HomePanel._sendErrorReport(errCode, msg.message);
         return;
       }
     }
@@ -4269,7 +4278,10 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
 
       if (buildResult !== 0) {
         tee('\n❌ Image build failed.\n');
-        post({ type: 'provisionStatus', text: '❌ Failed to build images. See log above.', done: true, ok: false });
+        const errCode = ErrorCode.ERR_DOCKER_PULL_FAILED;
+        const errMsg = errorCodeMessages[errCode];
+        post({ type: 'provisionStatus', text: `❌ ${errMsg.message}`, done: true, ok: false });
+        HomePanel._sendErrorReport(errCode, 'Docker image build failed');
         return;
       }
     }
@@ -4294,7 +4306,10 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
 
     if (upResult !== 0) {
       tee('\n❌ docker compose up failed.\n');
-      post({ type: 'provisionStatus', text: '❌ Failed to start containers. See log above.', done: true, ok: false });
+      const errCode = ErrorCode.ERR_DOCKER_CONTAINER_START;
+      const errMsg = errorCodeMessages[errCode];
+      post({ type: 'provisionStatus', text: `❌ ${errMsg.message}`, done: true, ok: false });
+      HomePanel._sendErrorReport(errCode, 'Docker container start failed');
       return;
     }
 
@@ -4315,6 +4330,10 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
 
     if (!healthy) {
       tee('\n⚠️  Gateway did not respond on /health within 60s. Containers may still be starting.\n');
+      // Send error report for health check timeout (non-critical)
+      const errCode = ErrorCode.ERR_GATEWAY_HEALTH_CHECK;
+      const errMsg = errorCodeMessages[errCode];
+      HomePanel._sendErrorReport(errCode, 'Gateway health check timed out after 60s');
     } else {
       tee('\n✅ Gateway is healthy!\n');
     }
@@ -4371,5 +4390,25 @@ FRESH_BUILD=${freshBuild ? 'true' : 'false'}
         stdio: 'ignore',
       }).on('close', () => resolve()).on('error', () => resolve());
     });
+  }
+
+  /**
+   * Sends an error report to the backend (fire-and-forget).
+   * Does not block or show errors on failure.
+   */
+  private static _sendErrorReport(errorCode: ErrorCode, message: string): void {
+    try {
+      const report = ErrorReporter.createErrorReport(
+        errorCode,
+        message,
+        { logLimit: 50 }
+      );
+      // Fire-and-forget - don't await
+      ErrorReporter.sendErrorReport(report).catch(() => {
+        // Silently ignore failures
+      });
+    } catch {
+      // Best-effort - never throw
+    }
   }
 }
