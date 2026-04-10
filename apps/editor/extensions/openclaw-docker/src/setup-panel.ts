@@ -8,10 +8,49 @@ import { StatusPanelController, setActiveOpenClawWorkspaceFolder } from '../../o
 
 const IMAGE = 'ghcr.io/openclaw/openclaw:latest';
 const CONTAINER = 'occ-openclaw';
-const HOST_PORT = 18790;
-const CONTAINER_PORT = 18790;
-const STATE_DIR = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
-const VOLUME_MOUNT = `${STATE_DIR}:/home/node/.openclaw`;
+const DEFAULT_HOST_PORT = 18790;
+const DEFAULT_CONTAINER_PORT = 18790;
+const DEFAULT_STATE_DIR = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
+
+// Config file paths
+function getDockerDir(extensionUri?: vscode.Uri): string {
+  // Get workspace root - try multiple approaches
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (workspaceRoot) {
+    return path.join(workspaceRoot, 'docker');
+  }
+  // Fallback: derive from extension path
+  if (extensionUri) {
+    return path.join(path.dirname(path.dirname(path.dirname(extensionUri.fsPath))), 'docker');
+  }
+  // Last resort: relative to where we think the repo is
+  return path.join(os.homedir(), 'Desktop', 'workshop', 'studio', 'hustle', 'occ', 'docker');
+}
+
+function getConfigFilePath(extensionUri?: vscode.Uri): string {
+  return path.join(getDockerDir(extensionUri), '.env.openclaw');
+}
+
+function getConfigExamplePath(extensionUri?: vscode.Uri): string {
+  return path.join(getDockerDir(extensionUri), '.env.openclaw.example');
+}
+
+// Config type
+export interface DockerConfig {
+  image: string;
+  port: string;
+  dataDir: string;
+  freshBuild: boolean;
+  bindHost: string;
+}
+
+const DEFAULT_CONFIG: DockerConfig = {
+  image: 'ghcr.io/openclaw/openclaw:latest',
+  port: '18790',
+  dataDir: './openclaw_docker_data',
+  freshBuild: false,
+  bindHost: '127.0.0.1',
+};
 
 export class DockerSetupPanel {
   public static currentPanel: DockerSetupPanel | undefined;
@@ -21,6 +60,28 @@ export class DockerSetupPanel {
   private _disposables: vscode.Disposable[] = [];
   private _statusController: StatusPanelController | undefined;
   private _disposed = false;
+
+  // Config flow state (0=Config, 1=Confirm, 2=Preflight, 3=Pull, 4=Onboard, 5=Launch, 6=Done)
+  private _configStep: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
+  private _configDraft: DockerConfig | null = null;
+  private _activeConfig: DockerConfig = { ...DEFAULT_CONFIG };
+
+  // Helper getters for provisioning
+  private get _image(): string { return this._activeConfig.image; }
+  private get _hostPort(): number { return parseInt(this._activeConfig.port, 10) || DEFAULT_HOST_PORT; }
+  private get _containerPort(): number { return DEFAULT_CONTAINER_PORT; }
+  private get _dataDir(): string { 
+    // Resolve relative paths relative to docker folder
+    const dockerDir = getDockerDir(this._extensionUri);
+    const dataDir = this._activeConfig.dataDir;
+    if (dataDir.startsWith('./') || !path.isAbsolute(dataDir)) {
+      return path.resolve(dockerDir, dataDir);
+    }
+    return dataDir;
+  }
+  private get _bindHost(): string { return this._activeConfig.bindHost; }
+  private get _freshBuild(): boolean { return this._activeConfig.freshBuild; }
+  private get _volumeMount(): string { return `${this._dataDir}:/home/node/.openclaw`; }
 
   private get _homeUri(): vscode.Uri {
     const homeExt = vscode.extensions.getExtension('openclaw.home');
@@ -76,7 +137,24 @@ export class DockerSetupPanel {
           this._statusController.handleMessage(msg);
           return;
         }
+
+        // Handle config flow messages
         switch (msg.command) {
+          case 'dockerBrowseDir':
+            await this._handleBrowseDir();
+            break;
+          case 'dockerSaveConfig':
+            this._handleSaveConfig(msg as unknown as { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string });
+            break;
+          case 'dockerConfirmConfig':
+            await this._handleConfirmConfig();
+            break;
+          case 'dockerBack':
+            this._handleBack();
+            break;
+          case 'dockerCancel':
+            this._handleCancel();
+            break;
           case 'dockerPreflightCheck':
             await this._handleDockerPreflight();
             break;
@@ -115,6 +193,159 @@ export class DockerSetupPanel {
       const d = this._disposables.pop();
       if (d) { d.dispose(); }
     }
+  }
+
+  // ── Config Helpers ──────────────────────────────────────────────────────────
+
+  /** Load config from file or return defaults */
+  private async _loadConfig(): Promise<DockerConfig> {
+    const configPath = getConfigFilePath(this._extensionUri);
+    try {
+      if (fs.existsSync(configPath)) {
+        const content = fs.readFileSync(configPath, 'utf-8');
+        const config: DockerConfig = { ...DEFAULT_CONFIG };
+        
+        const imageMatch = content.match(/^GATEWAY_IMAGE=(.+)$/m);
+        const portMatch = content.match(/^GATEWAY_PORT=(.+)$/m);
+        const dataDirMatch = content.match(/^OPENCLAW_DATA_DIR=(.+)$/m);
+        const freshBuildMatch = content.match(/^FRESH_BUILD=(.+)$/m);
+        const bindHostMatch = content.match(/^BIND_HOST=(.+)$/m);
+        
+        if (imageMatch?.[1]) config.image = imageMatch[1].trim();
+        if (portMatch?.[1]) config.port = portMatch[1].trim();
+        if (dataDirMatch?.[1]) config.dataDir = dataDirMatch[1].trim();
+        if (freshBuildMatch?.[1]) config.freshBuild = freshBuildMatch[1].trim().toLowerCase() === 'true';
+        if (bindHostMatch?.[1]) config.bindHost = bindHostMatch[1].trim();
+        
+        return config;
+      }
+    } catch { /* use defaults */ }
+    return { ...DEFAULT_CONFIG };
+  }
+
+  /** Save config to file atomically */
+  private async _saveConfig(config: DockerConfig): Promise<void> {
+    const configPath = getConfigFilePath(this._extensionUri);
+    const dockerDir = getDockerDir(this._extensionUri);
+    
+    // Ensure docker directory exists
+    if (!fs.existsSync(dockerDir)) {
+      fs.mkdirSync(dockerDir, { recursive: true });
+    }
+    
+    const content = [
+      `GATEWAY_IMAGE=${config.image}`,
+      `GATEWAY_PORT=${config.port}`,
+      `OPENCLAW_DATA_DIR=${config.dataDir}`,
+      `FRESH_BUILD=${config.freshBuild}`,
+      `BIND_HOST=${config.bindHost}`,
+      '',
+    ].join('\n');
+    
+    // Atomic write: temp file + rename
+    const tempPath = configPath + '.tmp';
+    fs.writeFileSync(tempPath, content, 'utf-8');
+    fs.renameSync(tempPath, configPath);
+  }
+
+  /** Validate config values */
+  private _validateConfig(config: DockerConfig): string | null {
+    const port = parseInt(config.port, 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      return 'Port must be between 1 and 65535';
+    }
+    if (!config.dataDir || config.dataDir.trim() === '') {
+      return 'Data directory is required';
+    }
+    if (config.bindHost !== '127.0.0.1' && config.bindHost !== '0.0.0.0') {
+      return 'Bind host must be 127.0.0.1 or 0.0.0.0';
+    }
+    return null;
+  }
+
+  // ── Config Message Handlers ────────────────────────────────────────────────
+
+  private async _handleBrowseDir(): Promise<void> {
+    const uri = await vscode.window.showOpenDialog({
+      canSelectFolders: true,
+      canSelectFiles: false,
+      canSelectMany: false,
+      title: 'Select OpenClaw Data Directory',
+    });
+    if (uri?.[0]) {
+      try {
+        this._panel.webview.postMessage({ type: 'dockerBrowseResult', path: uri[0].fsPath });
+      } catch { /* ignore */ }
+    }
+  }
+
+  private _handleSaveConfig(msg: { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string }): void {
+    this._configDraft = {
+      image: msg.image || DEFAULT_CONFIG.image,
+      port: msg.port || DEFAULT_CONFIG.port,
+      dataDir: msg.dataDir || DEFAULT_CONFIG.dataDir,
+      freshBuild: Boolean(msg.freshBuild),
+      bindHost: msg.bindHost || DEFAULT_CONFIG.bindHost,
+    };
+    
+    // Validate
+    const error = this._validateConfig(this._configDraft);
+    if (error) {
+      try {
+        this._panel.webview.postMessage({ type: 'dockerConfigError', message: error });
+      } catch { /* ignore */ }
+      return;
+    }
+    
+    // Advance to Confirm step
+    this._configStep = 1;
+    this._renderConfigStep();
+  }
+
+  private async _handleConfirmConfig(): Promise<void> {
+    if (!this._configDraft) return;
+    
+    // Save config to file
+    await this._saveConfig(this._configDraft);
+    this._activeConfig = { ...this._configDraft };
+    
+    // Advance to Step 3 (Preflight)
+    this._configStep = 2;
+    this._renderProvisioningStep();
+    
+    // Auto-start preflight
+    await this._handleDockerPreflight();
+  }
+
+  private _handleBack(): void {
+    if (this._configStep === 1) {
+      // Go back from Confirm to Config
+      this._configStep = 0;
+      this._renderConfigStep();
+    }
+  }
+
+  private _handleCancel(): void {
+    this.dispose();
+    void vscode.commands.executeCommand('openclaw.home.picker');
+  }
+
+  // ── Render Methods ─────────────────────────────────────────────────────────
+
+  private _renderConfigStep(): void {
+    const iconUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._homeUri, 'media', 'icon.png')
+    ).toString();
+    
+    this._panel.webview.html = this._getConfigHtml(iconUri, this._configDraft || DEFAULT_CONFIG);
+  }
+
+  private _renderProvisioningStep(): void {
+    const iconUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._homeUri, 'media', 'icon.png')
+    ).toString();
+    
+    this._panel.webview.html = this._getHtml(iconUri);
   }
 
   /** On open: jump straight to status panel if the container is already set up, else show wizard. */
@@ -161,15 +392,18 @@ export class DockerSetupPanel {
       cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
     }
 
-    // Container not running (or was deleted above) — show the setup wizard.
-    this._panel.webview.html = this._getHtml(webviewIconUri);
+    // Container not running (or was deleted above) — show config step first
+    this._activeConfig = await this._loadConfig();
+    this._configStep = 0;
+    this._configDraft = null;
+    this._panel.webview.html = this._getConfigHtml(webviewIconUri, this._activeConfig);
   }
 
   private async _showStatusPanel(): Promise<void> {
     if (!this._statusController) {
       const { DockerHostConnection } = await import('./connection');
       const host = new DockerHostConnection(
-        { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: HOST_PORT }, localMountPath: STATE_DIR },
+        { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: this._hostPort }, localMountPath: this._dataDir },
         CONTAINER,
       );
       this._statusController = new StatusPanelController(
@@ -184,9 +418,9 @@ export class DockerSetupPanel {
       );
     }
     await this._statusController.show();
-    this._panel.title = `OCC Home {Docker:${HOST_PORT}}`;
+    this._panel.title = `OCC Home {Docker:${this._hostPort}}`;
     void vscode.commands.executeCommand('occ.window.setHost', {
-      type: 'docker', hostId: `docker:${CONTAINER}`, port: HOST_PORT, label: `Docker (${CONTAINER})`,
+      type: 'docker', hostId: `docker:${CONTAINER}`, port: this._hostPort, label: `Docker (${CONTAINER})`,
     });
   }
 
@@ -236,21 +470,21 @@ export class DockerSetupPanel {
     };
 
     try {
-      logCmd(`$ docker pull ${IMAGE}\n`);
-      log(`Pulling ${IMAGE}...\n`);
+      logCmd(`$ docker pull ${this._image}\n`);
+      log(`Pulling ${this._image}...\n`);
       const pullCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', ['pull', IMAGE], { windowsHide: true });
+        const proc = cp.spawn('docker', ['pull', this._image], { windowsHide: true });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
         proc.stderr.on('data', (d: Buffer) => log(d.toString()));
         proc.on('close', (code) => resolve(code ?? -1));
         proc.on('error', () => resolve(-1));
       });
-      if (pullCode !== 0) { fail(`Failed to pull ${IMAGE}. Check your internet connection.`); return; }
+      if (pullCode !== 0) { fail(`Failed to pull ${this._image}. Check your internet connection.`); return; }
       log(`\n✓ Image ready\n`);
 
       // Ensure state directory exists on the host
-      try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch { /* ok */ }
-      log(`✓ State dir: ${STATE_DIR}\n`);
+      try { fs.mkdirSync(this._dataDir, { recursive: true }); } catch { /* ok */ }
+      log(`✓ State dir: ${this._dataDir}\n`);
 
       try { this._panel.webview.postMessage({ type: 'dockerPullDone' }); } catch { /* ignore */ }
     } catch (err) {
@@ -272,16 +506,16 @@ export class DockerSetupPanel {
     };
 
     try {
-      logCmd(`$ docker run --rm \\\n    -v ${VOLUME_MOUNT} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${IMAGE} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${CONTAINER_PORT}\n`);
+      logCmd(`$ docker run --rm \\\n    -v ${this._volumeMount} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${this._image} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${this._containerPort}\n`);
       log('Running OpenClaw onboard in container...\n');
       const code = await new Promise<number>((resolve) => {
         const proc = cp.spawn('docker', [
           'run', '--rm',
-          '-v', VOLUME_MOUNT,
+          '-v', this._volumeMount,
           '--security-opt', 'no-new-privileges',
           '--cap-drop', 'ALL',
           '--cap-add', 'NET_BIND_SERVICE',
-          IMAGE,
+          this._image,
           'openclaw', 'onboard',
           '--non-interactive', '--accept-risk',
           '--flow', 'quickstart',
@@ -291,7 +525,7 @@ export class DockerSetupPanel {
           '--custom-model-id', 'occ-legacy',
           '--custom-compatibility', 'openai',
           '--gateway-auth', 'token',
-          '--gateway-port', String(CONTAINER_PORT),
+          '--gateway-port', String(this._containerPort),
           '--skip-channels', '--skip-skills', '--skip-health',
         ], { windowsHide: true });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
@@ -305,10 +539,10 @@ export class DockerSetupPanel {
         return;
       }
 
-      // Patch occ-legacy model metadata in the config written to STATE_DIR
+      // Patch occ-legacy model metadata in the config written to data dir
       log('\nPatching model config...\n');
       try {
-        const cfgPath = path.join(STATE_DIR, 'openclaw.json');
+        const cfgPath = path.join(this._dataDir, 'openclaw.json');
         if (fs.existsSync(cfgPath)) {
           const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
           const OCC_LEGACY_COST = { input: 0.0000006, output: 0.000003, cacheRead: 0.0000001, cacheWrite: 0 };
@@ -332,10 +566,10 @@ export class DockerSetupPanel {
         }
       } catch { /* non-fatal */ }
 
-      // Write moltpilot-tier.json into the state dir
+      // Write moltpilot-tier.json into the data dir
       try {
         fs.writeFileSync(
-          path.join(STATE_DIR, 'moltpilot-tier.json'),
+          path.join(this._dataDir, 'moltpilot-tier.json'),
           JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
         );
       } catch { /* non-fatal */ }
@@ -389,19 +623,19 @@ export class DockerSetupPanel {
         cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
       }
 
-      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${HOST_PORT}:${CONTAINER_PORT} \\\n    -v ${VOLUME_MOUNT} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${IMAGE} \\\n    tail -f /dev/null\n`);
-      log(`Starting ${CONTAINER} container (port ${HOST_PORT}:${CONTAINER_PORT})...\n`);
+      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${this._hostPort}:${this._containerPort} \\\n    -v ${this._volumeMount} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${this._image} \\\n    tail -f /dev/null\n`);
+      log(`Starting ${CONTAINER} container (port ${this._hostPort}:${this._containerPort})...\n`);
       const launchCode = await new Promise<number>((resolve) => {
         const proc = cp.spawn('docker', [
           'run', '-d',
           '--name', CONTAINER,
           '--restart', 'unless-stopped',
-          '-p', `${HOST_PORT}:${CONTAINER_PORT}`,
-          '-v', VOLUME_MOUNT,
+          '-p', `${this._hostPort}:${this._containerPort}`,
+          '-v', this._volumeMount,
           '--security-opt', 'no-new-privileges',
           '--cap-drop', 'ALL',
           '--cap-add', 'NET_BIND_SERVICE',
-          IMAGE,
+          this._image,
           'tail', '-f', '/dev/null',
         ], { windowsHide: true });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
@@ -414,7 +648,7 @@ export class DockerSetupPanel {
       log(`✓ Container started\n`);
 
       // Swap workspace folder to show STATE_DIR only (removes ~/.openclaw if present)
-      try { setActiveOpenClawWorkspaceFolder(STATE_DIR); } catch { /* non-fatal */ }
+      try { setActiveOpenClawWorkspaceFolder(this._dataDir); } catch { /* non-fatal */ }
 
       log('\n✓ Setup complete!\n');
       try { this._panel.webview.postMessage({ type: 'launchDone' }); } catch { /* ignore */ }
@@ -456,6 +690,347 @@ export class DockerSetupPanel {
   <img class="logo" src="${iconUri}" alt="OpenClaw" />
   <div class="spinner"></div>
   <p>Connecting to Docker container&hellip;</p>
+</body>
+</html>`;
+  }
+
+  // ── Config Step HTML ───────────────────────────────────────────────────────
+
+  private _getConfigHtml(iconUri: string, config: DockerConfig): string {
+    const isConfirm = this._configStep === 1;
+    
+    if (isConfirm) {
+      return this._getConfirmHtml(iconUri, config);
+    }
+    
+    // Step 1: Config form
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      background: #1a1a1a; color: #e0e0e0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 32px 20px 48px; text-align: center;
+    }
+    .logo { width: 48px; height: 48px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 10px; }
+    .title { font-size: 19px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .sub { font-size: 12px; color: #555; margin-bottom: 20px; }
+
+    /* Step timeline - 6 steps */
+    .steps { display: flex; align-items: flex-start; gap: 0; margin-bottom: 24px; width: min(520px, 96vw); }
+    .step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+    .step-item:not(:last-child)::after {
+      content: ''; position: absolute; top: 13px; left: calc(50% + 14px);
+      width: calc(100% - 28px); height: 1px; background: #2b2b2b;
+    }
+    .step-item.done:not(:last-child)::after { background: #dc2828; }
+    .step-dot {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; margin-bottom: 4px;
+      position: relative; z-index: 1;
+    }
+    .step-item.done .step-dot { background: #dc2828; color: #fff; border: 2px solid #dc2828; }
+    .step-item.active .step-dot { background: transparent; border: 2px solid #dc2828; color: #dc2828; }
+    .step-item.pending .step-dot { background: transparent; border: 2px solid #2b2b2b; color: #444; }
+    .step-label { font-size: 9px; color: #555; text-align: center; line-height: 1.2; }
+    .step-item.done .step-label { color: #dc2828; }
+    .step-item.active .step-label { color: #e0e0e0; }
+
+    /* Form */
+    .form { width: min(420px, 96vw); display: flex; flex-direction: column; gap: 14px; }
+    .field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+    .field label { font-size: 12px; color: #888; font-weight: 500; }
+    .field input, .field select {
+      background: #252525; border: 1px solid #333; border-radius: 6px;
+      padding: 10px 12px; font-size: 13px; color: #e0e0e0; font-family: inherit;
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: #dc2828; }
+    .field-row { display: flex; gap: 10px; }
+    .field-row .field { flex: 1; }
+    .field-with-btn { display: flex; gap: 8px; }
+    .field-with-btn .field { flex: 1; }
+    .btn-browse {
+      background: #333; border: 1px solid #444; color: #aaa;
+      padding: 10px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;
+      font-family: inherit; white-space: nowrap;
+    }
+    .btn-browse:hover { background: #444; color: #fff; }
+    .checkbox { flex-direction: row; align-items: center; gap: 10px; }
+    .checkbox input { width: 16px; height: 16px; }
+    .checkbox label { font-size: 13px; color: #aaa; }
+
+    /* Error */
+    .error { color: #f87171; font-size: 12px; text-align: left; background: rgba(248,113,113,0.07); border: 1px solid rgba(248,113,113,0.2); border-radius: 6px; padding: 10px 14px; width: 100%; }
+
+    /* Buttons */
+    .btns { display: flex; gap: 12px; margin-top: 16px; width: min(420px, 96vw); justify-content: center; }
+    .btn-next {
+      background: #dc2828; border: none; color: #fff;
+      font-size: 13px; font-weight: 600; padding: 10px 28px; border-radius: 8px;
+      cursor: pointer; font-family: inherit; transition: background 0.15s;
+    }
+    .btn-next:hover { background: #b91c1c; }
+    .btn-cancel {
+      background: transparent; border: 1px solid #333; color: #666;
+      font-size: 13px; padding: 10px 20px; border-radius: 8px; cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-cancel:hover { color: #aaa; border-color: #444; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <div class="title">Docker Setup</div>
+  <div class="sub">Configure your Docker environment</div>
+
+  <!-- Step timeline -->
+  <div class="steps">
+    <div class="step-item active" id="s1">
+      <div class="step-dot">1</div>
+      <div class="step-label">Config</div>
+    </div>
+    <div class="step-item pending" id="s2">
+      <div class="step-dot">2</div>
+      <div class="step-label">Confirm</div>
+    </div>
+    <div class="step-item pending" id="s3">
+      <div class="step-dot">3</div>
+      <div class="step-label">Check</div>
+    </div>
+    <div class="step-item pending" id="s4">
+      <div class="step-dot">4</div>
+      <div class="step-label">Pull</div>
+    </div>
+    <div class="step-item pending" id="s5">
+      <div class="step-dot">5</div>
+      <div class="step-label">Onboard</div>
+    </div>
+    <div class="step-item pending" id="s6">
+      <div class="step-dot">6</div>
+      <div class="step-label">Launch</div>
+    </div>
+  </div>
+
+  <!-- Config form -->
+  <div class="form" id="config-form">
+    <div class="field">
+      <label>Docker Image</label>
+      <input type="text" id="image" value="${config.image}" placeholder="ghcr.io/openclaw/openclaw:latest" />
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Gateway Port (Host)</label>
+        <input type="number" id="port" value="${config.port}" placeholder="18790" min="1" max="65535" />
+      </div>
+      <div class="field">
+        <label>Bind Host</label>
+        <select id="bindHost">
+          <option value="127.0.0.1" ${config.bindHost === '127.0.0.1' ? 'selected' : ''}>127.0.0.1 (localhost)</option>
+          <option value="0.0.0.0" ${config.bindHost === '0.0.0.0' ? 'selected' : ''}>0.0.0.0 (all interfaces)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Data Directory</label>
+      <div class="field-with-btn">
+        <input type="text" id="dataDir" value="${config.dataDir}" placeholder="./openclaw_docker_data" />
+        <button class="btn-browse" onclick="browseDir()">Browse</button>
+      </div>
+    </div>
+    <div class="field checkbox">
+      <input type="checkbox" id="freshBuild" ${config.freshBuild ? 'checked' : ''} />
+      <label for="freshBuild">Force fresh build (rebuild image)</label>
+    </div>
+    <div class="error" id="error" style="display:none;"></div>
+  </div>
+
+  <div class="btns">
+    <button class="btn-cancel" onclick="cancel()">Cancel</button>
+    <button class="btn-next" onclick="next()">Next</button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+
+    function browseDir() {
+      vscode.postMessage({ command: 'dockerBrowseDir' });
+    }
+
+    function cancel() {
+      vscode.postMessage({ command: 'dockerCancel' });
+    }
+
+    function next() {
+      const image = document.getElementById('image').value;
+      const port = document.getElementById('port').value;
+      const dataDir = document.getElementById('dataDir').value;
+      const bindHost = document.getElementById('bindHost').value;
+      const freshBuild = document.getElementById('freshBuild').checked;
+      
+      vscode.postMessage({ 
+        command: 'dockerSaveConfig', 
+        image, port, dataDir, freshBuild, bindHost 
+      });
+    }
+
+    window.addEventListener('message', function(e) {
+      const msg = e.data;
+      if (msg.type === 'dockerBrowseResult') {
+        document.getElementById('dataDir').value = msg.path;
+      } else if (msg.type === 'dockerConfigError') {
+        const err = document.getElementById('error');
+        err.textContent = msg.message;
+        err.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>`;
+  }
+
+  private _getConfirmHtml(iconUri: string, config: DockerConfig): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+      background: #1a1a1a; color: #e0e0e0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 32px 20px 48px; text-align: center;
+    }
+    .logo { width: 48px; height: 48px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 10px; }
+    .title { font-size: 19px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .sub { font-size: 12px; color: #555; margin-bottom: 20px; }
+
+    /* Step timeline */
+    .steps { display: flex; align-items: flex-start; gap: 0; margin-bottom: 24px; width: min(520px, 96vw); }
+    .step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+    .step-item:not(:last-child)::after {
+      content: ''; position: absolute; top: 13px; left: calc(50% + 14px);
+      width: calc(100% - 28px); height: 1px; background: #2b2b2b;
+    }
+    .step-item.done:not(:last-child)::after { background: #dc2828; }
+    .step-dot {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; margin-bottom: 4px;
+      position: relative; z-index: 1;
+    }
+    .step-item.done .step-dot { background: #dc2828; color: #fff; border: 2px solid #dc2828; }
+    .step-item.active .step-dot { background: transparent; border: 2px solid #dc2828; color: #dc2828; }
+    .step-item.pending .step-dot { background: transparent; border: 2px solid #2b2b2b; color: #444; }
+    .step-label { font-size: 9px; color: #555; text-align: center; line-height: 1.2; }
+    .step-item.done .step-label { color: #dc2828; }
+    .step-item.active .step-label { color: #e0e0e0; }
+
+    /* Review table */
+    .review { width: min(420px, 96vw); background: #222; border-radius: 10px; padding: 20px; }
+    .review-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 16px; text-align: left; }
+    .review-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
+    .review-row:last-child { border-bottom: none; }
+    .review-label { color: #888; font-size: 12px; }
+    .review-value { color: #e0e0e0; font-size: 13px; font-family: monospace; }
+
+    /* Buttons */
+    .btns { display: flex; gap: 12px; margin-top: 20px; width: min(420px, 96vw); justify-content: center; }
+    .btn-back {
+      background: transparent; border: 1px solid #333; color: #aaa;
+      font-size: 13px; padding: 10px 20px; border-radius: 8px; cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-back:hover { color: #fff; border-color: #444; }
+    .btn-confirm {
+      background: #dc2828; border: none; color: #fff;
+      font-size: 13px; font-weight: 600; padding: 10px 28px; border-radius: 8px;
+      cursor: pointer; font-family: inherit; transition: background 0.15s;
+    }
+    .btn-confirm:hover { background: #b91c1c; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="${iconUri}" alt="OpenClaw" />
+  <div class="title">Docker Setup</div>
+  <div class="sub">Review your configuration</div>
+
+  <!-- Step timeline -->
+  <div class="steps">
+    <div class="step-item done" id="s1">
+      <div class="step-dot">✓</div>
+      <div class="step-label">Config</div>
+    </div>
+    <div class="step-item active" id="s2">
+      <div class="step-dot">2</div>
+      <div class="step-label">Confirm</div>
+    </div>
+    <div class="step-item pending" id="s3">
+      <div class="step-dot">3</div>
+      <div class="step-label">Check</div>
+    </div>
+    <div class="step-item pending" id="s4">
+      <div class="step-dot">4</div>
+      <div class="step-label">Pull</div>
+    </div>
+    <div class="step-item pending" id="s5">
+      <div class="step-dot">5</div>
+      <div class="step-label">Onboard</div>
+    </div>
+    <div class="step-item pending" id="s6">
+      <div class="step-dot">6</div>
+      <div class="step-label">Launch</div>
+    </div>
+  </div>
+
+  <!-- Review -->
+  <div class="review">
+    <div class="review-title">Configuration Review</div>
+    <div class="review-row">
+      <span class="review-label">Image</span>
+      <span class="review-value">${config.image}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">Port</span>
+      <span class="review-value">${config.port}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">Bind Host</span>
+      <span class="review-value">${config.bindHost}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">Data Directory</span>
+      <span class="review-value">${config.dataDir}</span>
+    </div>
+    <div class="review-row">
+      <span class="review-label">Fresh Build</span>
+      <span class="review-value">${config.freshBuild ? 'Yes' : 'No'}</span>
+    </div>
+  </div>
+
+  <div class="btns">
+    <button class="btn-back" onclick="back()">Back</button>
+    <button class="btn-confirm" onclick="confirm()">Confirm</button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+
+    function back() {
+      vscode.postMessage({ command: 'dockerBack' });
+    }
+
+    function confirm() {
+      vscode.postMessage({ command: 'dockerConfirmConfig' });
+    }
+  </script>
 </body>
 </html>`;
   }
@@ -581,7 +1156,7 @@ export class DockerSetupPanel {
     <div id="view-pull" style="display:none;width:100%;">
       <div class="status-row" id="pull-status">
         <div class="spinner"></div>
-        <span>Pulling ${IMAGE}...</span>
+        <span>Pulling ${this._image}...</span>
       </div>
       <div class="log-wrap" id="pull-log-wrap">
         <div class="log-box" id="pull-log"></div>
