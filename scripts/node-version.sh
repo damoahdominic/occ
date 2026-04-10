@@ -13,17 +13,24 @@ detect_and_use_node() {
     echo "Desired Node.js version: $NODE_VERSION"
     echo "Node.js version management: checking..."
 
-    # 1. INSIDE DOCKER: Use system Node (skip version managers entirely)
+    # Priority 2: INSIDE DOCKER - Only skip version managers if running as root
+    # Non-root users should still be able to use fnm/nvm if available
     if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        if command -v node >/dev/null 2>&1; then
-            local CURRENT_NODE_VERSION
-            CURRENT_NODE_VERSION="$(node --version 2>/dev/null || echo "unknown")"
-            echo "Docker environment detected, using system Node $CURRENT_NODE_VERSION"
-            return 0
+        # Only apply Docker bypass for root users (typical container setup)
+        if [ "$(id -u)" = "0" ]; then
+            if command -v node >/dev/null 2>&1; then
+                local CURRENT_NODE_VERSION
+                CURRENT_NODE_VERSION="$(node --version 2>/dev/null || echo "unknown")"
+                echo "Docker environment (root), using system Node $CURRENT_NODE_VERSION"
+                return 0
+            else
+                echo "ERROR: Running inside Docker but no system node found." >&2
+                echo "Make sure your Docker image includes Node.js $NODE_VERSION." >&2
+                return 1
+            fi
         else
-            echo "ERROR: Running inside Docker but no system node found." >&2
-            echo "Make sure your Docker image includes Node.js $NODE_VERSION." >&2
-            return 1
+            # Non-root in Docker: proceed to version manager detection (fnm/nvm)
+            echo "Docker environment detected (non-root), checking version managers..."
         fi
     fi
 

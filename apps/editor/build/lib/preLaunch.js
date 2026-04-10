@@ -11,7 +11,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const path_1 = __importDefault(require("path"));
 const child_process_1 = require("child_process");
 const fs_1 = require("fs");
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+// Priority 1: Use NPM env var if available (resolved by launch-editor.sh as root),
+// fall back to platform-specific default (npm/npm.cmd)
+const npm = process.env.NPM || (process.platform === 'win32' ? 'npm.cmd' : 'npm');
 const rootDir = path_1.default.resolve(__dirname, '..', '..');
 function runProcess(command, args = []) {
     return new Promise((resolve, reject) => {
