@@ -34,6 +34,36 @@ When in doubt: navigator asks, driver waits.
 
 ---
 
+### 3PS and 3PM Pair Programming Models
+
+In addition to the standard driver-navigator model, OCcode supports two specialized pair programming configurations:
+
+#### 3PS (Three-Person Sub-agent)
+Both the driver and navigator roles are filled by sub-agents. This configuration is used for:
+- Tasks requiring specialized expertise from multiple sub-agents
+- Complex operations where both agents benefit from sub-agent capabilities
+- Training scenarios where sub-agents learn from each other
+
+In 3PS:
+- Driver sub-agent handles execution tasks
+- Navigator sub-agent provides review and guidance
+- Both operate with sub-agent permissions and capabilities
+
+#### 3PM (Three-Person Main-agent)
+Both the driver and navigator roles are filled by main agents. This configuration is used for:
+- High-stakes operations requiring main-agent authority
+- Tasks needing full access to repository privileges
+- Critical path development requiring main-agent decision making
+
+In 3PM:
+- Driver main-agent has full execution authority
+- Navigator main-agent provides oversight and approval
+- Both operate with main-agent permissions
+
+The standard agent operating protocol applies to both 3PS and 3PM configurations, with the distinction being the agent type filling each role rather than changing the fundamental collaboration pattern.
+
+---
+
 ## Project Overview
 
 **OCcode** is a branded IDE built on the [Void editor](https://github.com/voideditor/void) fork
