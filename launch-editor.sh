@@ -13,15 +13,16 @@ if [ "$(id -u)" = "0" ]; then
         chmod 4755 "$SANDBOX"
     fi
     
-    # Priority 1: Resolve npm path before re-execution as bun user
-    # This ensures preLaunch.js can find npm (avoids ENOENT errors)
-    NPM_PATH=""
-    if command -v npm >/dev/null 2>&1; then
-        NPM_PATH="$(command -v npm)"
+    # Priority 1: Fix fnm permissions and provide explicit npm path
+    # Ensure bun user can access fnm node and npm
+    if [ -d "/opt/fnm" ]; then
+        chmod -R g+rx /opt/fnm 2>/dev/null || true
+        chmod -R o+rx /opt/fnm 2>/dev/null || true
     fi
-    
-    # Export NPM for use by preLaunch.js in bun user context
-    export NPM="$NPM_PATH"
+    if [ -d "/root/.local/state/fnm_multishells" ]; then
+        chmod -R g+rx /root/.local/state/fnm_multishells 2>/dev/null || true
+        chmod -R o+rx /root/.local/state/fnm_multishells 2>/dev/null || true
+    fi
     
     exec su bun -s /bin/bash -- "$ROOT/launch-editor.sh" "$@"
 fi
