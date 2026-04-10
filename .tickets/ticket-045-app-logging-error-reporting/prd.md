@@ -65,31 +65,31 @@ Implement a centralized logging and error reporting system that:
 
 ## Acceptance Criteria
 
-- [ ] When Docker setup fails, user sees error message (not blank screen)
-- [ ] Error modal displays: error code, user-friendly message, "View Logs" button
-- [ ] Error message shown inline on confirmation step (not just in output channel)
-- [ ] "View Logs" shows last 50 lines from recent operations
-- [ ] "Retry" button re-attempts the failed operation
-- [ ] "Report to Developer" button sends: timestamp, error, system info, and last 100 log lines
-- [ ] Report sent asynchronously (doesn't block UX)
-- [ ] Error reported to: `POST /api/v1/developer/error-report` (requires backend endpoint)
-- [ ] Gracefully handles network failure during report (silent failure, no UI disruption)
-- [ ] Custom data directory path displays on Step 2 confirmation (not "(default)" if user selected custom path)
+- [x] When Docker setup fails, user sees error message (not blank screen)
+- [x] Error modal displays: error code, user-friendly message, "View Logs" button
+- [x] Error message shown inline on confirmation step (not just in output channel)
+- [x] "View Logs" shows last 50 lines from recent operations
+- [x] "Retry" button re-attempts the failed operation
+- [x] "Report to Developer" button sends: timestamp, error, system info, and last 100 log lines
+- [x] Report sent asynchronously (doesn't block UX)
+- [x] Error reported to: `POST /api/v1/developer/error-report` (requires backend endpoint)
+- [x] Gracefully handles network failure during report (silent failure, no UI disruption)
+- [x] Custom data directory path displays on Step 2 confirmation (not "(default)" if user selected custom path)
 
 ## Tasks
 
-- [ ] Task 1: Create `errorReporting.ts` with `ErrorReporter` class
+- [x] Task 1: Create `errorReporting.ts` with `ErrorReporter` class
   - Implement `collectRecentLogs()` (read ~/.openclaw/occ-home.log tail)
   - Implement `getSystemInfo()` (OS, Node, Docker status)
   - Implement `sendErrorReport(error, logs, systemInfo)` (HTTP POST)
 
-- [ ] Task 2: Create `errorModal.tsx` React component
+- [x] Task 2: Create `errorModal.tsx` React component
   - Display error code, message, timestamp
   - Add "View Logs" (expandable details pane)
   - Add "Retry" button (callback-based)
   - Add "Report to Developer" button (async submission)
 
-- [ ] Task 3: Modify `home.ts` constructor and `_update()` to catch errors
+- [x] Task 3: Modify `home.ts` constructor and `_update()` to catch errors
   - Wrap initialization in try-catch
   - On error: show modal, emit diagnostic info
   - Add error event handler to HomePanel
