@@ -1,4 +1,4 @@
-.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows container-build-linux
+.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows build-macos build-macos-arm64 build-macos-x64 container-build-linux launch add-dev-build del-dev-build
 
 # Default target
 .DEFAULT_GOAL := help
@@ -205,4 +205,44 @@ launch:
 		exit 1; \
 	fi
 	@echo "Launching OCcode editor..."
-	@./launch-editor.sh
+	@./launch-editor.sh | tee .tmp/lauch-editor.log
+
+## add-dev-build: Install dev build package (platform-specific)
+add-dev-build:
+	@echo "Installing OCcode development build..."
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		DEB_FILE=$$(find $(PROJECT_ROOT)/apps/editor/.build/linux/deb -name "*.deb" -type f | head -1); \
+		if [ -z "$$DEB_FILE" ]; then \
+			echo "Error: .deb package not found. Run 'make build-linux' first"; \
+			exit 1; \
+		fi; \
+		echo "Found: $$DEB_FILE"; \
+		sudo dpkg -i "$$DEB_FILE" || (sudo apt-get install -f -y && sudo dpkg -i "$$DEB_FILE") || exit 1; \
+		echo "✓ OCcode installed successfully"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Error: macOS installation not yet implemented"; \
+		exit 1; \
+	elif [ "$$(uname -s)" = "MINGW64_NT"* ] || [ "$$(uname -s)" = "MSYS_NT"* ] || [ "$$(uname -s)" = "CYGWIN_NT"* ]; then \
+		echo "Error: Windows installation not yet implemented"; \
+		exit 1; \
+	else \
+		echo "Error: Unsupported platform: $$(uname -s)"; \
+		exit 1; \
+	fi
+
+## del-dev-build: Uninstall dev build package (platform-specific)
+del-dev-build:
+	@echo "Uninstalling OCcode development build..."
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		sudo dpkg --remove occ || exit 1; \
+		echo "✓ OCcode uninstalled successfully"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Error: macOS uninstallation not yet implemented"; \
+		exit 1; \
+	elif [ "$$(uname -s)" = "MINGW64_NT"* ] || [ "$$(uname -s)" = "MSYS_NT"* ] || [ "$$(uname -s)" = "CYGWIN_NT"* ]; then \
+		echo "Error: Windows uninstallation not yet implemented"; \
+		exit 1; \
+	else \
+		echo "Error: Unsupported platform: $$(uname -s)"; \
+		exit 1; \
+	fi
