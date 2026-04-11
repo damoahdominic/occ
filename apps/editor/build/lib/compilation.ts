@@ -114,7 +114,7 @@ export function transpileTask(src: string, out: string, esbuild: boolean): task.
 
 		return srcPipe
 			.pipe(transpile())
-			.pipe(gulp.dest(out));
+			.pipe(gulp.dest(out, { mode: 0o664 }));
 	};
 
 	task.taskName = `transpile-${path.basename(src)}`;
@@ -163,7 +163,7 @@ export function compileTask(src: string, out: string, build: boolean, options: {
 			.pipe(mangleStream)
 			.pipe(generator.stream)
 			.pipe(compile())
-			.pipe(gulp.dest(out));
+			.pipe(gulp.dest(out, { mode: 0o664 }));
 	};
 
 	task.taskName = `compile-${path.basename(src)}`;
@@ -184,7 +184,7 @@ export function watchTask(out: string, build: boolean, srcPath: string = 'src'):
 		return watchSrc
 			.pipe(generator.stream)
 			.pipe(util.incremental(compile, src, true))
-			.pipe(gulp.dest(out));
+			.pipe(gulp.dest(out, { mode: 0o664 }));
 	};
 	task.taskName = `watch-${path.basename(out)}`;
 	return task;

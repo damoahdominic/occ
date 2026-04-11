@@ -205,7 +205,7 @@ export interface IBundleESMTaskOpts {
 
 export function bundleTask(opts: IBundleESMTaskOpts): () => NodeJS.ReadWriteStream {
 	return function () {
-		return bundleESMTask(opts.esm).pipe(gulp.dest(opts.out));
+		return bundleESMTask(opts.esm).pipe(gulp.dest(opts.out, { mode: 0o664 }));
 	};
 }
 
@@ -263,7 +263,7 @@ export function minifyTask(src: string, sourceMapBaseUrl?: string): (cb: any) =>
 				includeContent: true,
 				addComment: true
 			} as any),
-			gulp.dest(src + '-min'),
+			gulp.dest(src + '-min', { mode: 0o664 }),
 			(err: any) => cb(err));
 	};
 }
