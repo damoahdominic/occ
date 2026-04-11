@@ -251,6 +251,41 @@ When the editor loads
 Then the user should be prompted to re-authenticate
 And the previous session should be cleared
 
+#### Scenario: Successful Onboarding Saves Logs
+Given the onboarding process completes successfully
+When the container finishes without errors (exit code 0)
+Then the logs should be saved to ~/.openclaw/docker-setup.log
+And the user should see a success message indicating "Logs saved to"
+And the log file should contain a timestamp header and all onboarding output
+
+#### Scenario: Onboarding Failure Persists Error Logs
+Given the onboarding process encounters an error
+When the container fails during onboarding
+Then the error logs should be saved to ~/.openclaw/docker-setup-error.log
+And a "View Error Log" button should appear in the error dialog
+And the button should NOT be hidden (visibility should allow user interaction)
+
+#### Scenario: View Error Log Button Opens Error Log File
+Given an error occurred during onboarding and error logs were saved
+When the user clicks the "View Error Log" button
+Then the error log file should open in the VS Code editor
+And the user should see the failure details and docker command output
+And if editor open fails, the file should open in the OS file explorer
+
+#### Scenario: Retry After Onboarding Failure
+Given onboarding has failed and error logs were created
+When the user clicks the "Retry" button
+Then the onboarding process should restart from the beginning
+And if it fails again, a new error log should be created or updated
+And the previous logs should be overwritten with the new attempt
+
+#### Scenario: Error Log File Accessibility and Content
+Given the user has completed onboarding (success or failure)
+When querying the log file path (~/.openclaw/docker-setup*.log)
+Then the log file should be readable and accessible
+And the log file should contain proper ISO format timestamps
+And file permissions should allow the user to open it in the editor
+
 ---
 
 ### Feature: Settings Panel - OCC Credits Card

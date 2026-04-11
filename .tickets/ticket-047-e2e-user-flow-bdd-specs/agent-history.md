@@ -92,12 +92,33 @@ Original task breakdown in ticket-016:
 |-----------|------------|---------|
 | openclaw-installation.spec.ts | 3 | OpenClaw Installation |
 | gateway-management.spec.ts | 3 | Gateway Management |
-| onboarding-auth.spec.ts | 5 | Onboarding and Auth |
+| onboarding-auth.spec.ts | 11 | Onboarding and Auth (5 base + 6 error log tests) |
 | settings-occ-credits.spec.ts | 5 | Settings Panel |
 | balance-polling.spec.ts | 5 | Balance Polling |
 | ci-integration.spec.ts | 8 | CI Integration |
-| **Total** | **29 tests** | |
+| **Total** | **35 tests** | |
+
+## Updates - 2026-04-11 (Later Session)
+
+Enhanced onboarding-auth.spec.ts with 6 additional tests for error log persistence (ticket-047 Task 3 expansion):
+
+**Happy Path Tests (3):**
+1. `successful onboarding saves logs to file` - Validates log file creation at ~/.openclaw/docker-setup.log
+2. `log file contains timestamp header and onboard output` - Validates log file format and content
+3. `status panel displays log file path feedback after success` - Validates user feedback message
+
+**Sad Path Tests (3):**
+1. `failed onboarding shows error log button and saves logs` - Validates error state and button presence
+2. `error log button is clickable and sends correct command` - Validates button functionality
+3. `error log file contains failure details and is properly formatted` - Validates error log content
+
+Updated spec (prd.md) with 6 new BDD scenarios covering:
+- Successful onboarding logs saved
+- Failed onboarding error logs persisted
+- View error log button functionality
+- Retry after failure
+- Error log file accessibility
 
 ## Completion
 
-All tasks completed successfully. The BDD specifications are now implemented as Playwright E2E tests ready for execution against the OCCode editor.
+All tasks completed successfully. The BDD specifications are now implemented as Playwright E2E tests ready for execution against the OCCode editor. Total: 35 tests across 6 test files.
