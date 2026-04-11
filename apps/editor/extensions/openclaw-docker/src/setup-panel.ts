@@ -65,6 +65,8 @@ export class DockerSetupPanel {
   private _configStep: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
   private _configDraft: DockerConfig | null = null;
   private _activeConfig: DockerConfig = { ...DEFAULT_CONFIG };
+  private _pullLogs: string[] = [];
+  private _onboardLogs: string[] = [];
 
   // Helper getters for provisioning
   private get _image(): string { return this._activeConfig.image; }
@@ -166,6 +168,9 @@ export class DockerSetupPanel {
             break;
           case 'dockerLaunchGateway':
             await this._handleLaunchGateway();
+            break;
+          case 'openErrorLog':
+            await this._handleOpenErrorLog(msg.path as string);
             break;
           case 'closePanel':
             this.dispose();
@@ -459,14 +464,27 @@ export class DockerSetupPanel {
   // ── Step 2: Pull image + create state dir ─────────────────────────────────
 
   private async _handlePullImage(): Promise<void> {
+    // Reset logs for this pull attempt
+    this._pullLogs = [];
+
     const log = (text: string, isErr = false) => {
+      this._pullLogs.push(text);
       try { this._panel.webview.postMessage({ type: 'dockerLog', text, isErr }); } catch { /* ignore */ }
     };
     const logCmd = (text: string) => {
+      this._pullLogs.push(text);
       try { this._panel.webview.postMessage({ type: 'dockerLog', text, isCmd: true }); } catch { /* ignore */ }
     };
     const fail = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
+      // Save accumulated logs to error file before showing error
+      const errorLogPath = path.join(os.homedir(), '.openclaw', 'docker-setup-error.log');
+      try {
+        fs.mkdirSync(path.dirname(errorLogPath), { recursive: true });
+        fs.writeFileSync(errorLogPath, this._pullLogs.join(''), 'utf-8');
+      } catch (err) {
+        // Non-fatal: log save failure won't prevent error message
+      }
+      try { this._panel.webview.postMessage({ type: 'dockerError', text, errorLogPath }); } catch { /* ignore */ }
     };
 
     try {
@@ -495,14 +513,27 @@ export class DockerSetupPanel {
   // ── Step 3: Onboard (one-shot container) ──────────────────────────────────
 
   private async _handleOnboard(): Promise<void> {
+    // Reset logs for this onboard attempt
+    this._onboardLogs = [];
+
     const log = (text: string, isErr = false) => {
+      this._onboardLogs.push(text);
       try { this._panel.webview.postMessage({ type: 'onboardLog', text, isErr }); } catch { /* ignore */ }
     };
     const logCmd = (text: string) => {
+      this._onboardLogs.push(text);
       try { this._panel.webview.postMessage({ type: 'onboardLog', text, isCmd: true }); } catch { /* ignore */ }
     };
     const fail = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
+      // Save accumulated logs to error file before showing error
+      const errorLogPath = path.join(os.homedir(), '.openclaw', 'docker-setup-error.log');
+      try {
+        fs.mkdirSync(path.dirname(errorLogPath), { recursive: true });
+        fs.writeFileSync(errorLogPath, this._onboardLogs.join(''), 'utf-8');
+      } catch (err) {
+        // Non-fatal: log save failure won't prevent error message
+      }
+      try { this._panel.webview.postMessage({ type: 'dockerError', text, errorLogPath }); } catch { /* ignore */ }
     };
 
     try {
@@ -535,8 +566,22 @@ export class DockerSetupPanel {
       });
 
       if (code !== 0) {
-        fail('Onboard failed. See the log above for details.');
+        fail('Onboard failed. See the error log for details.');
         return;
+      }
+
+      // Write logs to file for troubleshooting
+      const logDir = path.join(os.homedir(), '.openclaw');
+      const logPath = path.join(logDir, 'docker-setup.log');
+      try {
+        fs.mkdirSync(logDir, { recursive: true });
+        const timestamp = new Date().toISOString();
+        const logContent = `[${timestamp}] Docker Setup Onboard Logs\n${'='.repeat(60)}\n\n${this._onboardLogs.join('')}\n`;
+        fs.writeFileSync(logPath, logContent, 'utf-8');
+        log(`\n✓ Logs saved to: ${logPath}\n`);
+        try { this._panel.webview.postMessage({ type: 'onboardLogsPath', path: logPath }); } catch { /* ignore */ }
+      } catch (err) {
+        log(`\nWarning: Failed to save logs: ${String(err)}\n`);
       }
 
       // Patch occ-legacy model metadata in the config written to data dir
@@ -655,6 +700,25 @@ export class DockerSetupPanel {
       setTimeout(() => void this._showStatusPanel(), 1800);
     } catch (err) {
       fail(String(err));
+    }
+  }
+
+  // ── Error Log Handling ──────────────────────────────────────────────────────
+
+  private async _handleOpenErrorLog(errorLogPath: string): Promise<void> {
+    try {
+      const uri = vscode.Uri.file(errorLogPath);
+      // Try to open the file in the editor
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, { preview: false });
+    } catch (err) {
+      // If opening fails, try to reveal it in file explorer
+      try {
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(errorLogPath));
+      } catch (err2) {
+        // As a last resort, show the file path so user can open it manually
+        void vscode.window.showInformationMessage(`Error log saved at: ${errorLogPath}`);
+      }
     }
   }
 
@@ -1188,7 +1252,10 @@ export class DockerSetupPanel {
     <!-- Error view -->
     <div id="view-error" style="display:none;width:100%;flex-direction:column;align-items:center;gap:12px;">
       <div class="status-err" id="error-text"></div>
-      <button class="btn-retry" onclick="retry()">Retry</button>
+      <div style="display:flex;gap:8px;width:100%;justify-content:center;">
+        <button class="btn-retry" onclick="viewErrorLog()" id="btn-view-log" style="display:none;">View Error Log</button>
+        <button class="btn-retry" onclick="retry()">Retry</button>
+      </div>
     </div>
 
     <!-- Done -->
@@ -1235,11 +1302,27 @@ export class DockerSetupPanel {
       });
     }
 
-    function showError(text) {
+    var lastErrorLogPath = null;
+
+    function showError(text, errorLogPath) {
+      lastErrorLogPath = errorLogPath || null;
       hideAll();
       var ev = document.getElementById('view-error');
       ev.style.display = 'flex';
       document.getElementById('error-text').textContent = text;
+      // Show View Error Log button only if we have a log path
+      var btnViewLog = document.getElementById('btn-view-log');
+      if (errorLogPath) {
+        btnViewLog.style.display = 'inline-block';
+      } else {
+        btnViewLog.style.display = 'none';
+      }
+    }
+
+    function viewErrorLog() {
+      if (lastErrorLogPath) {
+        vscode.postMessage({ command: 'openErrorLog', path: lastErrorLogPath });
+      }
     }
 
     function appendLog(boxId, wrapId, text, isErr, isCmd) {
@@ -1314,7 +1397,7 @@ export class DockerSetupPanel {
         // Container was running but had no config — deleted it, restart from Pull Image.
         startPull();
       } else if (msg.type === 'dockerError') {
-        showError(msg.text || 'An error occurred.');
+        showError(msg.text || 'An error occurred.', msg.errorLogPath);
       }
     });
 
