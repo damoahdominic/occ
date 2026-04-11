@@ -8,8 +8,8 @@ import { StatusPanelController, setActiveOpenClawWorkspaceFolder } from '../../o
 
 const IMAGE = 'ghcr.io/openclaw/openclaw:latest';
 const CONTAINER = 'occ-openclaw';
-const DEFAULT_HOST_PORT = 18790;
-const DEFAULT_CONTAINER_PORT = 18790;
+const DEFAULT_HOST_PORT = 18789;
+const DEFAULT_CONTAINER_PORT = 18789;
 const DEFAULT_STATE_DIR = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
 
 // Config file paths
@@ -46,7 +46,7 @@ export interface DockerConfig {
 
 const DEFAULT_CONFIG: DockerConfig = {
   image: 'ghcr.io/openclaw/openclaw:latest',
-  port: '18790',
+  port: '18789',
   dataDir: './openclaw_docker_data',
   freshBuild: false,
   bindHost: '127.0.0.1',
@@ -826,7 +826,7 @@ export class DockerSetupPanel {
     <div class="field-row">
       <div class="field">
         <label>Gateway Port (Host)</label>
-        <input type="number" id="port" value="${config.port}" placeholder="18790" min="1" max="65535" />
+        <input type="number" id="port" value="${config.port}" placeholder="18789" min="1" max="65535" />
       </div>
       <div class="field">
         <label>Bind Host</label>
