@@ -13,6 +13,31 @@ else
 	fi
 fi
 
+# Self-healing: Fix permission issues from previous builds
+function _heal() {
+	local out_dirs=("out" "out-build" "out-vscode" "out-vscode-min")
+	local healed=0
+
+	for dir in "${out_dirs[@]}"; do
+		if [ -d "$dir" ]; then
+			# Check if we have write permission issues
+			if [ ! -w "$dir" ] 2>/dev/null; then
+				# Fix permissions: make directory writable
+				chmod -R u+w "$dir" 2>/dev/null && ((healed++))
+			fi
+			# Clean up broken symlinks and stale files
+			find "$dir" -type l -delete 2>/dev/null || true
+		fi
+	done
+
+	# Remove incomplete builds that might cause issues
+	rm -rf out-build 2>/dev/null || true
+	rm -rf out-vscode 2>/dev/null || true
+	rm -rf out-vscode-min 2>/dev/null || true
+
+	[ $healed -gt 0 ] && echo "[build-heal] Fixed permissions on $healed directories"
+}
+
 function code() {
 	cd "$ROOT"
 
@@ -86,6 +111,9 @@ function code-wsl()
 		fi
 	fi
 }
+
+# Run healing before every build
+_heal
 
 if [ "$IN_WSL" == "true" ] && [ -z "$DISPLAY" ]; then
 	code-wsl "$@"
