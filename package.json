@@ -18,6 +18,7 @@
     "editor:watch-react": "npm --prefix apps/editor run watchreact",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:cdp": "CDP_ENDPOINT=http://127.0.0.1:9222 playwright test",
     "bump-version": "yes | npx commit-and-tag-version -n"
   },
   "devDependencies": {
