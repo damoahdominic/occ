@@ -182,195 +182,40 @@ npx playwright test tests/e2e/ --reporter=list
 
 ### Testing
 
-#### Running the Editor
+- Editor container running: `docker compose up -d`
+- Editor accessible at `http://localhost:9888`
+
+#### npm Test Scripts
 
 ```bash
 # Start the dev environment (first time builds the image)
 docker compose up -d
 
-# Verify the editor is running
-curl -s http://localhost:9888/ | head -5
+# Run all E2E tests with standard Playwright (headless)
+npm run test:e2e
+
+# Run all E2E tests with Playwright UI (headed, interactive)
+npm run test:e2e:ui
+
+# Run tests with an existing Chrome instance via CDP
+npm run test:e2e:cdp
 ```
 
-#### MCP-Based Browser Testing (noVNC)
-
-**Required for headed UI testing.** Use this when tests need a real browser with a visible display — e.g. webview interactions, visual verification, or MCP-driven ad-hoc automation. The container provides a virtual X11 display so Chromium runs headed without a local display server.
-
-⚠️ **User approval required** before installing any testing browser. Always check for existing browser connections first.
-
-- Virtual X11 display (Xvfb) — headed browser, no local display required
-- noVNC web interface to watch the browser in real-time at http://localhost:6080/vnc.html
-- MCP server on port 3080 for browser automation
-
-**Start the noVNC container:**
+**Filter tests by file or pattern:**
 
 ```bash
-# Start with host network (required for localhost:9888 access)
-docker run -d --name playwright-novnc \
-  --network host \
-  -e SCREEN_WIDTH=1920 \
-  -e SCREEN_HEIGHT=1080 \
-  -e MCP_BROWSER=chromium \
-  ghcr.io/xtr-dev/mcp-playwright-novnc
+# Run a specific test file
+npx playwright test tests/e2e/docker-to-ide-flow.spec.ts
 
-# Wait for services to be ready
-sleep 5
+# Run tests matching a pattern
+npx playwright test --grep "home panel"
+
+# Run tests matching a pattern (inverted)
+npx playwright test --grep-invert "slow"
+
+# Run a specific test by name
+npx playwright test -t "should open home panel"
 ```
-
-**First-time setup — check for existing browser connection:**
-
-```bash
-# Test if noVNC container is already running and accessible
-docker exec playwright-novnc playwright --version 2>/dev/null && echo "✓ Playwright ready"
-
-# If the above fails, get user approval before installing:
-# 1. Confirm container is running: docker ps | grep playwright-novnc
-# 2. Ask user: "Install Playwright and browser binaries in the noVNC container?"
-# 3. If approved, run:
-docker exec playwright-novnc npm install -g playwright
-docker exec playwright-novnc playwright install chromium
-```
-
-**Access the noVNC interface:**
-- Open http://localhost:6080/vnc.html to watch the browser in real-time
-
-**Using MCP for testing:**
-
-Two MCP servers are configured in `.mcp.json` (Claude Code) and `opencode.json` (OpenCode):
-
-**1. `playwright-novnc`** — full browser automation via the noVNC container:
-```json
-{
-  "command": "docker",
-  "args": ["run","--rm","-i","--network=host",
-           "ghcr.io/xtr-dev/mcp-playwright-novnc","mcp-proxy","http://localhost:3080/sse"]
-}
-```
-
-**2. `chrome-devtools`** — direct Chrome DevTools Protocol access via a remote Chrome instance:
-```json
-{
-  "command": "npx",
-  "args": ["chrome-devtools-mcp@latest", "--autoConnect", "--channel", "beta"]
-}
-```
-`--autoConnect` reads Chrome Beta's user data directory directly (Chrome 144+). No `--remote-debugging-port` flag needed. Requires remote debugging to be enabled once via `chrome://inspect/#remote-debugging` in Chrome Beta.
-
-**Alternative (wrapper):** If `--autoConnect` stops working, `/usr/local/bin/chrome-devtools-mcp-wrapper` reads `DevToolsActivePort` and passes `--wsEndpoint` directly. Chrome 136+ deprecated `/json/version` so `--browserUrl` is unusable. Do not combine `--wsEndpoint` with `--autoConnect` or `--channel` — they conflict and cause the MCP to print help and exit.
-
-**Test for existing Chrome CDP connection first:**
-
-```bash
-# Check if Chrome is already running with remote debugging enabled
-for candidate in \
-  "/root/.config/google-chrome-beta/DevToolsActivePort" \
-  "/root/.config/google-chrome/DevToolsActivePort" \
-  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
-  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
-  if [ -f "$candidate" ]; then
-    echo "✓ Chrome CDP endpoint found at $candidate"
-    exit 0
-  fi
-done
-
-echo "✗ No Chrome CDP connection found"
-echo "Chrome not running with remote debugging. User approval required to set up."
-```
-
-**One-time setup — create the wrapper (if user approves):**
-
-```bash
-sudo tee /usr/local/bin/chrome-devtools-mcp-wrapper > /dev/null << 'EOF'
-#!/bin/bash
-# Reads DevToolsActivePort to get the current Chrome CDP WebSocket URL
-# and passes it to chrome-devtools-mcp via --wsEndpoint.
-
-ACTIVE_PORT_FILE=""
-for candidate in \
-  "/root/.config/google-chrome-beta/DevToolsActivePort" \
-  "/root/.config/google-chrome/DevToolsActivePort" \
-  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
-  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
-  if [ -f "$candidate" ]; then
-    ACTIVE_PORT_FILE="$candidate"
-    break
-  fi
-done
-
-if [ -z "$ACTIVE_PORT_FILE" ]; then
-  exec npx chrome-devtools-mcp@latest "$@"
-fi
-
-CDP_PORT=$(sed -n '1p' "$ACTIVE_PORT_FILE")
-CDP_PATH=$(sed -n '2p' "$ACTIVE_PORT_FILE")
-WS_ENDPOINT="ws://127.0.0.1:${CDP_PORT}${CDP_PATH}"
-
-exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS_ENDPOINT" "$@"
-EOF
-sudo chmod +x /usr/local/bin/chrome-devtools-mcp-wrapper
-```
-
-The wrapper automatically detects a running Chrome instance. If `DevToolsActivePort` is missing (Chrome not running with remote debugging), ask the user before proceeding.
-
-For available flags and options, run:
-```bash
-npx chrome-devtools-mcp@latest --help
-```
-
-Connects to Chrome already running with `--remote-debugging-port=9222 --user-data-dir=<path>` (see Chrome 136+ note below). Chrome is always remote — start it from the desktop or any headed environment.
-
-> **⚠️ Port 9222 conflict:** `playwright-novnc` runs with `--network=host` and its internal
-> Chromium binds to `127.0.0.1:9222`. While the container is running, Chrome cannot bind there.
-> Stop the container before using `chrome-devtools` MCP:
-> ```bash
-> docker kill playwright-novnc
-> ```
-
-**Available MCP tools:**
-- `browser_navigate` - Navigate to URL
-- `browser_snapshot` - Get page structure with element UIDs  
-- `browser_click` - Click elements
-- `browser_fill_form` - Fill form fields
-- `browser_take_screenshot` - Visual capture
-- `browser_list_pages` - List open tabs
-
-**Example test workflow:**
-
-```
-Using the playwright MCP:
-1. Navigate to http://localhost:9888/
-2. Open the Home panel (F1 → "OpenClaw: Home")
-3. Click the Docker setup card
-4. Verify the 3-step config modal appears
-5. Fill in: data directory = /tmp/openclaw-data, port = 18789
-6. Click Next, then Confirm
-7. Verify provisioning starts
-```
-
-**Clean up when done:**
-
-```bash
-docker stop playwright-novnc
-docker rm playwright-novnc
-```
-
----
-
-#### Playwright E2E Testing (Local)
-
-Run tests against the running editor:
-
-```bash
-# Start the dev environment
-docker compose up -d
-
-# Run tests
-npx playwright test tests/e2e/ --reporter=list
-```
-
-**Prerequisites:**
-- Editor container running: `docker compose up -d`
-- Editor accessible at `http://localhost:9888`
 
 **Webview Panel Access:**
 
@@ -397,41 +242,114 @@ import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures'
 | Mode | Env vars | When to use |
 |------|----------|-------------|
 | **Standard** | _(none)_ | CI, fast headless local runs |
-| **VNC** | `USE_VNC=1` | Watch tests live in noVNC at `localhost:6080` |
-| **CDP** | `CDP_ENDPOINT=<url>` | Custom Chrome endpoint |
-
-**Usage:**
-
-```bash
-# Standard (local Chromium)
-npx playwright test --config=playwright.config.ts
-
-# VNC mode
-USE_VNC=1 npx playwright test \
-  --config=playwright.remote-debugging.config.ts
-
-# CDP mode (connect to existing Chrome)
-CDP_ENDPOINT=http://127.0.0.1:9222 npx playwright test \
-  --config=playwright.config.ts
-```
+| **CDP** | `CDP_ENDPOINT=<url>` | Connect to existing Chrome via DevTools |
+| **VNC** | `USE_VNC=1` | Watch tests live in noVNC (requires explicit setup) |
 
 ---
 
-### Chrome DevTools Protocol (CDP) with Playwright
+#### Chrome DevTools Protocol (CDP) with Playwright
 
-Playwright can connect to an externally-launched Chrome instance via CDP for debugging.
+Playwright can connect to an externally-launched Chrome instance via CDP.
 
-⚠️ **User approval required** before launching Chrome with debugging flags.
+**Test for existing Chrome CDP connection first:**
 
-#### Chrome 136+ Note
-Starting with Chrome 136, you **must** use `--user-data-dir` with a custom profile for CDP to work.
+```bash
+# Check if Chrome is already running with remote debugging enabled
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    echo "✓ Chrome CDP endpoint found at $candidate"
+    exit 0
+  fi
+done
 
-#### Basic Usage
-1. Start Chrome with debugging: `chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug`
-2. Run tests: `CDP_ENDPOINT=http://127.0.0.1:9222 npx playwright test --config=playwright.config.ts`
-3. **Important:** Close only test contexts/pages, not the browser itself
+echo "✗ No Chrome CDP connection found"
+```
 
-**Config file:** Tests use `playwright.config.ts` which handles CDP when `CDP_ENDPOINT` is set.
+**One-time wrapper setup (if user approves):**
+
+```bash
+sudo tee /usr/local/bin/chrome-devtools-mcp-wrapper > /dev/null << 'EOF'
+#!/bin/bash
+ACTIVE_PORT_FILE=""
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    ACTIVE_PORT_FILE="$candidate"
+    break
+  fi
+done
+
+if [ -z "$ACTIVE_PORT_FILE" ]; then
+  exec npx chrome-devtools-mcp@latest "$@"
+fi
+
+CDP_PORT=$(sed -n '1p' "$ACTIVE_PORT_FILE")
+CDP_PATH=$(sed -n '2p' "$ACTIVE_PORT_FILE")
+WS_ENDPOINT="ws://127.0.0.1:${CDP_PORT}${CDP_PATH}"
+
+exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS_ENDPOINT" "$@"
+EOF
+sudo chmod +x /usr/local/bin/chrome-devtools-mcp-wrapper
+```
+
+> **⚠️ Chrome 136+:** You **must** use `--user-data-dir` with a custom profile for CDP to work.
+> **⚠️ Port 9222 conflict:** If using the noVNC container, stop it before Chrome debugging:
+> `docker kill playwright-novnc`
+
+---
+
+#### MCP Browser Automation (optional — requires explicit user request)
+
+**Only start the noVNC container when the user explicitly requests headed browser testing or MCP automation.**
+
+```bash
+# Start only if user requests: "I want to watch the browser tests run"
+docker run -d --name playwright-novnc \
+  --network host \
+  -e SCREEN_WIDTH=1920 \
+  -e SCREEN_HEIGHT=1080 \
+  -e MCP_BROWSER=chromium \
+  ghcr.io/xtr-dev/mcp-playwright-novnc
+
+sleep 5
+```
+
+**MCP servers available:**
+
+**1. `playwright-novnc`** — via noVNC container:
+```json
+{
+  "command": "docker",
+  "args": ["run","--rm","-i","--network=host",
+           "ghcr.io/xtr-dev/mcp-playwright-novnc","mcp-proxy","http://localhost:3080/sse"]
+}
+```
+
+**2. `chrome-devtools`** — direct Chrome CDP:
+```json
+{
+  "command": "npx",
+  "args": ["chrome-devtools-mcp@latest", "--autoConnect", "--channel", "beta"]
+}
+```
+
+**Available MCP tools:** `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill_form`, `browser_take_screenshot`, `browser_list_pages`
+
+**Access noVNC interface:** http://localhost:6080/vnc.html
+
+**Clean up when done:**
+
+```bash
+docker stop playwright-novnc
+docker rm playwright-novnc
+```
 
 ---
 
