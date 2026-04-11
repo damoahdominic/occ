@@ -24,6 +24,9 @@ function code() {
 		CODE=".build/electron/$NAME"
 	fi
 
+	# Clean out directory to avoid permission conflicts during rebuild
+	rm -rf out/ 2>/dev/null || true
+
 	# Get electron, compile, built-in extensions
 	if [[ -z "${VSCODE_SKIP_PRELAUNCH}" ]]; then
 		node build/lib/preLaunch.js
