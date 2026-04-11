@@ -706,8 +706,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
         if (rawUrl) {
           // Rewrite the internal container port to the host-mapped port
           const url = rawUrl
-            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
-            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${containerPort}`)
+            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${containerPort}`);
           await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
           // dashboard command failed — open plain URL as fallback
