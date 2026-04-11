@@ -8,10 +8,6 @@ export default defineConfig({
   // All tests share a single VS Code server — run serially to prevent
   // workspace-state contamination between test files.
   workers: 1,
-  reporter: [
-    ['list', { printSteps: true }],
-    // ['json', { outputFile: 'test-results/test-results.json' }],
-  ],
   expect: {
     toHaveScreenshot: {
       maxDiffPixels: 50,
@@ -63,7 +59,7 @@ export default defineConfig({
     // trying to start a new one.
     command: 'true',
     // url: 'http://[::1]:9888',
-    // reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });
