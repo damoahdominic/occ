@@ -32,10 +32,10 @@ export default defineConfig({
   },
   // No 'projects' block — the CDP fixture handles browser setup.
   // No launchOptions/browserName at config level — connectOverCDP is used instead.
-  webServer: {
-    command: 'true',
-    url: 'http://localhost:9888',
-    reuseExistingServer: true,
-    timeout: 30_000,
-  },
+  // webServer: {
+  //   command: 'true',
+  //   url: 'http://localhost:9888',
+  //   reuseExistingServer: true,
+  //   timeout: 30_000,
+  // },
 });

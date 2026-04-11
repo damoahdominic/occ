@@ -13,7 +13,7 @@ import { test, expect } from './fixtures';
  */
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await page.goto('http://localhost:9888/');
   await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 });
 

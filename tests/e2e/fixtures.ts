@@ -15,15 +15,15 @@
  *     Requires the container started with --network=host so port 9222 is on localhost:
  *       docker run -d --name playwright-novnc --network host \
  *         -e MCP_BROWSER=chromium ghcr.io/xtr-dev/mcp-playwright-novnc:latest
- *     Watch the browser live at http://localhost:6080/vnc.html
+ *     Watch the browser live at http://127.0.0.1:6080/vnc.html
  *
  *   CDP mode  (CDP_ENDPOINT=<url>):
- *     CDP_ENDPOINT=http://localhost:9222 npx playwright test --config=playwright.config.ts
+ *     CDP_ENDPOINT=http://127.0.0.1:9222 npx playwright test --config=playwright.config.ts
  *     Connects to an arbitrary Chrome DevTools HTTP endpoint. USE_VNC is ignored
  *     when CDP_ENDPOINT is set explicitly.
  *
  *   WS mode  (WS_ENDPOINT=<ws-url>):
- *     WS_ENDPOINT=ws://localhost:9222/devtools/browser/<uuid> npx playwright test --config=playwright.config.ts
+ *     WS_ENDPOINT=ws://127.0.0.1:9222/devtools/browser/<uuid> npx playwright test --config=playwright.config.ts
  *     Connects directly via WebSocket, bypassing the /json/version HTTP step.
  *     Useful when Chrome is behind a proxy or Host-header restrictions apply.
  *     Takes precedence over CDP_ENDPOINT and USE_VNC.
@@ -34,7 +34,7 @@
 
 import * as http from 'http';
 import {
-  test as base,
+  test as baseTest,
   chromium,
   type Browser,
   type BrowserContext,
@@ -42,19 +42,20 @@ import {
 } from '@playwright/test';
 
 export { expect, type Page, type FrameLocator } from '@playwright/test';
+export { baseTest };
 
 // ---------------------------------------------------------------------------
 // Mode detection — evaluated once per worker at module load time.
 // ---------------------------------------------------------------------------
 
 // Priority: WS_ENDPOINT > CDP_ENDPOINT > USE_VNC > auto-detect localhost:9222 > local Chromium.
-const VNC_DEFAULT_ENDPOINT = 'http://localhost:9222';
+const VNC_DEFAULT_ENDPOINT = 'http://127.0.0.1:9222';
 const REMOTE_ENDPOINT: string | null =
   process.env.WS_ENDPOINT ??
   process.env.CDP_ENDPOINT ??
   (process.env.USE_VNC ? VNC_DEFAULT_ENDPOINT : null);
 
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:9888';
+const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:9888';
 
 // VS Code web requires a ?workspace= param to open a folder; without it the
 // extension never activates and the "OCC Home" tab does not appear.
@@ -83,7 +84,7 @@ function detectLocalChrome(): Promise<string | null> {
             const json = JSON.parse(data) as { webSocketDebuggerUrl?: string };
             let ws = json.webSocketDebuggerUrl ?? '';
             // Chrome sometimes omits the port in the reported WS URL
-            ws = ws.replace('://localhost/', '://localhost:9222/');
+            ws = ws.replace('://127.0.0.1/', '://127.0.0.1:9222/');
             resolve(ws || null);
           } catch {
             resolve(null);
@@ -113,7 +114,7 @@ type TestFixtures = {
 // Unified test fixture
 // ---------------------------------------------------------------------------
 
-export const test = base.extend<TestFixtures, WorkerFixtures>({
+export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
   /**
    * Worker-scoped browser.
    *
@@ -192,26 +193,35 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
    * Intercept bare-root navigations (page.goto('/')) and redirect to the
    * workspace-aware URL so the extension activates in both CDP and headless modes.
    */
-  page: async ({ context }, use) => {
-    const page = await context.newPage();
+   page: async ({ context }, use) => {
+     const page = await context.newPage();
 
-    // In CDP mode, prefer the workspace URL from the live VS Code session.
-    // In headless mode (no existing pages), fall back to VSCODE_WORKSPACE_URL.
-    const vsCodePage = context.pages()
-      .filter(p => p !== page)
-      .find(p => p.url().startsWith(BASE_URL));
-    const targetUrl = vsCodePage?.url() ?? VSCODE_WORKSPACE_URL;
+     // In CDP mode, prefer the workspace URL from the live VS Code session.
+     // In headless mode (no existing pages), fall back to VSCODE_WORKSPACE_URL.
+     const vsCodePage = context.pages()
+       .filter(p => p !== page)
+       .find(p => p.url().startsWith(BASE_URL));
+     const targetUrl = vsCodePage?.url() ?? VSCODE_WORKSPACE_URL;
 
-    // Intercept bare-root navigations (page.goto('/') → BASE_URL + '/') and
-    // redirect to the workspace-aware URL so the OCC extension activates.
-    await page.route(BASE_URL + '/', (route) =>
-      route.fulfill({ status: 302, headers: { location: targetUrl } }),
-    );
+     // Ensure every test starts at the workspace‑aware URL so the OCC extension activates.
+     await page.goto(targetUrl, { waitUntil: 'load' });
 
-    await use(page);
-    // Page is closed implicitly when context closes.
-  },
+     await use(page);
+     // Page is closed implicitly when context closes.
+   },
 });
+
+// Preserve static methods from baseTest that get lost on .extend()
+test.beforeEach = baseTest.beforeEach;
+test.afterEach = baseTest.afterEach;
+test.describe = baseTest.describe;
+test.it = baseTest.it;
+
+// Polyfill for test.todo() - not available in Playwright 1.59+ extended fixtures
+// Creates a skipped test that can be enabled when feature is implemented
+(test as any).todo = function(title: string) {
+  return test.skip(`[PENDING] ${title}`, () => {});
+};
 
 // ---------------------------------------------------------------------------
 // withCDP helper

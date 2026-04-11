@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: 'http://localhost:9888',
+    baseURL: 'http://[::1]:9888/',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Connect to existing Chrome via CDP when CDP_ENDPOINT is set
@@ -33,6 +33,7 @@ export default defineConfig({
       // Standard mode - launch local Chromium
       browserName: 'chromium',
       headless: true,
+      baseURL: 'http://[::1]:9888/',
       ...devices['Desktop Chrome'],
       // Required when running inside Docker as root (no sandbox available)
       launchOptions: {
@@ -45,6 +46,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: {
+        baseURL: 'http://[::1]:9888/',
         ...devices['Desktop Chrome'],
         // Required when running inside Docker as root (no sandbox available)
         launchOptions: {
@@ -60,8 +62,8 @@ export default defineConfig({
     // The editor container is already running in Docker — reuse it instead of
     // trying to start a new one.
     command: 'true',
-    url: 'http://localhost:9888',
-    reuseExistingServer: true,
+    // url: 'http://[::1]:9888',
+    // reuseExistingServer: true,
     timeout: 30_000,
   },
 });
