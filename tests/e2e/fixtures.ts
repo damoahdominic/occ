@@ -199,6 +199,15 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
    page: async ({ context }, use) => {
      const page = await context.newPage();
 
+     // Track CDP sessions we create in this test so we can clean them up
+     const sessionsCreated = new Set<string>();
+     const originalNewCDPSession = page.context().newCDPSession.bind(page.context());
+     (page.context() as any).newCDPSession = async function(target: any) {
+       const session = await originalNewCDPSession(target);
+       sessionsCreated.add(session.toString());
+       return session;
+     };
+
      // In CDP mode, prefer the workspace URL from the live VS Code session.
      // In headless mode (no existing pages), fall back to VSCODE_WORKSPACE_URL.
      const vsCodePage = context.pages()
@@ -211,12 +220,14 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
 
      await use(page);
 
-     // Close any CDP sessions attached to this page to prevent resource leaks
+     // Close only the CDP sessions we created in this test
      for (const cdpSession of page.context().cdpSessions()) {
-       try {
-         await cdpSession.detach().catch(() => {});
-       } catch {
-         // Silently ignore errors if session is already detached
+       if (sessionsCreated.has(cdpSession.toString())) {
+         try {
+           await cdpSession.detach().catch(() => {});
+         } catch {
+           // Silently ignore errors if session is already detached
+         }
        }
      }
 
