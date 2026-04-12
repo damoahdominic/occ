@@ -703,15 +703,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
         );
         let rawUrl = (dashResult.stdout as string ?? '').trim();
 
+        // Check if a custom proxy URL is configured in openclaw.json
+        let proxyUrl: string | undefined;
+        try {
+          const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+          const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+          const gateway = configData['gateway'] as Record<string, unknown> | undefined;
+          proxyUrl = gateway?.['proxyUrl'] ?? gateway?.['proxy_url'] ?? configData['proxyUrl'] ?? configData['proxy_url'];
+          if (typeof proxyUrl !== 'string' || proxyUrl.length === 0) {
+            proxyUrl = undefined;
+          }
+        } catch {
+          // Config not available — use default behavior
+        }
+
         if (rawUrl) {
-          // Rewrite the internal container port to the host-mapped port
-          const url = rawUrl
-            .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
-            .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+          let url: string;
+          if (proxyUrl) {
+            // Use configured proxy URL instead of rewriting container port
+            try {
+              const proxyUri = new URL(proxyUrl);
+              const dashUri = new URL(rawUrl);
+              // Merge path, search, hash from dashboard URL into proxy URL
+              url = new URL(
+                `${dashUri.pathname}${dashUri.search}${dashUri.hash}`,
+                proxyUri.toString()
+              ).toString();
+            } catch {
+              // Invalid proxy URL — fall back to host port rewrite
+              url = rawUrl
+                .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
+                .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+            }
+          } else {
+            // No proxy URL configured — rewrite container port to host port
+            url = rawUrl
+              .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
+              .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
+          }
           await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
           // dashboard command failed — open plain URL as fallback
-          await vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${hostPort}/`));
+          const fallbackUrl = proxyUrl ?? `http://localhost:${hostPort}/`;
+          await vscode.env.openExternal(vscode.Uri.parse(fallbackUrl));
         }
         return;
       }

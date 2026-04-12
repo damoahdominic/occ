@@ -343,6 +343,22 @@ export function getDashboardUrl(): { url: string; port: number } | undefined {
     const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
     const token = auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string' ? auth['token'] as string : '';
 
+    // Proxy URL: if gateway.proxyUrl is configured, use it instead of constructing localhost URL.
+    // Useful for: reverse proxies, external gateways, custom domains, load balancers, non-standard ports.
+    const proxyUrl = gateway?.['proxyUrl'] ?? gateway?.['proxy_url'] ?? config['proxyUrl'] ?? config['proxy_url'];
+    if (typeof proxyUrl === 'string' && proxyUrl.length > 0) {
+      try {
+        const url = new URL(proxyUrl);
+        const fullUrl = token
+          ? `${url.toString().replace(/\/$/, '')}/#token=${token}`
+          : url.toString();
+        return { url: fullUrl, port };
+      } catch {
+        // Invalid URL — fall through to default
+      }
+    }
+
+    // Default: construct localhost URL with configured port
     const url = token
       ? `http://127.0.0.1:${port}/#token=${token}`
       : `http://127.0.0.1:${port}/`;
