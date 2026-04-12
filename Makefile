@@ -1,4 +1,4 @@
-.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows build-macos build-macos-arm64 build-macos-x64 container-build-linux launch add-dev-build del-dev-build
+.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows build-macos build-macos-arm64 build-macos-x64 container-build-linux launch add-dev-build del-dev-build cdp
 
 # Default target
 .DEFAULT_GOAL := help
@@ -221,3 +221,8 @@ del-dev-build:
 		echo "Error: Unsupported platform: $$(uname -s)"; \
 		exit 1; \
 	fi
+
+## cdp: Start Google Chrome with Chrome DevTools Protocol enabled
+cdp:
+	@echo "Starting Google Chrome with Chrome DevTools Protocol on port 9222..."
+	google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/cdp
