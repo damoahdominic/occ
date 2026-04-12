@@ -192,6 +192,9 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
    * VS Code web needs a ?workspace= param or the OCC extension never activates.
    * Intercept bare-root navigations (page.goto('/')) and redirect to the
    * workspace-aware URL so the extension activates in both CDP and headless modes.
+   *
+   * After each test, explicitly close any CDP sessions and clear the page to prevent
+   * resource leaks and browser connection issues in long-running test suites.
    */
    page: async ({ context }, use) => {
      const page = await context.newPage();
@@ -207,7 +210,18 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
      await page.goto(targetUrl, { waitUntil: 'load' });
 
      await use(page);
-     // Page is closed implicitly when context closes.
+
+     // Close any CDP sessions attached to this page to prevent resource leaks
+     for (const cdpSession of page.context().cdpSessions()) {
+       try {
+         await cdpSession.detach().catch(() => {});
+       } catch {
+         // Silently ignore errors if session is already detached
+       }
+     }
+
+     // Close the page to release resources and prevent state leakage to next test
+     await page.close().catch(() => {});
    },
 });
 
@@ -234,7 +248,8 @@ test.it = baseTest.it;
  * any Chromium page regardless of how the browser was launched.
  *
  * Returns a getter that returns all captured log strings accumulated since
- * withCDP() was called.
+ * withCDP() was called. The CDP session is automatically cleaned up when the
+ * page is closed at the end of the test.
  *
  * Example:
  *   const getLogs = await withCDP(page);
@@ -259,5 +274,6 @@ export async function withCDP(page: Page): Promise<() => string[]> {
     },
   );
 
+  // Session cleanup is handled by the page fixture teardown when page is closed
   return () => [...logs];
 }
