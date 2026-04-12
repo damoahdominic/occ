@@ -6,7 +6,17 @@
  * - Removing/normalizing trailing slashes
  * - Merging dashboard paths with proxy URLs
  * - Handling various path combinations
+ *
+ * These tests can be run standalone without the full VS Code editor:
+ *   npm test --filter proxy-paths
  */
+
+import {
+  addPathToUrl,
+  removeTrailingSlash,
+  normalizePath,
+  mergeDashboardWithProxy,
+} from '../utils/proxyUrl';
 
 interface TestCase {
   name: string;
@@ -23,45 +33,12 @@ interface NormalizeTestCase {
   expected: string;
 }
 
-// Utility: Add path to base URL (+ path)
-function addPathToUrl(baseUrl: string, path: string, search = '', hash = ''): string {
-  try {
-    const url = new URL(baseUrl);
-    // Remove trailing slash from base path if present
-    const basePath = url.pathname.replace(/\/$/, '');
-    // Ensure path starts with /
-    const addPath = path.startsWith('/') ? path : `/${path}`;
-    // Combine paths
-    url.pathname = basePath + addPath;
-    if (search) url.search = search;
-    if (hash) url.hash = hash;
-    return url.toString();
-  } catch {
-    return '';
-  }
-}
-
-// Utility: Remove trailing slash from URL (- slash)
-function removeTrailingSlash(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.pathname = parsed.pathname.replace(/\/$/, '') || '/';
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-// Utility: Normalize URL path (remove redundant slashes)
-function normalizePath(urlStr: string): string {
-  try {
-    const url = new URL(urlStr);
-    // Remove duplicate slashes in path
-    url.pathname = url.pathname.replace(/\/+/g, '/');
-    return url.toString();
-  } catch {
-    return urlStr;
-  }
+interface MergeTestCase {
+  name: string;
+  dashboardUrl: string;
+  proxyUrl?: string;
+  portMapping?: { containerPort: number; hostPort: number };
+  expected: string;
 }
 
 // Simple test runner
@@ -224,7 +201,7 @@ async function runTests(): Promise<void> {
 
   console.log('\n\nTest Suite 4: Combined Path Operations\n');
 
-  const mergeTests = [
+  const combinedTests = [
     {
       name: 'Add path then remove trailing slash',
       fn: () => {
@@ -245,7 +222,7 @@ async function runTests(): Promise<void> {
     },
   ];
 
-  for (const tc of mergeTests) {
+  for (const tc of combinedTests) {
     try {
       const result = tc.fn();
       assert(result === tc.expected, `${tc.name}\n  Got: ${result}\n  Expected: ${tc.expected}`);
@@ -256,11 +233,67 @@ async function runTests(): Promise<void> {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Test Suite 5: Merge Dashboard URL with Proxy
+  // ──────────────────────────────────────────────────────────────────────
+
+  console.log('\n\nTest Suite 5: Merge Dashboard URL with Proxy\n');
+
+  const mergeDashboardTests: MergeTestCase[] = [
+    {
+      name: 'Merge dashboard URL with proxy URL',
+      dashboardUrl: 'http://127.0.0.1:18789/#token=abc123',
+      proxyUrl: 'https://gateway.example.com/',
+      expected: 'https://gateway.example.com/#token=abc123',
+    },
+    {
+      name: 'Proxy URL with base path',
+      dashboardUrl: 'http://127.0.0.1:18789/config',
+      proxyUrl: 'https://api.example.com/openclaw/',
+      expected: 'https://api.example.com/openclaw/config',
+    },
+    {
+      name: 'Rewrite container port to host port (no proxy)',
+      dashboardUrl: 'http://127.0.0.1:18789/#token=xyz',
+      proxyUrl: undefined,
+      portMapping: { containerPort: 18789, hostPort: 18790 },
+      expected: 'http://127.0.0.1:18790/#token=xyz',
+    },
+    {
+      name: 'Proxy URL takes precedence over port mapping',
+      dashboardUrl: 'http://127.0.0.1:18789/#token=abc',
+      proxyUrl: 'https://secure.gateway.example.com/',
+      portMapping: { containerPort: 18789, hostPort: 18790 },
+      expected: 'https://secure.gateway.example.com/#token=abc',
+    },
+    {
+      name: 'Rewrite localhost variant of port',
+      dashboardUrl: 'http://localhost:18789/#token=test',
+      proxyUrl: undefined,
+      portMapping: { containerPort: 18789, hostPort: 18790 },
+      expected: 'http://localhost:18790/#token=test',
+    },
+    {
+      name: 'Handle empty dashboard URL gracefully',
+      dashboardUrl: '',
+      proxyUrl: 'https://gateway.example.com/',
+      expected: '',
+    },
+  ];
+
+  for (const tc of mergeDashboardTests) {
+    try {
+      const result = mergeDashboardWithProxy(tc.dashboardUrl, tc.proxyUrl, tc.portMapping);
+      assert(result === tc.expected, `${tc.name}\n  Got: ${result}\n  Expected: ${tc.expected}`);
+      console.log(`  ✓ ${tc.name}`);
+    } catch (err) {
+      console.error(`  ✗ ${tc.name}: ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
   console.log('\n\n✓ All proxy path tests passed!\n');
 }
-
-// Export utilities for use in extension code
-export { addPathToUrl, removeTrailingSlash, normalizePath };
 
 // Run tests
 runTests().catch(err => {

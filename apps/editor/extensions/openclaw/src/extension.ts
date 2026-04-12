@@ -14,6 +14,7 @@ import { HostManager } from './hosts/manager';
 import { HostStatusBarItem } from './hosts/statusbar';
 import { HostTreeProvider } from './hosts/tree';
 import type { OpenClawCoreAPI } from './hosts/types';
+import { mergeDashboardWithProxy } from './utils/proxyUrl';
 
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -718,29 +719,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
         }
 
         if (rawUrl) {
-          let url: string;
-          if (proxyUrl) {
-            // Use configured proxy URL instead of rewriting container port
-            try {
-              const proxyUri = new URL(proxyUrl);
-              const dashUri = new URL(rawUrl);
-              // Merge path, search, hash from dashboard URL into proxy URL
-              url = new URL(
-                `${dashUri.pathname}${dashUri.search}${dashUri.hash}`,
-                proxyUri.toString()
-              ).toString();
-            } catch {
-              // Invalid proxy URL — fall back to host port rewrite
-              url = rawUrl
-                .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
-                .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
-            }
-          } else {
-            // No proxy URL configured — rewrite container port to host port
-            url = rawUrl
-              .replace(new RegExp(`localhost:${containerPort}`, 'g'), `localhost:${hostPort}`)
-              .replace(new RegExp(`127\\.0\\.0\\.1:${containerPort}`, 'g'), `127.0.0.1:${hostPort}`);
-          }
+          // Use mergeDashboardWithProxy utility to handle URL rewriting
+          // (either with proxy URL or port mapping)
+          const url = mergeDashboardWithProxy(rawUrl, proxyUrl, {
+            containerPort,
+            hostPort,
+          });
           await vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
           // dashboard command failed — open plain URL as fallback
