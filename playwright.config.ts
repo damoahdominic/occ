@@ -53,6 +53,8 @@ export default defineConfig({
       },
     },
   ],
+  // Global teardown to close all tabs/pages when tests complete
+  globalTeardown: require.resolve('./tests/e2e/global-teardown.ts'),
   // No global setup needed - the fixtures.ts handles browser connection
   webServer: {
     // The editor container is already running in Docker — reuse it instead of
