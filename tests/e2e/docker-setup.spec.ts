@@ -11,30 +11,12 @@
  * The stepper is always visible at the top showing progress.
  */
 
-import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures';
+import { test, expect, type FrameLocator, withCDP } from './fixtures';
+import { waitForHomePanelTab, getInnerFrame } from './test-utils';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Open (or reveal) the OCC Home panel and wait for its tab to be visible. */
-async function waitForHomePanelTab(page: Page): Promise<void> {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-
-  await tab.waitFor({ timeout: 30_000 }).catch(() => null);
-
-  if (!await tab.isVisible()) {
-    await page.locator('.activitybar').click({ force: true, timeout: 10_000 }).catch(() => null);
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 30_000 });
-}
-
-/** Returns the inner FrameLocator for the OCC panel content. */
-function getInnerFrame(page: Page): FrameLocator {
-  return page.frameLocator('iframe.webview').first().frameLocator('iframe#active-frame');
-}
 
 /**
  * Navigate to the home panel and click the Docker card.
@@ -84,8 +66,8 @@ test('docker card is visible in host picker', async ({ page }) => {
   // Docker card should be visible with data-card attribute
   const dockerCard = innerFrame.locator('[data-card="docker"]');
   await dockerCard.waitFor({ timeout: 20_000 });
-  await expect(dockerCard).toContainText('Docker');
-  await expect(dockerCard).toContainText('Recommended');
+  await expect(dockerCard, 'Docker card should contain "Docker" text').toContainText('Docker');
+  await expect(dockerCard, 'Docker card should contain "Recommended" label').toContainText('Recommended');
 });
 
 test('clicking docker card shows 3-step config page (ticket-040)', async ({ page }) => {
@@ -100,41 +82,41 @@ test('clicking docker card shows 3-step config page (ticket-040)', async ({ page
     console.error('CDP console logs at failure:\n', getLogs().join('\n'));
     throw err;
   });
-  await expect(step1).toBeVisible();
+  await expect(step1, 'Step 1 config page should be visible').toBeVisible();
 
   // Stepper should show all 3 step indicators
   const step1Ind = innerFrame.locator('#config-step-1-indicator');
-  await expect(step1Ind).toBeVisible();
-  await expect(step1Ind).toContainText('1. Config');
+  await expect(step1Ind, 'Step 1 indicator should be visible').toBeVisible();
+  await expect(step1Ind, 'Step 1 indicator should contain "1. Config"').toContainText('1. Config');
 
   const step2Ind = innerFrame.locator('#config-step-2-indicator');
-  await expect(step2Ind).toBeVisible();
-  await expect(step2Ind).toContainText('2. Confirm');
+  await expect(step2Ind, 'Step 2 indicator should be visible').toBeVisible();
+  await expect(step2Ind, 'Step 2 indicator should contain "2. Confirm"').toContainText('2. Confirm');
 
   const step3Ind = innerFrame.locator('#config-step-3-indicator');
-  await expect(step3Ind).toBeVisible();
-  await expect(step3Ind).toContainText('3. Start');
+  await expect(step3Ind, 'Step 3 indicator should be visible').toBeVisible();
+  await expect(step3Ind, 'Step 3 indicator should contain "3. Start"').toContainText('3. Start');
 
   // Step 2 and 3 content should NOT be in the DOM (full-page render)
-  await expect(innerFrame.locator('#docker-config-step-2')).toHaveCount(0);
-  await expect(innerFrame.locator('#docker-config-step-3')).toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-2'), 'Step 2 content should not be in DOM yet').toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-3'), 'Step 3 content should not be in DOM yet').toHaveCount(0);
 });
 
 test('config page step 1 shows all 4 fields', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // Check all 4 config fields are visible
-  await expect(innerFrame.locator('#config-gateway-image')).toBeVisible();
-  await expect(innerFrame.locator('#config-gateway-port')).toBeVisible();
-  await expect(innerFrame.locator('#config-data-dir')).toBeVisible();
-  await expect(innerFrame.locator('#config-fresh-build')).toBeVisible();
+  await expect(innerFrame.locator('#config-gateway-image'), 'Gateway image field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#config-gateway-port'), 'Gateway port field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#config-data-dir'), 'Data directory field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#config-fresh-build'), 'Fresh build checkbox should be visible').toBeVisible();
 
   // Browse button should be visible
-  await expect(innerFrame.locator('button:has-text("Browse")')).toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Browse")'), 'Browse button should be visible').toBeVisible();
 
   // Next and Cancel buttons should be visible
-  await expect(innerFrame.locator('button:has-text("Next")')).toBeVisible();
-  await expect(innerFrame.locator('button:has-text("Cancel")')).toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Next")'), 'Next button should be visible').toBeVisible();
+  await expect(innerFrame.locator('button:has-text("Cancel")'), 'Cancel button should be visible').toBeVisible();
 });
 
 test('step indicators show correct active state', async ({ page }) => {
@@ -142,14 +124,14 @@ test('step indicators show correct active state', async ({ page }) => {
 
   // Step 1 indicator should be active (blue background #2563eb → rgb(37, 99, 235))
   const step1Indicator = innerFrame.locator('#config-step-1-indicator');
-  await expect(step1Indicator).toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
+  await expect(step1Indicator, 'Step 1 indicator should have active blue color').toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
 
   // Step 2 and 3 should be inactive (dark background #1a1a1a → rgb(26, 26, 26))
   const step2Indicator = innerFrame.locator('#config-step-2-indicator');
-  await expect(step2Indicator).toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
+  await expect(step2Indicator, 'Step 2 indicator should have inactive dark color').toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
 
   const step3Indicator = innerFrame.locator('#config-step-3-indicator');
-  await expect(step3Indicator).toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
+  await expect(step3Indicator, 'Step 3 indicator should have inactive dark color').toHaveCSS('background-color', /rgb\(26,|rgb\(26 /);
 });
 
 test('clicking Next renders Step 2 confirm page', async ({ page }) => {
@@ -164,21 +146,21 @@ test('clicking Next renders Step 2 confirm page', async ({ page }) => {
   await step2.waitFor({ state: 'visible', timeout: 20_000 });
 
   // Step 2 should show read-only confirm values
-  await expect(innerFrame.locator('#confirm-image')).toBeVisible();
-  await expect(innerFrame.locator('#confirm-port')).toBeVisible();
-  await expect(innerFrame.locator('#confirm-data-dir')).toBeVisible();
-  await expect(innerFrame.locator('#confirm-fresh-build')).toBeVisible();
+  await expect(innerFrame.locator('#confirm-image'), 'Confirm image field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#confirm-port'), 'Confirm port field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#confirm-data-dir'), 'Confirm data directory field should be visible').toBeVisible();
+  await expect(innerFrame.locator('#confirm-fresh-build'), 'Confirm fresh build field should be visible').toBeVisible();
 
   // Confirm button should be visible
-  await expect(innerFrame.locator('#btn-confirm-config')).toBeVisible();
+  await expect(innerFrame.locator('#btn-confirm-config'), 'Confirm button should be visible').toBeVisible();
 
   // Step 1 and 3 content should NOT be in DOM
-  await expect(innerFrame.locator('#docker-config-step-1')).toHaveCount(0);
-  await expect(innerFrame.locator('#docker-config-step-3')).toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-1'), 'Step 1 content should not be in DOM on Step 2').toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-3'), 'Step 3 content should not be in DOM on Step 2').toHaveCount(0);
 
   // Stepper: step 2 indicator should be active
   const step2Indicator = innerFrame.locator('#config-step-2-indicator');
-  await expect(step2Indicator).toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
+  await expect(step2Indicator, 'Step 2 indicator should have active blue color').toHaveCSS('background-color', /rgb\(37,|rgb\(37 /);
 });
 
 test('clicking Back from Step 2 returns to Step 1', async ({ page }) => {
@@ -193,7 +175,7 @@ test('clicking Back from Step 2 returns to Step 1', async ({ page }) => {
 
   // Step 1 should be visible again (full-page re-render)
   await innerFrame.locator('#docker-config-step-1').waitFor({ state: 'visible', timeout: 20_000 });
-  await expect(innerFrame.locator('#docker-config-step-2')).toHaveCount(0);
+  await expect(innerFrame.locator('#docker-config-step-2'), 'Step 2 content should be removed when going back to Step 1').toHaveCount(0);
 });
 
 test('cancel returns to host picker', async ({ page }) => {
@@ -205,15 +187,15 @@ test('cancel returns to host picker', async ({ page }) => {
   // Should return to the host picker (Docker/Local/SSH cards)
   const dockerCard = innerFrame.locator('[data-card="docker"]');
   await dockerCard.waitFor({ state: 'visible', timeout: 20_000 });
-  await expect(innerFrame.locator('[data-card="local"]')).toBeVisible();
+  await expect(innerFrame.locator('[data-card="local"]'), 'Local card should be visible in host picker after cancel').toBeVisible();
 });
 
 test('step timeline shows docker flow (1. Config → 2. Confirm → 3. Start)', async ({ page }) => {
   const innerFrame = await clickDockerCard(page);
 
   // All 3 step indicators should be visible in the stepper
-  await expect(innerFrame.locator('.stepper')).toBeVisible();
-  await expect(innerFrame.locator('#config-step-1-indicator')).toContainText('1. Config');
-  await expect(innerFrame.locator('#config-step-2-indicator')).toContainText('2. Confirm');
-  await expect(innerFrame.locator('#config-step-3-indicator')).toContainText('3. Start');
+  await expect(innerFrame.locator('.stepper'), 'Stepper should be visible').toBeVisible();
+  await expect(innerFrame.locator('#config-step-1-indicator'), 'Step 1 indicator should show "1. Config"').toContainText('1. Config');
+  await expect(innerFrame.locator('#config-step-2-indicator'), 'Step 2 indicator should show "2. Confirm"').toContainText('2. Confirm');
+  await expect(innerFrame.locator('#config-step-3-indicator'), 'Step 3 indicator should show "3. Start"').toContainText('3. Start');
 });

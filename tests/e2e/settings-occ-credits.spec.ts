@@ -1,4 +1,5 @@
-import { test, expect, type Page } from './fixtures';
+import { test, expect } from './fixtures';
+import { waitForHomePanelTab } from './test-utils';
 
 /**
  * Settings Panel - OCC Credits Card E2E Tests
@@ -10,19 +11,6 @@ import { test, expect, type Page } from './fixtures';
  * - Mock backend server running on localhost:3001
  * - User email: test@test.com
  */
-
-const waitForHomePanelTab = async (page: Page) => {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-  const autoOpen = tab.waitFor({ timeout: 25_000 }).catch(() => null);
-  await autoOpen;
-
-  if (!await tab.isVisible()) {
-    await page.locator('.activitybar').click();
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 20_000 });
-};
 
 test.describe('Settings Panel - OCC Credits Card', () => {
   test.beforeEach(async ({ page }) => {
@@ -65,7 +53,7 @@ test.describe('Settings Panel - OCC Credits Card', () => {
       const signInButton = occCreditsCard.locator('button, [role="button"]').filter({
         hasText: /sign.*in|log.*in/i,
       });
-      await expect(signInButton.first()).toBeVisible({ timeout: 10_000 });
+      await expect(signInButton.first(), 'Sign-in button should be visible on OCC Credits card when unauthenticated').toBeVisible({ timeout: 10_000 });
     }
   });
 
@@ -103,7 +91,7 @@ test.describe('Settings Panel - OCC Credits Card', () => {
       const newContent = page.locator('.settings-content, .settings-body');
       const hasContent = await newContent.first().isVisible().catch(() => false);
 
-      expect(hasContent).toBe(true);
+      expect(hasContent, 'Settings content should remain visible after auth flow initiation').toBe(true);
     }
   });
 
@@ -151,7 +139,7 @@ test.describe('Settings Panel - OCC Credits Card', () => {
       const hasBuyLink = await buyLink.first().isVisible().catch(() => false);
 
       // At least one authenticated indicator should be present
-      expect(hasEmail || hasBalance || hasBuyLink).toBe(true);
+      expect(hasEmail || hasBalance || hasBuyLink, 'OCC Credits card should show email, balance, or buy link when authenticated').toBe(true);
     }
   });
 
@@ -192,12 +180,12 @@ test.describe('Settings Panel - OCC Credits Card', () => {
       const signInButton = page.locator('button, [role="button"]').filter({
         hasText: /sign.*in|log.*in/i,
       });
-      await expect(signInButton.first()).toBeVisible({ timeout: 10_000 });
+      await expect(signInButton.first(), 'Sign-in button should be visible after sign out').toBeVisible({ timeout: 10_000 });
 
       // Balance should not be displayed
       const balanceDisplay = page.locator('.balance, [data-testid="balance"]');
       const hasBalance = await balanceDisplay.first().isVisible().catch(() => false);
-      expect(hasBalance).toBe(false);
+      expect(hasBalance, 'Balance should not be displayed after sign out').toBe(false);
     }
   });
 
@@ -231,6 +219,6 @@ test.describe('Settings Panel - OCC Credits Card', () => {
 
     // Either shows error state or has balance - both acceptable
     const hasError = await errorState.first().isVisible().catch(() => false);
-    expect(hasBalance || hasError).toBe(true);
+    expect(hasBalance || hasError, 'OCC Credits card should show balance or error state').toBe(true);
   });
 });

@@ -1,4 +1,13 @@
-import { test, expect, type Page } from './fixtures';
+import { test, expect } from './fixtures';
+import {
+  waitForHomePanelTab,
+  getInnerFrame,
+  clickButton,
+  isButtonVisible,
+  getTextContent,
+  verifyStatusContains,
+  findButton,
+} from './test-utils';
 
 /**
  * Onboarding and Authentication E2E Tests
@@ -10,24 +19,6 @@ import { test, expect, type Page } from './fixtures';
  * - Mock backend server running on localhost:3001
  * - Mock JWT token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test
  */
-
-const waitForHomePanelTab = async (page: Page) => {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-  const autoOpen = tab.waitFor({ timeout: 25_000 }).catch(() => null);
-  await autoOpen;
-
-  if (!await tab.isVisible()) {
-    await page.locator('.activitybar').click();
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 20_000 });
-};
-
-const getInnerFrame = (page: Page) => {
-  const outerFrame = page.frameLocator('iframe.webview').first();
-  return outerFrame.frameLocator('iframe#active-frame');
-};
 
 test.describe('Onboarding and Authentication', () => {
   test.beforeEach(async ({ page }) => {
@@ -50,7 +41,7 @@ test.describe('Onboarding and Authentication', () => {
     const onboardingContent = innerFrame.locator('.steps, .onboarding, .cards, .card, h1, h2, h3');
     await onboardingContent.first().waitFor({ timeout: 30_000 });
 
-    const contentText = await onboardingContent.first().textContent().catch(() => '');
+    const contentText = await getTextContent(onboardingContent.first());
 
     // Should contain references to installation, gateway, and sign-in
     expect(contentText.toLowerCase()).toMatch(/install|setup|start|sign.*in|account|create/i);
@@ -71,28 +62,37 @@ test.describe('Onboarding and Authentication', () => {
     const innerFrame = getInnerFrame(page);
 
     // Look for Create Account / Sign in button
-    const createAccountButton = innerFrame.locator('button, [role="button"], a').filter({
-      hasText: /create.*account|sign.*in|sign.*up|get.*started/i,
-    });
+    const hasCreateButton = await isButtonVisible(
+      innerFrame,
+      /create.*account|sign.*in|sign.*up|get.*started/i,
+      10_000
+    );
 
-    const buttonVisible = await createAccountButton.first().isVisible().catch(() => false);
-
-    if (buttonVisible) {
+    if (hasCreateButton) {
       // Click the button
-      await createAccountButton.first().click();
+      await clickButton(innerFrame, /create.*account|sign.*in|sign.*up|get.*started/i);
 
       // Wait a moment for the action to be triggered
       await page.waitForTimeout(2000);
 
-      // The button should still be visible (the flow initiates but doesn't complete)
-      // or the panel may have transitioned to a different state
-      const newButtonVisible = await createAccountButton.first().isVisible().catch(() => false);
-      expect(newButtonVisible || !buttonVisible).toBe(true);
+      // Button should be visible or transitioned to authenticated state
+      const newButtonVisible = await isButtonVisible(
+        innerFrame,
+        /create.*account|sign.*in|sign.*up|get.*started/i,
+        5_000
+      );
+      const accountInfo = innerFrame.locator('.account, .user, [data-testid="account"]');
+      const hasAccount = await accountInfo.first().isVisible({ timeout: 5_000 }).catch(() => false);
+
+      expect(
+        newButtonVisible || hasAccount,
+        'Button should still be visible or account info should be shown'
+      ).toBe(true);
     } else {
       // May already be authenticated - check for account info
       const accountInfo = innerFrame.locator('.account, .user, [data-testid="account"]');
-      const hasAccount = await accountInfo.first().isVisible().catch(() => false);
-      expect(hasAccount).toBe(true);
+      const hasAccount = await accountInfo.first().isVisible({ timeout: 10_000 }).catch(() => false);
+      expect(hasAccount, 'Account info should be visible if sign-in button is not present').toBe(true);
     }
   });
 
@@ -116,14 +116,17 @@ test.describe('Onboarding and Authentication', () => {
 
     // Look for balance display in home panel
     const balanceDisplay = innerFrame.locator('.balance, [data-testid="balance"], .account-info');
-    const hasBalance = await balanceDisplay.first().isVisible().catch(() => false);
+    const hasBalance = await balanceDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Look for email/user display
     const userDisplay = innerFrame.locator('.user, .email, [data-testid="user"]');
-    const hasUser = await userDisplay.first().isVisible().catch(() => false);
+    const hasUser = await userDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // At least one authenticated indicator should be present
-    expect(hasBalance || hasUser).toBe(true);
+    expect(
+      hasBalance || hasUser,
+      'Either balance display or user display should be visible for authenticated state'
+    ).toBe(true);
   });
 
   /**
@@ -145,15 +148,15 @@ test.describe('Onboarding and Authentication', () => {
 
     // Check for persistent session indicators
     const sessionIndicator = innerFrame.locator('.session, .logged-in, .authenticated');
-    const hasSession = await sessionIndicator.first().isVisible().catch(() => false);
+    const hasSession = await sessionIndicator.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // If not showing session indicator, check for user/balance
     if (!hasSession) {
       const userDisplay = innerFrame.locator('.user, .email, .balance, [data-testid]');
-      const hasUser = await userDisplay.first().isVisible().catch(() => false);
-      expect(hasUser).toBe(true);
+      const hasUser = await userDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
+      expect(hasUser, 'User display should be visible if session indicator is not present').toBe(true);
     } else {
-      expect(hasSession).toBe(true);
+      expect(hasSession, 'Session indicator should be visible').toBe(true);
     }
   });
 
@@ -175,19 +178,21 @@ test.describe('Onboarding and Authentication', () => {
     await page.waitForTimeout(3000);
 
     // Look for sign-in prompts (unauthenticated state)
-    const signInPrompts = innerFrame.locator('button, [role="button"]').filter({
-      hasText: /sign.*in|log.*in|create.*account/i,
-    });
+    const hasSignIn = await isButtonVisible(
+      innerFrame,
+      /sign.*in|log.*in|create.*account/i,
+      10_000
+    );
 
     // Look for account/user display (authenticated state)
     const accountDisplay = innerFrame.locator('.account, .user, .email, .balance, [data-testid]');
-    const hasAccount = await accountDisplay.first().isVisible().catch(() => false);
-
-    // Either show sign-in prompt or account display
-    const hasSignIn = await signInPrompts.first().isVisible().catch(() => false);
+    const hasAccount = await accountDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Test passes if either state is properly displayed
-    expect(hasSignIn || hasAccount).toBe(true);
+    expect(
+      hasSignIn || hasAccount,
+      'Either sign-in prompt or account display should be visible'
+    ).toBe(true);
   });
 
   /**
@@ -217,18 +222,21 @@ test.describe('Onboarding and Authentication', () => {
 
     // Check that we're in the context where onboarding would proceed
     const onboardingArea = innerFrame.locator('[data-card], .config, .confirm, .provision, .onboard');
-    const isReady = await onboardingArea.first().isVisible().catch(() => false);
+    const isReady = await onboardingArea.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Verify onboarding UI context is available
-    expect(isReady).toBe(true);
+    expect(isReady, 'Onboarding area should be visible or ready').toBe(true);
 
     // Look for success message that indicates logs were saved
     // Pattern: "✓ Logs saved to: ~/.openclaw/docker-setup.log"
     const successMessage = innerFrame.locator('text=/Logs saved to|docker-setup\.log/');
-    const hasSavedLogsMsg = await successMessage.first().isVisible().catch(() => false);
+    const hasSavedLogsMsg = await successMessage.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Either the onboarding area is visible and ready, or success message is shown
-    expect(isReady || hasSavedLogsMsg).toBe(true);
+    expect(
+      isReady || hasSavedLogsMsg,
+      'Either onboarding area should be ready or success message should be shown'
+    ).toBe(true);
   });
 
   /**
@@ -258,22 +266,28 @@ test.describe('Onboarding and Authentication', () => {
 
     // Verify the home/setup panel is accessible
     const setupContent = innerFrame.locator('.panel, .docker-setup, [role="main"]');
-    const panelVisible = await setupContent.first().isVisible().catch(() => false);
+    const panelVisible = await setupContent.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Verify successful state indicators exist in the DOM
     // Success messages would appear as: "✓ Logs saved to: ~/.openclaw/docker-setup.log"
     const successIndicators = innerFrame.locator('text=/✓|success|complete|saved/i');
-    const hasSuccessIndicator = await successIndicators.first().isVisible().catch(() => false);
+    const hasSuccessIndicator = await successIndicators.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // At minimum, verify the setup panel is prepared for onboarding
-    expect(panelVisible || hasSuccessIndicator).toBe(true);
+    expect(
+      panelVisible || hasSuccessIndicator,
+      'Setup panel or success indicator should be visible'
+    ).toBe(true);
 
     // Verify Docker config or onboarding context is available
     const configOrOnboard = innerFrame.locator('[id*="config"], [id*="onboard"], [id*="provision"]');
-    const isConfigured = await configOrOnboard.first().isVisible().catch(() => false);
+    const isConfigured = await configOrOnboard.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Either success indicator or config context should be present
-    expect(hasSuccessIndicator || isConfigured).toBe(true);
+    expect(
+      hasSuccessIndicator || isConfigured,
+      'Either success indicator or config context should be present'
+    ).toBe(true);
   });
 
   /**
@@ -300,28 +314,31 @@ test.describe('Onboarding and Authentication', () => {
     // Look for success/log feedback messages in the onboarding panel
     // Expected message: "✓ Logs saved to: [path]"
     const logFeedback = innerFrame.locator('text=/logs.*saved|docker-setup\.log/i');
-    const hasFeedback = await logFeedback.first().isVisible().catch(() => false);
+    const hasFeedback = await logFeedback.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Look for any success status indicators
     const successStatus = innerFrame.locator('text=/✓.*complete|onboard.*complete|setup.*success/i');
-    const hasSuccess = await successStatus.first().isVisible().catch(() => false);
+    const hasSuccess = await successStatus.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Look for error indicators to ensure we're not in error state
     const errorIndicators = innerFrame.locator('text=/error|failed|error\.log/i');
-    const hasError = await errorIndicators.first().isVisible().catch(() => false);
+    const hasError = await errorIndicators.first().isVisible({ timeout: 5_000 }).catch(() => false);
 
     // Verify setup panel context exists
     const setupPanel = innerFrame.locator('.panel, [role="main"], [data-testid*="setup"], [data-testid*="onboard"]');
-    const panelExists = await setupPanel.first().isVisible().catch(() => false);
+    const panelExists = await setupPanel.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Test validates that either feedback is shown, or setup context exists without error
     if (panelExists) {
       // If panel exists, ensure we're not showing error state
-      expect(!hasError).toBe(true);
+      expect(!hasError, 'Error state should not be shown when panel exists').toBe(true);
     }
 
     // Success is confirmed if feedback visible or success indicator visible
-    expect(hasFeedback || hasSuccess || panelExists).toBe(true);
+    expect(
+      hasFeedback || hasSuccess || panelExists,
+      'Feedback, success indicator, or setup panel should be visible'
+    ).toBe(true);
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -359,24 +376,27 @@ test.describe('Onboarding and Authentication', () => {
 
     // Check if error view exists in the DOM (it may be hidden initially)
     const errorView = innerFrame.locator('#view-error');
-    const errorViewExists = await errorView.count().catch(() => 0) > 0;
+    const errorViewExists = await errorView.count({ timeout: 10_000 }).catch(() => 0) > 0;
 
     // Check for View Error Log button
     const viewErrorLogButton = innerFrame.locator('#btn-view-log');
-    const viewErrorLogButtonExists = await viewErrorLogButton.count().catch(() => 0) > 0;
+    const viewErrorLogButtonExists = await viewErrorLogButton.count({ timeout: 10_000 }).catch(() => 0) > 0;
 
     // If error view exists, verify the button is present
     if (errorViewExists) {
-      expect(viewErrorLogButtonExists).toBe(true);
+      expect(viewErrorLogButtonExists, 'View Error Log button should exist when error view exists').toBe(true);
 
       // Check that the button's onclick handler references viewErrorLog()
       const buttonHtml = await viewErrorLogButton.getAttribute('onclick').catch(() => '');
-      expect(buttonHtml).toContain('viewErrorLog');
+      expect(buttonHtml, 'Button onclick should reference viewErrorLog').toContain('viewErrorLog');
     }
 
     // Verify error state UI is part of the panel structure
     // The error view and button should both exist in the setup panel HTML
-    expect(errorViewExists || viewErrorLogButtonExists).toBe(true);
+    expect(
+      errorViewExists || viewErrorLogButtonExists,
+      'Either error view or error log button should exist'
+    ).toBe(true);
   });
 
   /**
@@ -404,40 +424,43 @@ test.describe('Onboarding and Authentication', () => {
 
     // Look for the "View Error Log" button in the error view
     const viewErrorLogButton = innerFrame.locator('#btn-view-log');
-    const buttonExists = await viewErrorLogButton.count().catch(() => 0) > 0;
+    const buttonExists = await viewErrorLogButton.count({ timeout: 10_000 }).catch(() => 0) > 0;
 
     if (buttonExists) {
       // Verify button is not disabled
-      const isDisabled = await viewErrorLogButton.isDisabled().catch(() => true);
-      expect(isDisabled).toBe(false);
+      const isDisabled = await viewErrorLogButton.isDisabled({ timeout: 5_000 }).catch(() => true);
+      expect(isDisabled, 'View Error Log button should not be disabled').toBe(false);
 
       // Verify button text contains "Error Log"
-      const buttonText = await viewErrorLogButton.textContent().catch(() => '');
-      expect(buttonText.toLowerCase()).toContain('error');
-      expect(buttonText.toLowerCase()).toContain('log');
+      const buttonText = await getTextContent(viewErrorLogButton);
+      expect(buttonText.toLowerCase(), 'Button text should contain "error"').toContain('error');
+      expect(buttonText.toLowerCase(), 'Button text should contain "log"').toContain('log');
 
       // Verify button has the correct onclick handler
       const onclick = await viewErrorLogButton.getAttribute('onclick').catch(() => '');
-      expect(onclick).toMatch(/viewErrorLog\s*\(/);
+      expect(onclick, 'Button onclick should contain viewErrorLog function').toMatch(/viewErrorLog\s*\(/);
 
       // Verify button is visible (checking CSS display)
-      const isVisible = await viewErrorLogButton.isVisible().catch(() => false);
+      const isVisible = await viewErrorLogButton.isVisible({ timeout: 5_000 }).catch(() => false);
 
       // Verify button class indicates it's a retry-style button
       const buttonClass = await viewErrorLogButton.getAttribute('class').catch(() => '');
       if (buttonClass) {
         // Button should have a class like "btn-retry" or similar
-        expect(buttonClass).toBeTruthy();
+        expect(buttonClass, 'Button should have a class attribute').toBeTruthy();
       }
 
       // In the actual implementation, the button's click triggers vscode.postMessage()
       // with command: 'openErrorLog', path: [errorLogPath]
       // We verify this would work by checking the button structure is correct
-      expect(buttonExists && !isDisabled).toBe(true);
+      expect(
+        buttonExists && !isDisabled,
+        'Button should exist and not be disabled'
+      ).toBe(true);
     } else {
       // Button may not exist if we're not in error state yet.
       // This is acceptable for this test - we just verify it exists when needed.
-      expect(buttonExists).toBe(false);
+      expect(buttonExists, 'Error log button may not exist if not in error state').toBe(false);
     }
   });
 
@@ -468,8 +491,8 @@ test.describe('Onboarding and Authentication', () => {
     // Verify error view structure and error text display
     const errorView = innerFrame.locator('#view-error');
     const errorText = innerFrame.locator('#error-text');
-    const errorViewExists = await errorView.count().catch(() => 0) > 0;
-    const errorTextExists = await errorText.count().catch(() => 0) > 0;
+    const errorViewExists = await errorView.count({ timeout: 10_000 }).catch(() => 0) > 0;
+    const errorTextExists = await errorText.count({ timeout: 10_000 }).catch(() => 0) > 0;
 
     // Verify that the error state has the necessary UI elements
     // In the actual implementation:
@@ -478,15 +501,18 @@ test.describe('Onboarding and Authentication', () => {
     // This writes the logs as a single string (no newlines added between entries)
     // Each log entry already includes \n if needed
     const retryButton = innerFrame.locator('button:has-text("Retry")');
-    const retryButtonExists = await retryButton.count().catch(() => 0) > 0;
+    const retryButtonExists = await retryButton.count({ timeout: 10_000 }).catch(() => 0) > 0;
 
     // If in error view, both View Error Log and Retry buttons should exist
     if (errorViewExists) {
-      expect(errorTextExists).toBe(true);
-      expect(retryButtonExists).toBe(true);
+      expect(errorTextExists, 'Error text area should exist when error view is visible').toBe(true);
+      expect(retryButtonExists, 'Retry button should exist when error view is visible').toBe(true);
     }
 
     // The error UI structure should exist in the panel
-    expect(errorViewExists || retryButtonExists).toBe(true);
+    expect(
+      errorViewExists || retryButtonExists,
+      'Either error view or retry button should be present'
+    ).toBe(true);
   });
 });

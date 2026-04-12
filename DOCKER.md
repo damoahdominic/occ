@@ -129,6 +129,13 @@ Required variables:
 - `GATEWAY_PORT` — Port for gateway (optional, default 18789)
 - `GATEWAY_BIND_HOST` — Bind address (optional, default 127.0.0.1)
 
+Optional variables:
+- `GATEWAY_PROXY_URL` — Proxy URL for gateway dashboard (optional)
+  - Use when gateway runs behind a reverse proxy or on non-standard port
+  - If set, takes precedence over `GATEWAY_PORT` and `GATEWAY_BIND_HOST`
+  - Examples: `https://gateway.example.com/`, `http://localhost:8443/gateway/`
+  - If unset, dashboard URL is constructed from `GATEWAY_BIND_HOST` and `GATEWAY_PORT`
+
 **Usage** (production-like, base config only):
 
 ```bash
@@ -207,6 +214,68 @@ docker-dev logs -f
 - `bunny` image is used for faster development iteration vs `openclaw/pod`
 - Local data persists in `./openclaw_docker_data` (git-ignored)
 - Docker socket mount enables docker-in-docker for gateway functionality
+
+---
+
+### 3b. Proxy URL Configuration
+
+**Purpose**: Configure gateway dashboard URL when running behind a reverse proxy or on non-standard ports.
+
+**When to Use**:
+- Gateway runs behind nginx/HAProxy reverse proxy
+- Gateway is accessible via non-standard port
+- Gateway uses HTTPS while container uses HTTP
+- Gateway is accessed via hostname instead of IP
+
+**Configuration via Environment**:
+
+Set `GATEWAY_PROXY_URL` in `.env.openclaw`:
+
+```bash
+# Examples:
+GATEWAY_PROXY_URL=https://gateway.example.com/
+GATEWAY_PROXY_URL=https://myproxy.internal:9443/gateway/
+GATEWAY_PROXY_URL=http://localhost:8443/
+```
+
+**How It Works**:
+
+1. If `GATEWAY_PROXY_URL` is set, the OCC extension uses it directly for dashboard links
+2. If not set, the extension constructs URL from `GATEWAY_BIND_HOST` and `GATEWAY_PORT`
+3. `GATEWAY_PROXY_URL` takes precedence over port-based construction
+
+**Development Example**:
+
+```bash
+# Using reverse proxy locally
+GATEWAY_PROXY_URL=http://localhost:8443/gateway/
+GATEWAY_BIND_HOST=127.0.0.1
+GATEWAY_PORT=18789
+
+# Gateway runs on 18789 internally, but accessible via proxy at 8443/gateway/
+# OCC extension opens http://localhost:8443/gateway/ in browser
+```
+
+**Production Example**:
+
+```bash
+# External access via HTTPS
+GATEWAY_PROXY_URL=https://gateway.company.com/
+GATEWAY_BIND_HOST=0.0.0.0
+GATEWAY_PORT=18789
+
+# Gateway runs on 18789, reverse proxy (nginx) handles HTTPS
+# OCC extension opens https://gateway.company.com/ in browser
+```
+
+**Path Handling**:
+
+The proxy URL is merged with dashboard paths:
+- Dashboard file @ `/dashboard/index.html`
+- Proxy URL: `https://gateway.example.com/api/gateway/`
+- Result: `https://gateway.example.com/api/gateway/dashboard/index.html`
+
+Paths are normalized to remove duplicate slashes and handle trailing slashes correctly.
 
 ---
 

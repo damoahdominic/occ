@@ -14,7 +14,8 @@
  *   ticket-042  .tickets/ticket-042-docker-to-ide-e2e-flow/prd.md
  */
 
-import { test, expect, type Page, type FrameLocator } from './fixtures';
+import { test, expect, type FrameLocator } from './fixtures';
+import { waitForHomePanelTab, getInnerFrame } from './test-utils';
 
 // ─── Test environment defaults ────────────────────────────────────────────────
 // Use these values when filling Step 1 config fields.
@@ -24,25 +25,10 @@ const TEST_GATEWAY_PORT = '18991';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getInnerFrame(page: Page): FrameLocator {
-  return page
-    .frameLocator('iframe.webview').first()
-    .frameLocator('iframe#active-frame');
-}
-
-async function openOccHomePanel(page: Page): Promise<void> {
+async function openOccHomePanel(page: any): Promise<void> {
   await page.goto('/');
   await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-
-  await page.keyboard.press('F1');
-  await page.locator('.quick-input-widget').waitFor({ timeout: 10_000 });
-  await page.keyboard.type('OpenClaw: Home');
-  await page.locator('.quick-input-list .monaco-list-row').first().click();
-
-  await page
-    .locator('[role="tab"]')
-    .filter({ hasText: 'OCC Home' })
-    .waitFor({ timeout: 30_000 });
+  await waitForHomePanelTab(page);
 }
 
 async function clickDockerCard(page: Page): Promise<FrameLocator> {
@@ -79,8 +65,8 @@ test.describe('Step 1: Docker config form (ticket-040)', () => {
     await openOccHomePanel(page);
     const frame = await clickDockerCard(page);
 
-    await expect(frame.locator('#docker-config-step-1')).toBeVisible();
-    await expect(frame.locator('.modal, [role="dialog"]')).toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-1'), 'Step 1 config should be visible (full-page, not modal)').toBeVisible();
+    await expect(frame.locator('.modal, [role="dialog"]'), 'No modal dialog should be present').toHaveCount(0);
   });
 
   test('stepper shows all 3 step indicators', async ({ page }) => {
@@ -88,9 +74,9 @@ test.describe('Step 1: Docker config form (ticket-040)', () => {
     const frame = await clickDockerCard(page);
 
     // Stepper items are generic divs — match by visible text
-    await expect(frame.locator('text=1. Config').first()).toBeVisible();
-    await expect(frame.locator('text=2. Confirm').first()).toBeVisible();
-    await expect(frame.locator('text=3. Start').first()).toBeVisible();
+    await expect(frame.locator('text=1. Config').first(), '1. Config step should be visible').toBeVisible();
+    await expect(frame.locator('text=2. Confirm').first(), '2. Confirm step should be visible').toBeVisible();
+    await expect(frame.locator('text=3. Start').first(), '3. Start step should be visible').toBeVisible();
   });
 
   test('Step 1 indicator active (blue), Step 3 inactive', async ({ page }) => {
@@ -100,8 +86,8 @@ test.describe('Step 1: Docker config form (ticket-040)', () => {
     // Active step pill is blue (rgb 37 99 235); inactive steps use a darker background
     // Stepper pills have no IDs — select by their text content within the stepper row
     const stepper = frame.locator('#docker-config-step-1').locator('..').locator('..').first();
-    await expect(stepper.locator('text=1. Config').first()).toBeVisible();
-    await expect(stepper.locator('text=3. Start').first()).toBeVisible();
+    await expect(stepper.locator('text=1. Config').first(), 'Step 1 config should be visible in stepper').toBeVisible();
+    await expect(stepper.locator('text=3. Start').first(), 'Step 3 start should be visible in stepper').toBeVisible();
   });
 
   test('all config fields, Bind Address toggle, Browse, Next and Cancel are visible', async ({ page }) => {
@@ -109,16 +95,16 @@ test.describe('Step 1: Docker config form (ticket-040)', () => {
     const frame = await clickDockerCard(page);
 
     // Fields use placeholder selectors — no IDs on inputs
-    await expect(frame.locator('input[placeholder*="openclaw/pod"]')).toBeVisible();
-    await expect(frame.locator('input[placeholder="18789"]')).toBeVisible();
-    await expect(frame.locator('input[placeholder="Select a directory..."]')).toBeVisible();
-    await expect(frame.locator('input[type="checkbox"]')).toBeVisible();
+    await expect(frame.locator('input[placeholder*="openclaw/pod"]'), 'Docker image field should be visible').toBeVisible();
+    await expect(frame.locator('input[placeholder="18789"]'), 'Port field should be visible').toBeVisible();
+    await expect(frame.locator('input[placeholder="Select a directory..."]'), 'Directory selection field should be visible').toBeVisible();
+    await expect(frame.locator('input[type="checkbox"]'), 'Fresh build checkbox should be visible').toBeVisible();
     // Bind Address toggle (127.0.0.1 / 0.0.0.0 buttons)
-    await expect(frame.locator('button:has-text("127.0.0.1")')).toBeVisible();
-    await expect(frame.locator('button:has-text("0.0.0.0")')).toBeVisible();
-    await expect(frame.locator('button:has-text("Browse")')).toBeVisible();
-    await expect(frame.locator('button:has-text("Next")')).toBeVisible();
-    await expect(frame.locator('button:has-text("Cancel")')).toBeVisible();
+    await expect(frame.locator('button:has-text("127.0.0.1")'), 'Bind address 127.0.0.1 button should be visible').toBeVisible();
+    await expect(frame.locator('button:has-text("0.0.0.0")'), 'Bind address 0.0.0.0 button should be visible').toBeVisible();
+    await expect(frame.locator('button:has-text("Browse")'), 'Browse button should be visible').toBeVisible();
+    await expect(frame.locator('button:has-text("Next")'), 'Next button should be visible').toBeVisible();
+    await expect(frame.locator('button:has-text("Cancel")'), 'Cancel button should be visible').toBeVisible();
   });
 
   test('Cancel returns to host picker with all 3 cards', async ({ page }) => {
@@ -127,9 +113,9 @@ test.describe('Step 1: Docker config form (ticket-040)', () => {
 
     await frame.locator('button:has-text("Cancel")').click();
 
-    await expect(frame.locator('[data-card="docker"]')).toBeVisible();
-    await expect(frame.locator('[data-card="local"]')).toBeVisible();
-    await expect(frame.locator('#docker-config-step-1')).toHaveCount(0);
+    await expect(frame.locator('[data-card="docker"]'), 'Docker card should be visible in host picker').toBeVisible();
+    await expect(frame.locator('[data-card="local"]'), 'Local card should be visible in host picker').toBeVisible();
+    await expect(frame.locator('#docker-config-step-1'), 'Step 1 config should be removed after cancel').toHaveCount(0);
   });
 });
 
@@ -141,9 +127,9 @@ test.describe('Step 2: Confirm config (ticket-040)', () => {
     const frame = await clickDockerCard(page);
     await advanceToStep2(frame);
 
-    await expect(frame.locator('#docker-config-step-2')).toBeVisible();
-    await expect(frame.locator('#docker-config-step-1')).toHaveCount(0);
-    await expect(frame.locator('#docker-config-step-3')).toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-2'), 'Step 2 should be visible after Next').toBeVisible();
+    await expect(frame.locator('#docker-config-step-1'), 'Step 1 should be removed from DOM on Step 2').toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-3'), 'Step 3 should not be in DOM on Step 2').toHaveCount(0);
   });
 
   test('Step 2 shows all read-only confirm values and Confirm & Start button', async ({ page }) => {
@@ -152,12 +138,12 @@ test.describe('Step 2: Confirm config (ticket-040)', () => {
     await advanceToStep2(frame);
 
     // Confirm rows are generic divs — assert by label text presence
-    await expect(frame.locator('text=Image').first()).toBeVisible();
-    await expect(frame.locator('text=Port').first()).toBeVisible();
-    await expect(frame.locator('text=Data Directory').first()).toBeVisible();
-    await expect(frame.locator('text=Bind Address').first()).toBeVisible();
-    await expect(frame.locator('text=Fresh Build').first()).toBeVisible();
-    await expect(frame.locator('button:has-text("Confirm & Start")')).toBeVisible();
+    await expect(frame.locator('text=Image').first(), 'Image field should be visible on Step 2').toBeVisible();
+    await expect(frame.locator('text=Port').first(), 'Port field should be visible on Step 2').toBeVisible();
+    await expect(frame.locator('text=Data Directory').first(), 'Data Directory field should be visible on Step 2').toBeVisible();
+    await expect(frame.locator('text=Bind Address').first(), 'Bind Address field should be visible on Step 2').toBeVisible();
+    await expect(frame.locator('text=Fresh Build').first(), 'Fresh Build field should be visible on Step 2').toBeVisible();
+    await expect(frame.locator('button:has-text("Confirm & Start")'), 'Confirm & Start button should be visible').toBeVisible();
   });
 
   test('Step 2 stepper shows "2. Confirm" pill', async ({ page }) => {
@@ -165,7 +151,7 @@ test.describe('Step 2: Confirm config (ticket-040)', () => {
     const frame = await clickDockerCard(page);
     await advanceToStep2(frame);
 
-    await expect(frame.locator('text=2. Confirm').first()).toBeVisible();
+    await expect(frame.locator('text=2. Confirm').first(), '2. Confirm stepper pill should be visible').toBeVisible();
   });
 
   test('Back from Step 2 returns to Step 1', async ({ page }) => {
@@ -175,8 +161,8 @@ test.describe('Step 2: Confirm config (ticket-040)', () => {
 
     await frame.locator('button:has-text("Back")').click();
 
-    await expect(frame.locator('#docker-config-step-1')).toBeVisible();
-    await expect(frame.locator('#docker-config-step-2')).toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-1'), 'Step 1 should be visible after Back').toBeVisible();
+    await expect(frame.locator('#docker-config-step-2'), 'Step 2 should be removed from DOM after Back').toHaveCount(0);
   });
 });
 
@@ -188,13 +174,13 @@ test.describe('Step 3: Provision (ticket-040)', () => {
     const frame = await clickDockerCard(page);
     await advanceToStep3(frame);
 
-    await expect(frame.locator('#docker-config-step-3')).toBeVisible();
-    await expect(frame.locator('#docker-config-step-1')).toHaveCount(0);
-    await expect(frame.locator('#docker-config-step-2')).toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-3'), 'Step 3 provision panel should be visible').toBeVisible();
+    await expect(frame.locator('#docker-config-step-1'), 'Step 1 should be removed from DOM').toHaveCount(0);
+    await expect(frame.locator('#docker-config-step-2'), 'Step 2 should be removed from DOM').toHaveCount(0);
 
     // Provision log visible — rendered as a generic div (no ID/class on log element)
     // Assert via the status text shown below the log
-    await expect(frame.locator('[role="status"]').first()).toBeVisible();
+    await expect(frame.locator('[role="status"]').first(), 'Provision status should be visible').toBeVisible();
   });
 
   test('Step 3 stepper shows "3. Start" pill', async ({ page }) => {
@@ -202,7 +188,7 @@ test.describe('Step 3: Provision (ticket-040)', () => {
     const frame = await clickDockerCard(page);
     await advanceToStep3(frame);
 
-    await expect(frame.locator('text=3. Start').first()).toBeVisible();
+    await expect(frame.locator('text=3. Start').first(), '3. Start stepper pill should be visible').toBeVisible();
   });
 });
 
@@ -222,7 +208,7 @@ test.describe('Post-provision: Connect to Gateway (ticket-031 pending) @slow', (
 
     // Wait for provision to complete (up to 5 min)
     await frame.locator('text=Docker environment is ready').waitFor({ timeout: 300_000 });
-    await expect(frame.locator('button:has-text("Connect to Gateway")')).toBeVisible();
+    await expect(frame.locator('button:has-text("Connect to Gateway")'), 'Connect to Gateway button should be visible after provision success').toBeVisible();
   });
 
   test('Connect to Gateway opens gateway dashboard in new tab', async ({ page }) => {
@@ -255,7 +241,7 @@ test.describe('Post-provision: Connect to Gateway (ticket-031 pending) @slow', (
 
     // WebSocket URL field is pre-filled with the port configured in Step 1
     const wsInput = newTab.locator('input[placeholder*="ws://"]');
-    await expect(wsInput).toHaveValue(new RegExp(TEST_GATEWAY_PORT));
+    await expect(wsInput, 'WebSocket URL should include configured gateway port').toHaveValue(new RegExp(TEST_GATEWAY_PORT));
   });
 
   // ── ticket-031: AI config panel (NOT YET IMPLEMENTED) ──────────────────────

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from './fixtures';
+import { test, expect } from './fixtures';
+import { getInnerFrame } from './test-utils';
 
 /**
  * Gateway Proxy Path Configuration E2E Tests
@@ -16,28 +17,6 @@ import { test, expect, type Page } from './fixtures';
  *   - Docker container with configurable port mapping
  *   - Network access to test proxy server
  */
-
-const waitForConfigPanel = async (page: Page) => {
-  // Wait for extension to initialize
-  await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
-
-  // Open OpenClaw configure command
-  await page.keyboard.press('Control+Shift+P');
-  await page.waitForTimeout(500);
-
-  const quickOpen = page.locator('[aria-label="Quick Input"], .quick-open-widget');
-  await expect(quickOpen).toBeVisible();
-
-  await page.keyboard.type('openclaw configure', { delay: 50 });
-  await page.waitForTimeout(300);
-
-  const configureOption = page.locator('[role="option"]').filter({ hasText: 'Configure' }).first();
-  await expect(configureOption).toBeVisible();
-  await configureOption.click();
-
-  // Wait for config panel to open
-  await page.waitForTimeout(2000);
-};
 
 test.describe('Gateway Proxy Path Configuration', () => {
   test.beforeEach(async ({ page }) => {

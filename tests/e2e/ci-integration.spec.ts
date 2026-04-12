@@ -26,7 +26,7 @@ test.describe('CI Integration', () => {
     await expect(workbench).toBeVisible({ timeout: 10_000 });
 
     // This test passing confirms the test infrastructure is working
-    expect(true).toBe(true);
+    expect(true, 'Playwright test runner should be functional').toBe(true);
   });
 
   /**
@@ -42,8 +42,8 @@ test.describe('CI Integration', () => {
     const { test: fixtureTest } = await import('./fixtures');
 
     // Verify we can create a basic test context
-    expect(fixtureTest).toBeDefined();
-    expect(fixtureTest.describe).toBeDefined();
+    expect(fixtureTest, 'Fixtures should be defined').toBeDefined();
+    expect(fixtureTest.describe, 'test.describe should be available').toBeDefined();
   });
 
   /**
@@ -57,7 +57,7 @@ test.describe('CI Integration', () => {
 
     // Verify this test file can access the config
     const configExists = await import('../playwright.config').then(() => true).catch(() => false);
-    expect(configExists).toBe(true);
+    expect(configExists, 'Playwright config file should exist and be accessible').toBe(true);
   });
 
   /**
@@ -69,7 +69,9 @@ test.describe('CI Integration', () => {
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 
     // Test uses proper expect with timeout
-    await expect(page.locator('.monaco-workbench')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.monaco-workbench')).toBeVisible({
+      timeout: 10_000
+    });
   });
 
   /**
@@ -86,7 +88,7 @@ test.describe('CI Integration', () => {
     const elapsed = Date.now() - startTime;
 
     // Should complete well within the 5-minute CI timeout
-    expect(elapsed).toBeLessThan(300000);
+    expect(elapsed, 'Test should complete within 5-minute CI timeout').toBeLessThan(300000);
   });
 });
 
@@ -110,7 +112,7 @@ test.describe('CI Configuration Validation', () => {
     const elapsed = Date.now() - startTime;
 
     // Individual operations should be much faster than the global timeout
-    expect(elapsed).toBeLessThan(60000);
+    expect(elapsed, 'Operations should complete within 1 minute').toBeLessThan(60000);
   });
 
   test('test can run with video recording enabled', async ({ page }) => {
@@ -121,7 +123,7 @@ test.describe('CI Configuration Validation', () => {
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 
     // If we get here, video recording is working
-    expect(true).toBe(true);
+    expect(true, 'Video recording should not interfere with test execution').toBe(true);
   });
 
   test('test can run with screenshot on failure enabled', async ({ page }) => {
@@ -132,6 +134,6 @@ test.describe('CI Configuration Validation', () => {
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 
     // If we get here, screenshot capability is working
-    expect(true).toBe(true);
+    expect(true, 'Screenshot capability should not interfere with test execution').toBe(true);
   });
 });

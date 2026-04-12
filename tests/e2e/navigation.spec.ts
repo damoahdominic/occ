@@ -16,9 +16,9 @@ test.beforeEach(async ({ page }) => {
 
 test('activity bar is visible and has clickable items', async ({ page }) => {
   const activityBar = page.locator('.activitybar');
-  await expect(activityBar).toBeVisible();
+  await expect(activityBar, 'Activity bar should be visible').toBeVisible();
   // At least one action item (Explorer, Search, Source Control, …)
-  await expect(activityBar.locator('.action-item')).not.toHaveCount(0);
+  await expect(activityBar.locator('.action-item'), 'Activity bar should have at least one action item').not.toHaveCount(0);
 });
 
 test('Explorer panel opens via activity bar', async ({ page }) => {
@@ -30,23 +30,23 @@ test('Explorer panel opens via activity bar', async ({ page }) => {
     // Fallback to first action item
     await page.locator('.activitybar .action-item').first().click();
   }
-  await expect(page.locator('.sidebar')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.sidebar'), 'Sidebar should be visible after clicking Explorer').toBeVisible({ timeout: 10_000 });
 });
 
 test('command palette opens and accepts input', async ({ page }) => {
   await page.keyboard.press('F1');
   const quickInput = page.locator('.quick-input-widget');
-  await expect(quickInput).toBeVisible({ timeout: 10_000 });
+  await expect(quickInput, 'Command palette should be visible after F1').toBeVisible({ timeout: 10_000 });
   // Type something to confirm the input is live
   await page.keyboard.type('View:');
   // F1 opens the command palette with '>' already in the input, so typing 'View:' gives '>View:'
-  await expect(quickInput.locator('.quick-input-box input')).toHaveValue('>View:');
+  await expect(quickInput.locator('.quick-input-box input'), 'Command palette input should accept typed text').toHaveValue('>View:');
   // Dismiss
   await page.keyboard.press('Escape');
-  await expect(quickInput).not.toBeVisible();
+  await expect(quickInput, 'Command palette should close after Escape').not.toBeVisible();
 });
 
 test('Extensions panel opens via keyboard shortcut', async ({ page }) => {
   await page.keyboard.press('Control+Shift+X');
-  await expect(page.locator('.sidebar')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.sidebar'), 'Sidebar should be visible after Ctrl+Shift+X').toBeVisible({ timeout: 10_000 });
 });

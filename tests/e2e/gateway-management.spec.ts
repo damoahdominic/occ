@@ -1,4 +1,12 @@
-import { test, expect, type Page } from './fixtures';
+import { test, expect } from './fixtures';
+import {
+  waitForHomePanelTab,
+  getInnerFrame,
+  clickButton,
+  isButtonVisible,
+  verifyStatusContains,
+  getTextContent,
+} from './test-utils';
 
 /**
  * Gateway Management E2E Tests
@@ -6,77 +14,60 @@ import { test, expect, type Page } from './fixtures';
  * BDD Specification: ticket-047 Task 2
  * Feature: Gateway Management
  *
+ * Scenarios:
+ *   1. Start gateway transitions from stopped to running
+ *   2. Stop gateway transitions from running to stopped
+ *   3. Gateway status displays current state
+ *
  * Test Data Requirements:
  * - OpenClaw installed in test profile
- * - Mock backend server running on localhost:3001
+ * - Editor running on http://localhost:9888
+ * - OCC Home panel accessible
  */
-
-const waitForHomePanelTab = async (page: Page) => {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-  const autoOpen = tab.waitFor({ timeout: 25_000 }).catch(() => null);
-  await autoOpen;
-
-  if (!await tab.isVisible()) {
-    await page.locator('.activitybar').click();
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 20_000 });
-};
-
-const getInnerFrame = (page: Page) => {
-  const outerFrame = page.frameLocator('iframe.webview').first();
-  return outerFrame.frameLocator('iframe#active-frame');
-};
 
 test.describe('Gateway Management', () => {
   test.beforeEach(async ({ page }) => {
+    // Navigate to VS Code web interface
     await page.goto('/');
+    // Wait for editor to be fully loaded
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
   });
 
   /**
    * Scenario: Start Gateway Successfully
+   *
    * Given: OpenClaw is installed in test profile
    * When: user clicks "Start Gateway" button
-   * Then: gateway status changes to "Starting"
-   * And: after gateway starts, status shows "Running"
-   * And: gateway is accessible on configured port
+   * Then: gateway status changes to indicate starting/running
+   * And: status eventually shows "Running" (or "Stopped" if already started)
+   *
+   * Acceptance Criteria:
+   * - Start button is found and clickable
+   * - Clicking starts the gateway process
+   * - Status updates to Running (or other valid state)
+   * - Gateway reaches running state within 60 seconds
    */
   test('start gateway transitions from stopped to running', async ({ page }) => {
     await waitForHomePanelTab(page);
     const innerFrame = getInnerFrame(page);
 
-    // Find and click Start Gateway button
-    const startButton = innerFrame.locator('button, [role="button"]').filter({
-      hasText: /start.*gateway|gateway.*start/i,
-    });
+    // Check if Start button is visible
+    const hasStartButton = await isButtonVisible(innerFrame, /start.*gateway|gateway.*start/i, 10_000);
 
-    const startVisible = await startButton.first().isVisible().catch(() => false);
+    if (hasStartButton) {
+      // Click Start Gateway button
+      await clickButton(innerFrame, /start.*gateway|gateway.*start/i);
 
-    if (startVisible) {
-      await startButton.first().click();
+      // Gateway startup typically takes 5-30 seconds
+      // Allow up to 60 seconds for cold start
+      const statusIsRunning = await verifyStatusContains(innerFrame, 'running', 60_000);
 
-      // Check for "Starting" status
-      const startingStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /starting/i,
-      });
-
-      // Wait a moment for status to update
-      await page.waitForTimeout(2000);
-
-      // Check for "Running" status
-      const runningStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /running/i,
-      });
-
-      await expect(runningStatus.first()).toBeVisible({ timeout: 60_000 });
+      expect(statusIsRunning, 'Gateway status should show Running after startup').toBe(true);
     } else {
-      // Gateway may already be running
-      const runningStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /running/i,
-      });
-      await expect(runningStatus.first()).toBeVisible({ timeout: 10_000 });
+      // Start button not visible - gateway may already be running
+      const statusIsRunning = await verifyStatusContains(innerFrame, 'running', 10_000);
+
+      expect(statusIsRunning, 'Gateway should be in Running state when Start button not visible').toBe(true);
     }
   });
 
@@ -91,36 +82,32 @@ test.describe('Gateway Management', () => {
     await waitForHomePanelTab(page);
     const innerFrame = getInnerFrame(page);
 
-    // Find and click Stop Gateway button
-    const stopButton = innerFrame.locator('button, [role="button"]').filter({
-      hasText: /stop.*gateway|gateway.*stop/i,
-    });
+    // Check if Stop button is visible
+    const hasStopButton = await isButtonVisible(innerFrame, /stop.*gateway|gateway.*stop/i, 10_000);
 
-    const stopVisible = await stopButton.first().isVisible().catch(() => false);
+    if (hasStopButton) {
+      // Click Stop Gateway button
+      await clickButton(innerFrame, /stop.*gateway|gateway.*stop/i);
 
-    if (stopVisible) {
-      await stopButton.first().click();
+      // Gateway shutdown typically takes 2-10 seconds
+      const statusIsStopped = await verifyStatusContains(innerFrame, 'stopped', 30_000);
 
-      // Check for "Stopping" status
-      const stoppingStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /stopping/i,
-      });
+      expect(statusIsStopped, 'Gateway status should show Stopped after stop').toBe(true);
 
-      // Wait a moment for status to update
-      await page.waitForTimeout(2000);
+      // Verify Stop button is no longer visible (replaced by Start button)
+      await page.waitForTimeout(1000);
+      const stopButtonStillVisible = await isButtonVisible(
+        innerFrame,
+        /stop.*gateway|gateway.*stop/i,
+        5_000
+      );
 
-      // Check for "Stopped" status
-      const stoppedStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /stopped/i,
-      });
-
-      await expect(stoppedStatus.first()).toBeVisible({ timeout: 60_000 });
+      expect(stopButtonStillVisible, 'Stop button should be hidden after gateway stops').toBe(false);
     } else {
-      // Gateway may already be stopped - verify stopped status
-      const stoppedStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /stopped/i,
-      });
-      await expect(stoppedStatus.first()).toBeVisible({ timeout: 10_000 });
+      // Stop button not visible - gateway may already be stopped
+      const statusIsStopped = await verifyStatusContains(innerFrame, 'stopped', 10_000);
+
+      expect(statusIsStopped, 'Gateway should be in Stopped state when Stop button not visible').toBe(true);
     }
   });
 
@@ -136,46 +123,39 @@ test.describe('Gateway Management', () => {
     await waitForHomePanelTab(page);
     const innerFrame = getInnerFrame(page);
 
-    const startButton = innerFrame.locator('button, [role="button"]').filter({
-      hasText: /start.*gateway|gateway.*start/i,
-    });
+    // Check if Start button is visible
+    const hasStartButton = await isButtonVisible(innerFrame, /start.*gateway|gateway.*start/i, 10_000);
 
-    const startVisible = await startButton.first().isVisible().catch(() => false);
-
-    if (startVisible) {
-      await startButton.first().click();
+    if (hasStartButton) {
+      // Click Start Gateway button
+      await clickButton(innerFrame, /start.*gateway|gateway.*start/i);
 
       // Should show "Starting" within 2 seconds
       await page.waitForTimeout(2000);
-      const startingStatus = innerFrame.locator('[data-testid="gateway-status"], .status"]').filter({
-        hasText: /starting/i,
-      });
-      expect(await startingStatus.count()).toBeGreaterThan(0);
+      const startingStatus = await verifyStatusContains(innerFrame, 'starting', 5_000);
+      expect(startingStatus, 'Status should show Starting after clicking start button').toBe(true);
 
       // Wait for potential timeout (30 seconds is too long for test, use 10)
       await page.waitForTimeout(10_000);
 
       // Check for error or running status
-      const errorStatus = innerFrame.locator('.error, [data-testid="error"]').filter({
+      const hasError = innerFrame.locator('[data-testid="error"], .error').filter({
         hasText: /timeout|error/i,
       });
-      const runningStatus = innerFrame.locator('[data-testid="gateway-status"], .status').filter({
-        hasText: /running/i,
-      });
+      const isErrorVisible = await hasError.first().isVisible({ timeout: 2_000 }).catch(() => false);
+      const isRunning = await verifyStatusContains(innerFrame, 'running', 2_000);
 
       // Either error with retry or successful start is acceptable
-      const hasError = await errorStatus.first().isVisible().catch(() => false);
-      const hasRunning = await runningStatus.first().isVisible().catch(() => false);
-
-      if (hasError) {
-        // Check for retry button
+      if (isErrorVisible) {
+        // Check for retry button when error is shown
         const retryButton = innerFrame.locator('button, [role="button"]').filter({
           hasText: /retry/i,
         });
-        await expect(retryButton.first()).toBeVisible({ timeout: 5_000 });
+        const hasRetry = await retryButton.first().isVisible({ timeout: 5_000 }).catch(() => false);
+        expect(hasRetry, 'Retry button should be visible when error occurs').toBe(true);
       } else {
         // Should have started successfully
-        await expect(runningStatus.first()).toBeVisible({ timeout: 5_000 });
+        expect(isRunning, 'Gateway should be Running or error with retry should be shown').toBe(true);
       }
     }
   });

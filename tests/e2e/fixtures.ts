@@ -135,7 +135,7 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
 
       if (endpoint) {
         try {
-          browser = await chromium.connectOverCDP(endpoint, { timeout: 5_000 });
+          browser = await chromium.connectOverCDP(endpoint, { timeout: 30_000 });
         } catch {
           browser = await chromium.launch({
             headless: true,

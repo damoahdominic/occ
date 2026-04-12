@@ -18,12 +18,22 @@
 #
 # ENVIRONMENT:
 #   OPENCLAW_DATA_DIR : Where to persist local openclaw.json (default: ./openclaw_docker_data)
+#   GATEWAY_PROXY_URL : (Optional) Proxy URL for gateway dashboard if behind reverse proxy
+#
+# PROXY URL EXAMPLES:
+#   For development with reverse proxy:
+#     GATEWAY_PROXY_URL=http://localhost:8443/gateway/
+#   For external access:
+#     GATEWAY_PROXY_URL=https://gateway.example.com/
+#   Unset to use default:
+#     http://{GATEWAY_BIND_HOST}:{GATEWAY_PORT}/
 #
 # NOTES:
 #   - bunny image provides faster dev iteration than production image
 #   - Docker socket mount enables container to access host Docker
 #   - Local data persists across container restarts
 #   - This file is git-ignored in production contexts
+#   - proxyUrl (if set) takes precedence over port-based construction
 #
 # See DOCKER.md for detailed configuration and usage.
 
@@ -33,6 +43,9 @@ services:
   occ-gateway:
     image: bunny:latest
     command: bash -lc "mkdir -p /root/.openclaw && echo '{\"gateway\":{\"controlUi\":{\"dangerouslyAllowHostHeaderOriginFallback\":true}}}' > /root/.openclaw/openclaw.json; bun i -g @buape/carbon @larksuiteoapi/node-sdk @slack/web-api grammy && openclaw gateway run --allow-unconfigured --bind lan"
+    environment:
+      # Optional: Set proxy URL for gateway when behind reverse proxy
+      # GATEWAY_PROXY_URL: ${GATEWAY_PROXY_URL:-}
     ports:
       - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_PORT:-18789}:18789"
     volumes:

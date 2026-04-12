@@ -1,4 +1,5 @@
-import { test, expect, type Page, type FrameLocator } from './fixtures';
+import { test, expect } from './fixtures';
+import { waitForHomePanelTab, getInnerFrame } from './test-utils';
 
 /**
  * Visual regression snapshot tests for the OCC editor.
@@ -12,31 +13,6 @@ import { test, expect, type Page, type FrameLocator } from './fixtures';
  *     └── iframe#active-frame  (inner — actual panel HTML, same content)
  */
 
-/** Open (or reveal) the OCC Home panel and wait for its tab to be visible. */
-async function waitForHomePanelTab(page: Page): Promise<void> {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-
-  // The panel auto-opens ~12–15 s after workbench loads.  If it hasn't
-  // appeared yet (e.g. under load), trigger it explicitly with the keyboard
-  // shortcut after stealing focus back from any webview.
-  const autoOpen = tab.waitFor({ timeout: 25_000 }).catch(() => null);
-  await autoOpen;
-
-  if (!await tab.isVisible()) {
-    // Move focus to VS Code chrome so Ctrl+Alt+H reaches the workbench.
-    await page.locator('.activitybar').click();
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 20_000 });
-}
-
-/** Return the inner iframe locator for the OCC Home panel content. */
-function getInnerFrame(page: Page): FrameLocator {
-  const outerFrame = page.frameLocator('iframe.webview').first();
-  return outerFrame.frameLocator('iframe#active-frame');
-}
-
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
@@ -47,7 +23,7 @@ test('workbench loads and renders correctly', async ({ page }) => {
   // in-progress animations a moment to settle before snapping.
   await page.locator('.monaco-workbench').waitFor({ state: 'visible' });
 
-  await expect(page).toHaveScreenshot('workbench-loaded.png', {
+  await expect(page, 'Workbench snapshot should match baseline').toHaveScreenshot('workbench-loaded.png', {
     animations: 'disabled',
     maxDiffPixels: 100,
   });
@@ -63,7 +39,7 @@ test('home panel install wizard snapshot', async ({ page }) => {
   const panelContent = innerFrame.locator('h1, .setup-title, #panel-bootstrap-choice');
   await panelContent.first().waitFor({ timeout: 30_000 });
 
-  await expect(innerFrame.locator('body')).toHaveScreenshot('home-panel-wizard.png', {
+  await expect(innerFrame.locator('body'), 'Home panel wizard snapshot should match baseline').toHaveScreenshot('home-panel-wizard.png', {
     animations: 'disabled',
     maxDiffPixels: 100,
   });
@@ -98,7 +74,7 @@ test('docker card setup view snapshot', async ({ page }) => {
   const newInnerFrame = getInnerFrame(page);
   await newInnerFrame.locator('#btn-choose-docker').waitFor({ timeout: 20_000 });
 
-  await expect(newInnerFrame.locator('body')).toHaveScreenshot('docker-setup-choice.png', {
+  await expect(newInnerFrame.locator('body'), 'Docker setup choice snapshot should match baseline').toHaveScreenshot('docker-setup-choice.png', {
     animations: 'disabled',
     maxDiffPixels: 100,
   });

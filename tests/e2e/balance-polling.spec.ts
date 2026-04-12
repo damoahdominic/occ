@@ -1,4 +1,10 @@
-import { test, expect, type Page } from './fixtures';
+import { test, expect } from './fixtures';
+import {
+  waitForHomePanelTab,
+  getInnerFrame,
+  isButtonVisible,
+  clickButton,
+} from './test-utils';
 
 /**
  * Balance Polling and Deduction E2E Tests
@@ -12,24 +18,6 @@ import { test, expect, type Page } from './fixtures';
  * - Deduction: 0.01 per chat message
  * - Mock backend server on localhost:3001
  */
-
-const waitForHomePanelTab = async (page: Page) => {
-  const tab = page.locator('[role="tab"]').filter({ hasText: 'OCC Home' });
-  const autoOpen = tab.waitFor({ timeout: 25_000 }).catch(() => null);
-  await autoOpen;
-
-  if (!await tab.isVisible()) {
-    await page.locator('.activitybar').click();
-    await page.keyboard.press('Control+Alt+H');
-  }
-
-  await tab.waitFor({ timeout: 20_000 });
-};
-
-const getInnerFrame = (page: Page) => {
-  const outerFrame = page.frameLocator('iframe.webview').first();
-  return outerFrame.frameLocator('iframe#active-frame');
-};
 
 test.describe('Balance Polling and Deduction', () => {
   test.beforeEach(async ({ page }) => {
@@ -60,10 +48,13 @@ test.describe('Balance Polling and Deduction', () => {
     const balanceInPanel = innerFrame.locator('.balance, [data-testid="balance"]');
 
     // Check either location
-    const hasStatusBalance = await balanceInStatus.first().isVisible().catch(() => false);
-    const hasPanelBalance = await balanceInPanel.first().isVisible().catch(() => false);
+    const hasStatusBalance = await balanceInStatus.first().isVisible({ timeout: 10_000 }).catch(() => false);
+    const hasPanelBalance = await balanceInPanel.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
-    expect(hasStatusBalance || hasPanelBalance).toBe(true);
+    expect(
+      hasStatusBalance || hasPanelBalance,
+      'Balance should be visible in either status bar or home panel'
+    ).toBe(true);
   });
 
   /**
@@ -84,13 +75,10 @@ test.describe('Balance Polling and Deduction', () => {
     await page.waitForTimeout(3000);
 
     // Try to open chat sidebar if available
-    const chatButton = page.locator('.actions, .sidebar-toggle').filter({
-      hasText: /chat|message/i,
-    });
-    const chatVisible = await chatButton.first().isVisible().catch(() => false);
+    const hasChatButton = await isButtonVisible(page.locator('.actions, .sidebar-toggle'), /chat|message/i, 5_000);
 
-    if (chatVisible) {
-      await chatButton.first().click();
+    if (hasChatButton) {
+      await page.locator('.actions, .sidebar-toggle').filter({ hasText: /chat|message/i }).first().click();
       await page.waitForTimeout(2000);
     }
 
@@ -98,7 +86,7 @@ test.describe('Balance Polling and Deduction', () => {
     const innerFrame = getInnerFrame(page);
     const chatInput = innerFrame.locator('input[type="text"], textarea, [contenteditable="true"]');
 
-    const inputVisible = await chatInput.first().isVisible().catch(() => false);
+    const inputVisible = await chatInput.first().isVisible({ timeout: 5_000 }).catch(() => false);
 
     if (inputVisible) {
       // Type a message
@@ -106,20 +94,17 @@ test.describe('Balance Polling and Deduction', () => {
       await page.waitForTimeout(1000);
 
       // Look for send button
-      const sendButton = innerFrame.locator('button, [role="button"]').filter({
-        hasText: /send|submit|go/i,
-      });
-      const sendVisible = await sendButton.first().isVisible().catch(() => false);
+      const hasSendButton = await isButtonVisible(innerFrame, /send|submit|go/i, 5_000);
 
-      if (sendVisible) {
-        await sendButton.first().click();
+      if (hasSendButton) {
+        await clickButton(innerFrame, /send|submit|go/i);
         // Wait for response and balance update
         await page.waitForTimeout(5000);
 
         // Check balance after potential deduction
         const balanceAfter = innerFrame.locator('.balance, [data-testid="balance"]');
-        const hasBalance = await balanceAfter.first().isVisible().catch(() => false);
-        expect(hasBalance).toBe(true);
+        const hasBalance = await balanceAfter.first().isVisible({ timeout: 10_000 }).catch(() => false);
+        expect(hasBalance, 'Balance should be visible after sending message').toBe(true);
       }
     }
 
@@ -146,14 +131,17 @@ test.describe('Balance Polling and Deduction', () => {
       hasText: /low.*balance|insufficient|not enough|credits/i,
     });
 
-    const hasWarning = await lowBalanceWarning.first().isVisible().catch(() => false);
+    const hasWarning = await lowBalanceWarning.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Or check for balance display
     const balanceDisplay = innerFrame.locator('.balance, [data-testid="balance"]');
-    const hasBalance = await balanceDisplay.first().isVisible().catch(() => false);
+    const hasBalance = await balanceDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     // Either shows warning or shows balance
-    expect(hasWarning || hasBalance).toBe(true);
+    expect(
+      hasWarning || hasBalance,
+      'Either low balance warning or balance display should be visible'
+    ).toBe(true);
   });
 
   /**
@@ -171,7 +159,7 @@ test.describe('Balance Polling and Deduction', () => {
 
     // Initial balance check
     const initialBalance = innerFrame.locator('.balance, [data-testid="balance"]');
-    const hasInitialBalance = await initialBalance.first().isVisible().catch(() => false);
+    const hasInitialBalance = await initialBalance.first().isVisible({ timeout: 10_000 }).catch(() => false);
 
     if (hasInitialBalance) {
       // Simulate window focus by clicking somewhere
@@ -185,6 +173,9 @@ test.describe('Balance Polling and Deduction', () => {
       // Check balance is still displayed (refreshed)
       const refreshedBalance = innerFrame.locator('.balance, [data-testid="balance"]');
       await expect(refreshedBalance.first()).toBeVisible({ timeout: 10_000 });
+    } else {
+      // If initial balance not visible, that's acceptable - skip the refresh check
+      expect(hasInitialBalance, 'Initial balance should be visible for refresh test').toBe(true);
     }
   });
 
@@ -207,20 +198,22 @@ test.describe('Balance Polling and Deduction', () => {
 
     // Verify balance display exists
     const balanceDisplay = innerFrame.locator('.balance, [data-testid="balance"]');
-    const hasBalance = await balanceDisplay.first().isVisible().catch(() => false);
+    const hasBalance = await balanceDisplay.first().isVisible({ timeout: 10_000 }).catch(() => false);
+
+    expect(hasBalance, 'Balance should be visible for multiple interaction test').toBe(true);
 
     if (hasBalance) {
       // Try to send multiple messages if chat is available
       for (let i = 0; i < 3; i++) {
         const chatInput = innerFrame.locator('input[type="text"], textarea').first();
-        const inputVisible = await chatInput.isVisible().catch(() => false);
+        const inputVisible = await chatInput.isVisible({ timeout: 5_000 }).catch(() => false);
 
         if (inputVisible) {
           await chatInput.fill(`Test message ${i + 1}`);
           await page.waitForTimeout(500);
 
           const sendButton = innerFrame.locator('button').filter({ hasText: /send/i });
-          const sendVisible = await sendButton.first().isVisible().catch(() => false);
+          const sendVisible = await sendButton.first().isVisible({ timeout: 5_000 }).catch(() => false);
 
           if (sendVisible) {
             await sendButton.first().click();
