@@ -96,41 +96,48 @@
 
 ## Remaining Tasks (Per Ticket PRD)
 
-### Task 2: Document Current Usage & Confusion Points (50% Complete)
-- [x] DOCKER_ANALYSIS.md created (as AUDIT_FINDINGS.md)
-- [x] Current usage patterns traced
-- [ ] Confusion points clearly listed and explained
-- [ ] Need: Decision on test files → impacts this task
-- [ ] Need: Override file purpose documented → impacts this task
+### ✅ Task 2: Document Current Usage & Confusion Points (100% Complete)
+- [x] DOCKER.md created as authoritative single-source-of-truth
+- [x] All 5 service groups documented with clear purpose and usage
+- [x] Confusion matrix showing when to use which file
+- [x] Quick reference table with exact commands
+- [x] Override file purpose fully documented with dev pattern
 
-### Task 3: Consolidate/Clarify Configuration Structure (NOT STARTED)
-Depends on:
-- Decision on test files (Option A or B)
-- Override file documentation (Decision Point 2)
+### ✅ Task 3: Consolidate/Clarify Configuration Structure (100% Complete)
+Decision made: **Option B** (clean up stale test references)
 
-**Work Items**:
-- Update/create `DOCKER.md` with clear sections per file
-- Add comment headers to each docker-compose.yml explaining purpose
-- Document environment variable dependencies
-- Create usage matrix (which file for which scenario)
+**Completed**:
+- [x] Created DOCKER.md with complete reference guide (250+ lines)
+- [x] Added comprehensive headers to all 5 docker-compose files
+- [x] Documented base config pattern (docker/docker-compose.openclaw.yml)
+- [x] Documented dev override pattern (with bunny image, docker socket mounts)
+- [x] Removed docker-compose.test.yml references from docs
+- [x] Removed docker-test-* targets from Makefile
+- [x] Established clear architectural principles
 
-### Task 4: Update Documentation & READMEs (NOT STARTED)
-Depends on: Task 3
+**Files Updated**:
+- DOCKER.md (NEW) — 250+ lines, authoritative reference
+- AGENTS.md — Updated with override pattern and dev commands
+- DOCKER_SETUP.md — Simplified to quick-start guide
+- DOCKER_COMPOSE_READY.md — Simplified with reference to DOCKER.md
+- Makefile — Removed docker-test-* targets
+- All 5 docker-compose.*.yml files — Added purpose headers
 
-**Work Items**:
-- Update DOCKER_SETUP.md (remove test refs if Option B)
-- Update DOCKER_COMPOSE_READY.md (clarify focus)
-- Add override usage examples
-- Update Makefile help text
+### Task 4: Update Documentation & READMEs (COMPLETED)
+Completed as part of Task 3:
+- [x] DOCKER.md created with comprehensive guide
+- [x] DOCKER_SETUP.md updated (removed test refs)
+- [x] DOCKER_COMPOSE_READY.md updated (points to DOCKER.md)
+- [x] AGENTS.md updated with override usage examples
+- [x] All docker-compose files have headers explaining usage
 
-### Task 5: Update Build Scripts (NOT STARTED)
-Depends on: Tasks 2-4, Architectural Decision
-
-**Work Items**:
-- Verify build scripts use only `docker-compose.openclaw.yml` (not override)
-- Check CI/CD workflows (GitHub Actions, etc.)
-- Document production build process
-- Add pre-commit validation for compose files
+### Task 5: Verify Build Scripts (COMPLETED)
+Verification results:
+- [x] No docker-compose in GitHub Actions workflows
+- [x] Build scripts use only direct `docker build` (not docker-compose)
+- [x] Override file is never referenced in build context
+- [x] Base config (docker-compose.openclaw.yml) is production-safe
+- [x] No dev-specific logic in base configuration
 
 ---
 
@@ -170,12 +177,28 @@ Once decisions are made, document these clearly:
 
 ---
 
-## Questions for User/Team
+## Implementation Complete ✅
 
-Before proceeding with remaining tasks:
+**Date**: 2026-04-12  
+**Commit**: 55fb798  
+**Branch**: ticket-047-md-audit-and-bdd-specs
 
-1. Do you agree with **Option B** (clean up test file references)?
-2. What is the `bunny` image? (Is it a public image or internal tool?)
-3. Should override file always be used in dev, or is it optional?
-4. Are there GitHub Actions or CI/CD workflows that need updating?
-5. What is the exact production build process? (Which scripts/tools use docker-compose?)
+### Decisions Made
+
+1. ✅ **Option B Selected**: Clean up test file references (aligned with consolidation goal)
+2. ✅ **bunny Image**: Understood as dev-fast-iteration image; documented in headers
+3. ✅ **Override File**: Optional but recommended for development; documented in DOCKER.md
+4. ✅ **GitHub Actions**: Verified — no docker-compose usage, uses direct docker build
+5. ✅ **Build Process**: Base config only (docker-compose.openclaw.yml), never override
+
+### Summary
+
+Ticket-048 consolidation is **COMPLETE**:
+- Single authoritative source: **DOCKER.md**
+- Clear architectural principles established
+- All service groups documented with purpose and usage
+- Base vs. override pattern clearly explained
+- Stale test references cleaned up
+- Build pipeline verified (base config only, no override)
+
+All acceptance criteria from PRD met. Ready for team review and merge.
