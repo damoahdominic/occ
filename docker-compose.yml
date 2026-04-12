@@ -1,3 +1,28 @@
+# OCC Editor & Web Development Services
+#
+# PURPOSE:
+#   Development environment for OCC editor (VSCode fork) and Next.js web app.
+#   Separate concern from OpenClaw services (see docker/docker-compose.openclaw.yml).
+#
+# USAGE:
+#   docker-compose up -d                    # Start both services
+#   docker-compose logs -f editor           # View editor logs
+#   docker-compose exec editor bash         # Access container shell
+#   docker-compose down                     # Stop
+#
+# SERVICES:
+#   - editor : VSCode fork on port 9888 (healthcheck ~9 min cold start)
+#   - web    : Next.js web app on port 3002
+#
+# NOTES:
+#   - Root-level location (legacy convention)
+#   - Never used in production builds or CI/CD
+#   - Separate network from OpenClaw services
+#
+# See DOCKER.md for detailed configuration and usage.
+
+version: "3.9"
+
 services:
   editor:
     build:

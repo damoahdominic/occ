@@ -1,3 +1,42 @@
+# Windows 11 VM for Cross-Platform Testing
+#
+# PURPOSE:
+#   Windows 11 virtual machine for cross-platform testing, Windows-specific
+#   builds, and UI testing scenarios. Specialized use case only.
+#
+# USAGE:
+#   docker-compose -f docker-compose.windows.yml up -d
+#   docker-compose -f docker-compose.windows.yml logs -f windows-vm
+#   docker-compose -f docker-compose.windows.yml down
+#
+# SERVICES:
+#   - windows-vm : Windows 11 VM with hardware acceleration (KVM)
+#
+# PORTS:
+#   - 8006 : Web viewer for VM display
+#   - 3389 : RDP (Remote Desktop Protocol) access
+#
+# DEVICES & CAPABILITIES:
+#   - /dev/kvm        : Hardware acceleration for virtualization
+#   - /dev/net/tun    : Network acceleration
+#   - CAP_NET_ADMIN   : Network administration capability
+#
+# VOLUMES:
+#   - ./docker/windows-storage : VM persistent storage
+#   - ./docker/windows-shared   : Shared data directory
+#
+# REQUIREMENTS:
+#   - KVM support (nested virtualization or Linux host)
+#   - Sufficient RAM and CPU (configurable via environment)
+#   - These commands require sudo or docker group access
+#
+# NOTES:
+#   - Completely separate from OpenClaw and editor services
+#   - Resource-intensive; only run when needed
+#   - Restart grace period: 2 minutes
+#
+# See DOCKER.md for detailed configuration and usage.
+
 version: "3.8"
 
 services:

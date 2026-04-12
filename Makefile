@@ -47,31 +47,6 @@ run-node-setup:
 	@echo "Running node-setup test scenario..."
 	docker run --rm -v $(PROJECT_ROOT):/app $(UBUNTU_IMAGE) bash -c "apt-get update && apt-get install -y curl wget git && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && export NVM_DIR=\"/root/.nvm\" && echo 'export NVM_DIR=\"\$$HOME/.nvm\"' >> ~/.bashrc && echo '[ -s \"\$$NVM_DIR/nvm.sh\" ] && source \"\$$NVM_DIR/nvm.sh\"' >> ~/.bashrc && cd /app && npm ci --ignore-scripts && source ~/.bashrc && source ./scripts/activate_env.sh && ./launch-editor.sh --setup-and-run"
 
-## docker-test: Run all tests using docker-compose
-docker-test:
-	@echo "Running all test scenarios with docker-compose..."
-	docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-
-## docker-test-fnm: Run fnm test with docker-compose
-docker-test-fnm:
-	@echo "Running fnm test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-fnm
-
-## docker-test-nvm: Run nvm test with docker-compose
-docker-test-nvm:
-	@echo "Running nvm test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-nvm
-
-## docker-test-node-only: Run node-only test with docker-compose
-docker-test-node-only:
-	@echo "Running node-only test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-node-only
-
-## docker-test-node-setup: Run node-setup test with docker-compose
-docker-test-node-setup:
-	@echo "Running node-setup test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-node-setup
-
 ## build-linux-container: Build the Linux build container image
 build-linux-container:
 	@echo "Building $(BUILD_LINUX_IMAGE) container..."

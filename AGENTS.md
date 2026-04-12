@@ -374,11 +374,35 @@ docker compose down
 
 ### OpenClaw Docker Gateway
 
-The OpenClaw gateway services (postgres, redis, gateway) are managed via `docker/docker-compose.openclaw.yml`:
+The OpenClaw gateway services (postgres, redis, gateway) are managed via two docker-compose files:
+
+**Development** (with local overrides for faster iteration):
 
 ```bash
-# Start gateway services
-OPENCLAW_DATA_DIR=./.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+# Start gateway services with dev overrides
+docker compose \
+  -f docker/docker-compose.openclaw.yml \
+  -f docker/docker-compose.openclaw.override.yml \
+  up -d
+
+# Or with env vars
+OPENCLAW_DATA_DIR=./.openclaw docker compose \
+  -f docker/docker-compose.openclaw.yml \
+  -f docker/docker-compose.openclaw.override.yml \
+  up -d
+
+# Check service health
+docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml ps
+
+# View gateway logs
+docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml logs -f occ-gateway
+```
+
+**Production** (base config only — used in CI/builds):
+
+```bash
+# Start gateway services (production-like)
+docker compose -f docker/docker-compose.openclaw.yml up -d
 
 # Check service health
 docker compose -f docker/docker-compose.openclaw.yml ps
@@ -390,7 +414,18 @@ docker compose -f docker/docker-compose.openclaw.yml logs -f occ-gateway
 docker compose -f docker/docker-compose.openclaw.yml down
 ```
 
-The gateway is accessible at `http://127.0.0.1:${GATEAWY_HOST_PORT:-18789}`. Postgres and Redis run on the internal Docker network only (no host port exposure).
+**Convenience alias** (for development):
+
+```bash
+alias docker-dev="docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml"
+docker-dev up -d
+docker-dev logs -f occ-gateway
+docker-dev ps
+```
+
+The gateway is accessible at `http://127.0.0.1:${GATEWAY_PORT:-18789}`. Postgres and Redis run on the internal Docker network only (no host port exposure).
+
+**See [DOCKER.md](./DOCKER.md) for detailed OpenClaw setup, environment variables, and troubleshooting.**
 
 ---
 

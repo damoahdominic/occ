@@ -1,3 +1,32 @@
+# OpenClaw Gateway — Development Overrides
+#
+# PURPOSE:
+#   Development-only overrides for OpenClaw gateway. Use WITH base config
+#   (docker-compose.openclaw.yml) via multi-file composition.
+#   NEVER used in production or CI/CD builds.
+#
+# USAGE:
+#   Development only: docker compose \
+#     -f docker/docker-compose.openclaw.yml \
+#     -f docker/docker-compose.openclaw.override.yml \
+#     up -d
+#
+# OVERRIDES:
+#   - Image: bunny:latest (fast iteration) instead of openclaw/pod:latest
+#   - Volumes: Local data dir and docker socket for docker-in-docker
+#   - Ports: Configurable via env for local dev access
+#
+# ENVIRONMENT:
+#   OPENCLAW_DATA_DIR : Where to persist local openclaw.json (default: ./openclaw_docker_data)
+#
+# NOTES:
+#   - bunny image provides faster dev iteration than production image
+#   - Docker socket mount enables container to access host Docker
+#   - Local data persists across container restarts
+#   - This file is git-ignored in production contexts
+#
+# See DOCKER.md for detailed configuration and usage.
+
 version: "3.9"
 
 services:

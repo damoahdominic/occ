@@ -1,3 +1,33 @@
+# OpenClaw Gateway — Base Production Configuration
+#
+# PURPOSE:
+#   Production-ready configuration for OpenClaw gateway and supporting services
+#   (PostgreSQL, Redis). This is the ONLY config used for builds and CI/CD.
+#   No dev-specific logic or overrides.
+#
+# USAGE:
+#   Production/CI: docker compose -f docker/docker-compose.openclaw.yml up -d
+#   Development:   docker compose -f docker/docker-compose.openclaw.yml \
+#                    -f docker/docker-compose.openclaw.override.yml up -d
+#
+# SERVICES:
+#   - occ-gateway  : OpenClaw gateway (port 18789)
+#   - occ-postgres : PostgreSQL 16 (port 5432)
+#   - occ-redis    : Redis 7 (port 6379)
+#
+# NETWORKS:
+#   - occ-network  : Custom bridge network for service communication
+#
+# VOLUMES:
+#   - occ-postgres-data : Persistent PostgreSQL data
+#   - occ-redis-data    : Persistent Redis data (not currently used)
+#
+# ENVIRONMENT:
+#   Load variables from docker/.env.openclaw
+#   Required: POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_USER, DATABASE_URL, REDIS_URL
+#
+# See DOCKER.md for detailed configuration and usage.
+
 version: "3.9"
 
 services:
