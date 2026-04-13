@@ -21,6 +21,7 @@ import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled } from '../../../../../../../workbench/contrib/void/common/voidSettingsTypes.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
+import { BalanceDisplay } from '../void-settings-tsx/BalanceDisplay.js';
 import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
@@ -3151,6 +3152,16 @@ export const SidebarChat = () => {
 		ref={sidebarRef}
 		className='w-full h-full max-h-full flex flex-col overflow-auto px-4'
 	>
+		<div style={{ padding: '12px 16px', borderBottom: '1px solid #e1e1e1' }}>
+			<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+				<h2 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>OCC Home</h2>
+				<BalanceDisplay
+					balance={settingsState?.globalSettings?.occBalance ?? null}
+					isLoading={false}
+				/>
+			</div>
+		</div>
+
 		<ErrorBoundary>
 			{landingPageInput}
 		</ErrorBoundary>
