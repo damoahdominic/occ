@@ -247,6 +247,23 @@ import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures'
 
 ---
 
+#### Playwright Configuration
+
+**Test Results Output:**
+
+Test results, screenshots, and videos are saved to `./test-results/`. This directory is configured in `playwright.config.ts`:
+
+```ts
+outputDir: './test-results',
+```
+
+After test runs, check this directory for:
+- `test-results/*.png` — screenshots from failed tests
+- `test-results/*.webm` — video recordings (on failure)
+- `test-results/trace.zip` — Playwright trace files for debugging
+
+---
+
 #### Chrome DevTools Protocol (CDP) with Playwright
 
 Playwright can connect to an externally-launched Chrome instance via CDP.
