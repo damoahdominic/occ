@@ -14,7 +14,7 @@ import { waitForHomePanelTab } from './test-utils';
 
 test.describe('Settings Panel - OCC Credits Card', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    // Fixture already navigates to workspace-aware URL; wait for workbench to render
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
   });
 

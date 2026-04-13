@@ -174,7 +174,9 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
     const context = existing.length > 0
       ? existing[0]
       : await browser.newContext({ baseURL: BASE_URL });
-    // Ensure baseURL is honoured even on a reused context
+    // Ensure baseURL is set even on reused contexts (CDP mode)
+    // In CDP mode, reused contexts don't have baseURL, so apply it explicitly
+    (context as any)._baseURL = BASE_URL;
     if (!context.pages().length) {
       await context.newPage();
     }
@@ -221,13 +223,20 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
      await use(page);
 
      // Close only the CDP sessions we created in this test
-     for (const cdpSession of page.context().cdpSessions()) {
-       if (sessionsCreated.has(cdpSession.toString())) {
-         try {
-           await cdpSession.detach().catch(() => {});
-         } catch {
-           // Silently ignore errors if session is already detached
+     const pageContext = page.context();
+     if (typeof pageContext.cdpSessions === 'function') {
+       try {
+         for (const cdpSession of pageContext.cdpSessions()) {
+           if (sessionsCreated.has(cdpSession.toString())) {
+             try {
+               await cdpSession.detach().catch(() => {});
+             } catch {
+               // Silently ignore errors if session is already detached
+             }
+           }
          }
+       } catch {
+         // Silently ignore if cdpSessions is not available
        }
      }
 

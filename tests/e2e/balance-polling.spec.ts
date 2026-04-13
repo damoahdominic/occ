@@ -21,7 +21,7 @@ import {
 
 test.describe('Balance Polling and Deduction', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
+    // Fixture already navigates to workspace-aware URL; wait for workbench to render
     await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
   });
 

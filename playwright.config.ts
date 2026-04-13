@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: 'http://[::1]:9888/',
+    baseURL: 'http://127.0.0.1:9888/',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Connect to existing Chrome via CDP when CDP_ENDPOINT is set
@@ -31,7 +31,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: {
-        baseURL: 'http://[::1]:9888/',
+        baseURL: 'http://127.0.0.1:9888/',
         // Fixtures (global-setup.ts) will connect via CDP if CDP_ENDPOINT is set
         // Otherwise fixtures will launch local Chromium with appropriate args
       },
