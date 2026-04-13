@@ -11,20 +11,27 @@ import { Page, FrameLocator, expect } from '@playwright/test';
  * Wait for Home panel tab to be visible and clickable.
  * Handles both auto-opened and manually-triggered tab visibility.
  */
-export async function waitForHomePanelTab(page: Page, timeout = 30_000): Promise<void> {
+export async function waitForHomePanelTab(page: Page, timeout = 60_000): Promise<void> {
   const tab = page.locator('[role="tab"]').filter({ hasText: /OCC Home|Home/ });
 
   try {
     // First try: wait for auto-open
     await tab.waitFor({ timeout: 5_000 }).catch(() => null);
 
-    // If not visible, manually open
+    // If not visible, manually open via sidebar or keyboard shortcut
     if (!await tab.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await page.locator('.activitybar').click().catch(() => null);
-      await page.keyboard.press('Control+Alt+H');
+      // Try clicking activity bar first
+      const activityBar = page.locator('.activitybar');
+      if (await activityBar.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await activityBar.click().catch(() => null);
+      }
+      // Try keyboard shortcut to open sidebar
+      await page.keyboard.press('Control+Alt+H').catch(() => null);
+      // Wait a bit for UI to update
+      await page.waitForTimeout(500);
     }
 
-    // Final wait for tab to be visible
+    // Final wait for tab to be visible (increased from 30s to 60s for CDP)
     await tab.waitFor({ timeout });
   } catch (e) {
     throw new Error(`OCC Home panel tab not found after ${timeout}ms`);

@@ -218,7 +218,14 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
      const targetUrl = vsCodePage?.url() ?? VSCODE_WORKSPACE_URL;
 
      // Ensure every test starts at the workspace‑aware URL so the OCC extension activates.
-     await page.goto(targetUrl, { waitUntil: 'load' });
+     // Increased timeout to 90s for CDP and slower systems with workspace loading
+     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+
+     // Verify navigation succeeded (check URL contains workspace param)
+     const currentUrl = page.url();
+     if (!currentUrl.includes('workspace=') && !currentUrl.includes('occode-editor')) {
+       throw new Error(`Page navigation failed. Expected workspace URL but got: ${currentUrl}`);
+     }
 
      await use(page);
 
