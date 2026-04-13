@@ -201,6 +201,28 @@ npm run test:e2e:ui
 npm run test:e2e:cdp
 ```
 
+**⚠️ IMPORTANT: CDP tests must run serially (1 worker)**
+
+The E2E fixture shares a single browser context across tests via CDP. This is incompatible with parallel test execution.
+
+```bash
+# ✓ CORRECT — uses 1 worker by default
+npm run test:e2e tests/e2e/onboarding-auth.spec.ts
+
+# ✓ CORRECT — explicitly serial
+npm run test:e2e -- --workers=1 tests/e2e/onboarding-auth.spec.ts
+
+# ✗ WRONG — parallel workers interfere with shared context
+npm run test:e2e -- --workers=4 tests/e2e/onboarding-auth.spec.ts
+```
+
+When using `--workers=4` with CDP tests, you will see:
+- Tests run in 4 parallel workers
+- Multiple workers open pages simultaneously on the same context
+- Network and page state conflicts occur
+- Tests timeout waiting for `.monaco-workbench` or fail with page content errors
+- **Solution: Always use `--workers=1` for CDP E2E tests**
+
 **Filter tests by file or pattern:**
 
 ```bash
@@ -216,6 +238,34 @@ npx playwright test --grep-invert "slow"
 # Run a specific test by name
 npx playwright test -t "should open home panel"
 ```
+
+**Test Result Interpretation & Next Actions**
+
+After running tests, check `./test-results/` for detailed failure diagnostics:
+
+| Symptom | Cause | Next Action |
+|---------|-------|-------------|
+| Many tests timeout at `.monaco-workbench` | Tests running in parallel (`--workers=4`) | Re-run with `--workers=1` |
+| Single test fails with "Page content should be visible" | Test logic issue (OCC Home panel not loading) | Check test `beforeEach`, webview iframe structure, or OCC extension activation |
+| "OCC Home panel tab not found after Xs" | Timeout in `waitForHomePanelTab()` | Increase `beforeEach` timeout or improve panel open strategy |
+| First test passes, later tests fail with blank pages | Page fixture navigation to wrong URL (e.g., `chrome://newtab/`) | Check if page.goto() is landing on expected VS Code URL; URL fallback in fixture should recover |
+| All tests hang indefinitely | Chrome CDP disconnected | Verify Chrome is running with `--remote-debugging-port=9222` |
+
+**Investigating Failed Tests:**
+1. **Screenshots**: `test-results/*test-failed-*.png` show what the page looked like at failure time
+2. **Trace files**: `test-results/trace.zip` contains Playwright trace (viewable at https://trace.playwright.dev)
+3. **Error context**: `test-results/*error-context.md` shows the page's a11y tree snapshot at failure
+4. **Test output**: Re-run failing test with `-t "test name"` to isolate and debug
+
+```bash
+# Run a single test for debugging
+npx playwright test -t "home panel shows onboarding steps"
+
+# Inspect trace in Playwright Inspector
+npx playwright show-trace test-results/trace.zip
+```
+
+---
 
 **Webview Panel Access:**
 
