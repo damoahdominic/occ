@@ -31,7 +31,7 @@ test_fnm() {
 
     echo "Running fnm test..."
     local output
-    output=$(timeout 180 docker run --rm -v "$PROJECT_ROOT:/app" node:22 bash -c 'curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /usr/local && source /root/.bashrc && cd /app && npm ci --ignore-scripts && fnm --version 2>&1')
+    output=$(timeout 180 docker-compose -f "$PROJECT_ROOT/docker/docker-compose.node-tests.yml" run --rm -w /app node-fnm)
 
     if echo "$output" | grep -qE "fnm [0-9]+\.[0-9]+"; then
         print_pass "fnm scenario passed - fnm is available"
@@ -49,7 +49,7 @@ test_nvm() {
 
     echo "Running nvm test..."
     local output
-    output=$(timeout 180 docker run --rm -v "$PROJECT_ROOT:/app" node:22 bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && source ~/.bashrc && nvm --version 2>&1" 2>&1)
+    output=$(timeout 180 docker-compose -f "$PROJECT_ROOT/docker/docker-compose.node-tests.yml" run --rm node-nvm 2>&1)
 
     if echo "$output" | grep -qE "[0-9]+\.[0-9]+"; then
         print_pass "nvm scenario passed - nvm is available"
@@ -67,7 +67,7 @@ test_node_only() {
 
     echo "Running Node only test..."
     local output
-    output=$(timeout 60 docker run --rm -v "$PROJECT_ROOT:/app" node:22 bash -c "node --version 2>&1" 2>&1)
+    output=$(timeout 60 docker-compose -f "$PROJECT_ROOT/docker/docker-compose.node-tests.yml" run --rm node-only 2>&1)
 
     if echo "$output" | grep -qE "v[0-9]+\.[0-9]+"; then
         print_pass "Node only scenario passed"
@@ -85,7 +85,7 @@ test_node_setup() {
 
     echo "Running Node setup test..."
     local output
-    output=$(timeout 240 docker run --rm -v "$PROJECT_ROOT:/app" ubuntu:22.04 bash -c 'apt-get update && apt-get install -y curl wget git && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && export NVM_DIR="/root/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh" && nvm install 20.18.2 && node --version 2>&1' 2>&1)
+    output=$(timeout 240 docker-compose -f "$PROJECT_ROOT/docker/docker-compose.node-tests.yml" run --rm node-setup 2>&1)
 
     if echo "$output" | grep -qE "v[0-9]+\.[0-9]+"; then
         print_pass "Node setup scenario passed"

@@ -13,7 +13,7 @@ echo ""
 # Check prerequisites
 if ! docker ps | grep -q playwright-novnc; then
     echo "❌ Error: playwright-novnc container is not running"
-    echo "   Start it with: docker run -d --name playwright-novnc --network host ghcr.io/xtr-dev/mcp-playwright-novnc:latest"
+    echo "   Start it with: docker-compose -f docker/docker-compose.mcp-proxy.yml up -d"
     exit 1
 fi
 
@@ -42,9 +42,8 @@ trap cleanup EXIT
 
 # Start the mcp-proxy
 echo "🚀 Starting MCP proxy session..."
-docker run --rm -i --network=host \
-    ghcr.io/xtr-dev/mcp-playwright-novnc:latest \
-    mcp-proxy http://localhost:3080/sse \
+COMPOSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker"
+docker-compose -f "$COMPOSE_DIR/docker-compose.mcp-proxy.yml" run --rm -i mcp-proxy \
     < "$INPUT_PIPE" > "$OUTPUT_PIPE" 2>/dev/null &
 PROXY_PID=$!
 

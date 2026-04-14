@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  node-fnm:
+    image: node:22
+    container_name: occ-test-node-fnm
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: >
+      bash -c '
+        curl -fsSL https://fnm.vercel.app/install | bash -s -- --install-dir /usr/local &&
+        source /root/.bashrc &&
+        npm ci --ignore-scripts &&
+        fnm --version
+      '
+
+  node-nvm:
+    image: node:22
+    container_name: occ-test-node-nvm
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: >
+      bash -c '
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
+        source ~/.bashrc &&
+        nvm --version
+      '
+
+  node-only:
+    image: node:22
+    container_name: occ-test-node-only
+    command: node --version
+
+  node-setup:
+    image: ubuntu:22.04
+    container_name: occ-test-node-setup
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: >
+      bash -c '
+        apt-get update &&
+        apt-get install -y curl wget git &&
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash &&
+        export NVM_DIR="/root/.nvm" &&
+        [ -s "$$NVM_DIR/nvm.sh" ] && source "$$NVM_DIR/nvm.sh" &&
+        nvm install 20.18.2 &&
+        node --version
+      '
+
+  alpine-extraction:
+    image: node:22-alpine
+    container_name: occ-alpine-extract
+    command: /bin/sh -c 'cat `which node`'

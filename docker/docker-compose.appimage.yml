@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  appimage-builder:
+    # Image name will be passed via environment variable or override
+    image: ${APPIMAGE_BUILD_IMAGE:-void-appimage-builder}
+    container_name: occ-appimage-builder
+    working_dir: /app
+    volumes:
+      - .:/app
+    privileged: true
+    command: >
+      bash -c '
+        cd /app &&
+        rm -rf VoidApp.AppDir &&
+        mkdir -p VoidApp.AppDir/usr/bin VoidApp.AppDir/usr/lib VoidApp.AppDir/usr/share/applications &&
+        find . -maxdepth 1 ! -name VoidApp.AppDir ! -name "." ! -name ".." -exec cp -r {} VoidApp.AppDir/usr/bin/ \;
+      '

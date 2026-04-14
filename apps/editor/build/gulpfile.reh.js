@@ -156,7 +156,9 @@ function getNodeChecksum(expectedName) {
 function extractAlpinefromDocker(nodeVersion, platform, arch) {
 	const imageName = arch === 'arm64' ? 'arm64v8/node' : 'node';
 	log(`Downloading node.js ${nodeVersion} ${platform} ${arch} from docker image ${imageName}`);
-	const contents = cp.execSync(`docker run --rm ${imageName}:${nodeVersion}-alpine /bin/sh -c 'cat \`which node\`'`, { maxBuffer: 100 * 1024 * 1024, encoding: 'buffer' });
+	const dockerDir = path.join(__dirname, '../../..', 'docker');
+	const scriptPath = path.join(dockerDir, 'extract-node-alpine.sh');
+	const contents = cp.execSync(`bash ${scriptPath} "${imageName}" "${nodeVersion}"`, { maxBuffer: 100 * 1024 * 1024, encoding: 'buffer' });
 	return es.readArray([new File({ path: 'node', contents, stat: { mode: parseInt('755', 8) } })]);
 }
 
