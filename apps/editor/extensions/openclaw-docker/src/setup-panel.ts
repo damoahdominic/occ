@@ -288,10 +288,8 @@ export class DockerSetupPanel {
       dataDir: null,
     };
 
-    // Validate image
-    if (!config.image || config.image.trim() === '') {
-      errors.image = 'Docker image is required';
-    } else if (!config.image.includes(':')) {
+    // Validate image — blank is fine (defaults to DEFAULT_CONFIG.image)
+    if (config.image && config.image.trim() !== '' && !config.image.includes(':')) {
       errors.image = 'Image must include a tag (e.g., :latest)';
     }
 
@@ -1164,7 +1162,7 @@ ${logs.substring(0, 3000)}
   <!-- Config form -->
   <div class="form" id="config-form">
     <div class="field">
-      <label>Docker Image</label>
+      <label>Docker Image <span style="font-weight:400;color:#666;font-size:11px;">(optional — defaults to ghcr.io/openclaw/openclaw:latest)</span></label>
       <input type="text" id="image" value="${config.image}" placeholder="ghcr.io/openclaw/openclaw:latest" onchange="validateField('image')" onkeyup="debounceValidate('image')" />
       <div class="error-msg" id="image-error"></div>
     </div>
