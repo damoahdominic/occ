@@ -12,16 +12,15 @@ const DEFAULT_HOST_PORT = 18789;
 const DEFAULT_CONTAINER_PORT = 18789;
 const DEFAULT_STATE_DIR = path.join(os.homedir(), 'Desktop', 'occ-state-dir');
 
-// Config file paths
+// Config file paths — resolve relative to the extension, not the workspace,
+// because the user's workspace may be ~/.openclaw (not the project root).
+// Extension lives at: <project>/apps/editor/extensions/openclaw-docker/
+// Docker dir lives at: <project>/docker/
 function getDockerDir(extensionUri?: vscode.Uri): string {
-  // Get workspace root - try multiple approaches
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (workspaceRoot) {
-    return path.join(workspaceRoot, 'docker');
-  }
-  // Fallback: derive from extension path
   if (extensionUri) {
-    return path.join(path.dirname(path.dirname(path.dirname(extensionUri.fsPath))), 'docker');
+    // 4 levels up from extension dir → project root
+    const projectRoot = path.dirname(path.dirname(path.dirname(path.dirname(extensionUri.fsPath))));
+    return path.join(projectRoot, 'docker');
   }
   // Last resort: relative to where we think the repo is
   return path.join(os.homedir(), 'Desktop', 'workshop', 'studio', 'hustle', 'occ', 'docker');
@@ -420,13 +419,13 @@ export class DockerSetupPanel {
     });
   }
 
-  /** Check if docker-compose is installed and available */
+  /** Check if docker compose (V2 plugin) is installed and available */
   private async _checkComposeAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
       try {
         const result = cp.spawnSync(
-          'docker-compose',
-          ['--version'],
+          'docker',
+          ['compose', 'version'],
           { timeout: 2000, windowsHide: true },
         );
         resolve(result.status === 0);
@@ -436,7 +435,7 @@ export class DockerSetupPanel {
     });
   }
 
-  /** Check both Docker and docker-compose availability */
+  /** Check both Docker and docker compose (V2 plugin) availability */
   private async _checkDockerEnvironment(): Promise<{ docker: boolean; compose: boolean; error?: string }> {
     const docker = await this._checkDockerAvailable();
     const compose = await this._checkComposeAvailable();
@@ -444,7 +443,7 @@ export class DockerSetupPanel {
     if (!docker || !compose) {
       const missing = [];
       if (!docker) missing.push('Docker');
-      if (!compose) missing.push('docker-compose');
+      if (!compose) missing.push('docker compose');
       return {
         docker,
         compose,
@@ -455,46 +454,20 @@ export class DockerSetupPanel {
     return { docker, compose };
   }
 
-  /** Generate docker-compose.yml for the gateway */
-  private _generateDockerCompose(): string {
-    return `version: '3.8'
-
-services:
-  ${CONTAINER}:
-    image: ${this._image}
-    container_name: ${CONTAINER}
-    restart: unless-stopped
-    ports:
-      - "${this._hostPort}:${this._containerPort}"
-    volumes:
-      - ${this._dataDir}:/home/node/.openclaw
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-    command: tail -f /dev/null
-    networks:
-      - occ-network
-
-networks:
-  occ-network:
-    driver: bridge
-`;
+  /** Get the compose file path — uses the canonical docker-compose.openclaw.yml */
+  private _getComposeFilePath(): string {
+    return path.join(getDockerDir(this._extensionUri), 'docker-compose.openclaw.yml');
   }
 
-  /** Save docker-compose.yml to the docker directory */
-  private _saveDockerCompose(): void {
-    const dockerDir = getDockerDir(this._extensionUri);
-    const composeFile = path.join(dockerDir, 'docker-compose.yml');
-
-    try {
-      fs.mkdirSync(dockerDir, { recursive: true });
-      fs.writeFileSync(composeFile, this._generateDockerCompose(), 'utf-8');
-    } catch (err) {
-      console.error('Failed to save docker-compose.yml:', err);
-    }
+  /** Build env vars to pass user config to docker-compose.openclaw.yml */
+  private _getComposeEnv(): Record<string, string> {
+    return {
+      ...process.env as Record<string, string>,
+      OCC_GATEWAY_IMAGE: this._image,
+      GATEWAY_PORT: String(this._hostPort),
+      GATEWAY_BIND_HOST: this._bindHost,
+      OPENCLAW_DATA_DIR: this._dataDir,
+    };
   }
 
   // ── Config Message Handlers ────────────────────────────────────────────────
@@ -574,7 +547,7 @@ ${logs.substring(0, 3000)}
 
   private _getComposeVersion(): string {
     try {
-      const result = cp.spawnSync('docker-compose', ['--version'], { timeout: 2000, encoding: 'utf-8', windowsHide: true });
+      const result = cp.spawnSync('docker', ['compose', 'version'], { timeout: 2000, encoding: 'utf-8', windowsHide: true });
       return (result.stdout || 'unknown').trim();
     } catch {
       return 'unknown';
@@ -641,11 +614,14 @@ ${logs.substring(0, 3000)}
   }
 
   private _handleBack(): void {
-    if (this._configStep === 1) {
-      // Go back from Confirm to Config
+    if (this._configStep <= 1) {
+      // Go back to Config (step 0)
       this._configStep = 0;
-      this._renderConfigStep();
+    } else {
+      // From any provisioning step, go back to Config (step 0) so user can edit
+      this._configStep = 0;
     }
+    this._renderConfigStep();
   }
 
   private _handleCancel(): void {
@@ -671,52 +647,41 @@ ${logs.substring(0, 3000)}
     this._panel.webview.html = this._getHtml(iconUri);
   }
 
-  /** On open: jump straight to status panel if the container is already set up, else show wizard. */
+  /** On open: probe gateway at user-configured port. If healthy → status panel, else → wizard. */
   private async _initHtml(iconUri: vscode.Uri): Promise<void> {
     const webviewIconUri = this._panel.webview.asWebviewUri(iconUri).toString();
 
-    // Quick synchronous check — is the container running at all?
-    const containerRunning = (() => {
+    // Load saved user config and probe the gateway at the configured port
+    const config = await this._loadConfig();
+    const port = parseInt(config.port, 10) || DEFAULT_HOST_PORT;
+    const host = config.bindHost === '0.0.0.0' ? '127.0.0.1' : (config.bindHost || '127.0.0.1');
+
+    const gatewayHealthy = (() => {
       try {
         const result = cp.spawnSync(
-          'docker',
-          ['ps', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.Status}}'],
+          'curl', ['-sf', '-o', '/dev/null', '-w', '%{http_code}', `http://${host}:${port}/health`, '--max-time', '2'],
           { timeout: 5000, windowsHide: true },
         );
-        const st = (result.stdout?.toString() ?? '').trim();
-        return st.length > 0 && st.toLowerCase().startsWith('up');
+        const code = result.stdout?.toString().trim();
+        return code === '200' || code === '204';
       } catch { return false; }
     })();
 
-    if (containerRunning) {
-      // Health check: config file at the known path is the source of truth.
-      const configCheck = cp.spawnSync(
-        'docker',
-        ['exec', CONTAINER, 'test', '-f', '/home/node/.openclaw/openclaw.json'],
-        { timeout: 5000, windowsHide: true },
-      );
-      const isConfigured = configCheck.status === 0;
-
-      if (isConfigured) {
-        // Show a loading placeholder immediately so the panel isn't blank
-        // while the async status checks (docker exec calls) run in the background.
-        this._panel.webview.html = this._getLoadingHtml(webviewIconUri);
-        void this._showStatusPanel().catch(() => {
-          // If status panel fails to load, fall back to the wizard so the user
-          // isn't stuck looking at a blank / loading screen.
-          if (!this._disposed) {
-            this._panel.webview.html = this._getHtml(webviewIconUri);
-          }
-        });
-        return;
-      }
-
-      // Container running but config missing — it's broken. Delete it and restart.
-      cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
+    if (gatewayHealthy) {
+      // Gateway is responding at the user-configured port — go straight to status panel
+      this._activeConfig = config;
+      this._panel.webview.html = this._getLoadingHtml(webviewIconUri);
+      void this._showStatusPanel().catch(() => {
+        // If status panel fails to load, fall back to the wizard
+        if (!this._disposed) {
+          this._panel.webview.html = this._getConfigHtml(webviewIconUri, config);
+        }
+      });
+      return;
     }
 
-    // Container not running (or was deleted above) — show config step first
-    this._activeConfig = await this._loadConfig();
+    // Gateway not responding — show config step with saved user config
+    this._activeConfig = config;
     this._configStep = 0;
     this._configDraft = null;
     this._panel.webview.html = this._getConfigHtml(webviewIconUri, this._activeConfig);
@@ -806,15 +771,14 @@ ${logs.substring(0, 3000)}
     };
 
     try {
-      // Save docker-compose.yml first
-      this._saveDockerCompose();
-      const dockerDir = getDockerDir(this._extensionUri);
+      const composeFile = this._getComposeFilePath();
+      const env = this._getComposeEnv();
 
-      logCmd(`$ docker-compose pull\n`);
-      log(`Pulling ${this._image}...\n`);
+      logCmd(`$ docker compose -f docker-compose.openclaw.yml pull --ignore-buildable\n`);
+      log(`Pulling images...\n`);
       const pullCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker-compose', ['pull'], {
-          cwd: dockerDir,
+        const proc = cp.spawn('docker', ['compose', '-f', composeFile, 'pull', '--ignore-buildable'], {
+          env,
           windowsHide: true,
         });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
@@ -822,8 +786,11 @@ ${logs.substring(0, 3000)}
         proc.on('close', (code) => resolve(code ?? -1));
         proc.on('error', () => resolve(-1));
       });
-      if (pullCode !== 0) { fail(`Failed to pull ${this._image}. Check your internet connection.`); return; }
-      log(`\n✓ Image ready\n`);
+      if (pullCode !== 0) {
+        log(`\n⚠ Pull returned non-zero (buildable images will be built during start)\n`);
+      } else {
+        log(`\n✓ Images ready\n`);
+      }
 
       // Ensure state directory exists on the host
       try { fs.mkdirSync(this._dataDir, { recursive: true }); } catch { /* ok */ }
@@ -835,7 +802,7 @@ ${logs.substring(0, 3000)}
     }
   }
 
-  // ── Step 3: Onboard (one-shot container) ──────────────────────────────────
+  // ── Step 3: Onboard (compose up — the compose command handles onboarding) ─
 
   private async _handleOnboard(): Promise<void> {
     // Reset logs for this onboard attempt
@@ -862,27 +829,20 @@ ${logs.substring(0, 3000)}
     };
 
     try {
-      const dockerDir = getDockerDir(this._extensionUri);
+      const composeFile = this._getComposeFilePath();
+      const env = this._getComposeEnv();
 
-      logCmd(`$ docker-compose run --rm ${CONTAINER} openclaw onboard ...\n`);
-      log('Running OpenClaw onboard in container...\n');
+      // Ensure state directory exists on the host
+      try { fs.mkdirSync(this._dataDir, { recursive: true }); } catch { /* ok */ }
+
+      const args = ['-f', composeFile, 'up', '-d'];
+      if (this._freshBuild) { args.push('--build'); }
+
+      logCmd(`$ docker compose -f docker-compose.openclaw.yml up -d${this._freshBuild ? ' --build' : ''}\n`);
+      log('Starting gateway services (gateway, postgres, redis)...\n');
       const code = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker-compose', [
-          'run', '--rm',
-          CONTAINER,
-          'openclaw', 'onboard',
-          '--non-interactive', '--accept-risk',
-          '--flow', 'quickstart',
-          '--auth-choice', 'custom-api-key',
-          '--custom-base-url', 'https://occ.mba.sh/v1',
-          '--custom-api-key', '',
-          '--custom-model-id', 'occ-legacy',
-          '--custom-compatibility', 'openai',
-          '--gateway-auth', 'token',
-          '--gateway-port', String(this._containerPort),
-          '--skip-channels', '--skip-skills', '--skip-health',
-        ], {
-          cwd: dockerDir,
+        const proc = cp.spawn('docker', ['compose', ...args], {
+          env,
           windowsHide: true,
         });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
@@ -892,9 +852,11 @@ ${logs.substring(0, 3000)}
       });
 
       if (code !== 0) {
-        fail('Onboard failed. See the error log for details.');
+        fail('Services failed to start. See the log above for details.');
         return;
       }
+
+      log('✓ Services started\n');
 
       // Write logs to file for troubleshooting
       const logDir = path.join(os.homedir(), '.openclaw');
@@ -902,48 +864,13 @@ ${logs.substring(0, 3000)}
       try {
         fs.mkdirSync(logDir, { recursive: true });
         const timestamp = new Date().toISOString();
-        const logContent = `[${timestamp}] Docker Setup Onboard Logs\n${'='.repeat(60)}\n\n${this._onboardLogs.join('')}\n`;
+        const logContent = `[${timestamp}] Docker Setup Logs\n${'='.repeat(60)}\n\n${this._onboardLogs.join('')}\n`;
         fs.writeFileSync(logPath, logContent, 'utf-8');
-        log(`\n✓ Logs saved to: ${logPath}\n`);
+        log(`✓ Logs saved to: ${logPath}\n`);
         try { this._panel.webview.postMessage({ type: 'onboardLogsPath', path: logPath }); } catch { /* ignore */ }
       } catch (err) {
         log(`\nWarning: Failed to save logs: ${String(err)}\n`);
       }
-
-      // Patch occ-legacy model metadata in the config written to data dir
-      log('\nPatching model config...\n');
-      try {
-        const cfgPath = path.join(this._dataDir, 'openclaw.json');
-        if (fs.existsSync(cfgPath)) {
-          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
-          const OCC_LEGACY_COST = { input: 0.0000006, output: 0.000003, cacheRead: 0.0000001, cacheWrite: 0 };
-          const patchModel = (obj: unknown): void => {
-            if (!obj || typeof obj !== 'object') return;
-            if (Array.isArray(obj)) { obj.forEach(patchModel); return; }
-            const o = obj as Record<string, unknown>;
-            if (o['id'] === 'occ-legacy') {
-              o['name']          = 'occ-legacy';
-              o['reasoning']     = false;
-              o['input']         = ['text'];
-              o['cost']          = { ...OCC_LEGACY_COST };
-              o['contextWindow'] = 262144;
-              o['maxTokens']     = 262144;
-              return;
-            }
-            Object.values(o).forEach(patchModel);
-          };
-          patchModel(cfg);
-          fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
-        }
-      } catch { /* non-fatal */ }
-
-      // Write moltpilot-tier.json into the data dir
-      try {
-        fs.writeFileSync(
-          path.join(this._dataDir, 'moltpilot-tier.json'),
-          JSON.stringify({ tier: 'free', grantedAt: new Date().toISOString(), limitUsd: 1.00 }),
-        );
-      } catch { /* non-fatal */ }
 
       log('\n✓ Onboard complete!\n');
       try { this._panel.webview.postMessage({ type: 'onboardDone' }); } catch { /* ignore */ }
@@ -952,67 +879,63 @@ ${logs.substring(0, 3000)}
     }
   }
 
-  // ── Step 4: Launch persistent gateway container ───────────────────────────
+  // ── Step 4: Verify gateway is healthy ────────────────────────────────────
 
   private async _handleLaunchGateway(): Promise<void> {
     const log = (text: string, isErr = false) => {
       try { this._panel.webview.postMessage({ type: 'launchLog', text, isErr }); } catch { /* ignore */ }
-    };
-    const logCmd = (text: string) => {
-      try { this._panel.webview.postMessage({ type: 'launchLog', text, isCmd: true }); } catch { /* ignore */ }
     };
     const fail = (text: string) => {
       try { this._panel.webview.postMessage({ type: 'dockerError', text }); } catch { /* ignore */ }
     };
 
     try {
-      // Remove any existing stopped container with this name
+      const composeFile = this._getComposeFilePath();
+      const env = this._getComposeEnv();
+
+      // Services were started in Step 3. Verify the gateway is up.
       const existing = cp.spawnSync('docker', ['ps', '-a', '--filter', `name=^/${CONTAINER}$`, '--format', '{{.Status}}'], { timeout: 8000, windowsHide: true });
       const existingStatus = existing.stdout?.toString().trim() ?? '';
 
-      if (existingStatus) {
-        if (existingStatus.toLowerCase().startsWith('up')) {
-          // Health check: config file must exist before we consider the container healthy.
-          const configCheck = cp.spawnSync(
-            'docker',
-            ['exec', CONTAINER, 'test', '-f', '/home/node/.openclaw/openclaw.json'],
-            { timeout: 5000, windowsHide: true },
-          );
-          if (configCheck.status === 0) {
-            log(`✓ Container ${CONTAINER} is already running and configured\n`);
-            try { this._panel.webview.postMessage({ type: 'launchDone' }); } catch { /* ignore */ }
-            setTimeout(() => void this._showStatusPanel(), 1200);
-            return;
-          }
-          // Running but not configured — delete and restart from Step 2.
-          log(`Container is running but not configured — removing and restarting setup...\n`);
-          cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
-          try { this._panel.webview.postMessage({ type: 'dockerContainerBroken' }); } catch { /* ignore */ }
-          return;
-        }
-        log(`Removing existing stopped container...\n`);
-        cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
+      if (!existingStatus || !existingStatus.toLowerCase().startsWith('up')) {
+        log(`Gateway not running — restarting...\n`);
+        const upCode = await new Promise<number>((resolve) => {
+          const proc = cp.spawn('docker', ['compose', '-f', composeFile, 'up', '-d'], {
+            env,
+            windowsHide: true,
+          });
+          proc.stdout.on('data', (d: Buffer) => log(d.toString()));
+          proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
+          proc.on('close', (c) => resolve(c ?? -1));
+          proc.on('error', () => resolve(-1));
+        });
+        if (upCode !== 0) { fail('Failed to launch gateway container.'); return; }
       }
 
-      const dockerDir = getDockerDir(this._extensionUri);
+      log(`✓ Gateway container is running\n`);
 
-      logCmd(`$ docker-compose up -d\n`);
-      log(`Starting ${CONTAINER} container (port ${this._hostPort}:${this._containerPort})...\n`);
-      const launchCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker-compose', [
-          'up', '-d',
-        ], {
-          cwd: dockerDir,
-          windowsHide: true,
-        });
-        proc.stdout.on('data', (d: Buffer) => log(d.toString()));
-        proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
-        proc.on('close', (c) => resolve(c ?? -1));
-        proc.on('error', () => resolve(-1));
-      });
+      // Probe the gateway HTTP endpoint at the user-configured port
+      const gatewayUrl = `http://${this._bindHost === '0.0.0.0' ? '127.0.0.1' : this._bindHost}:${this._hostPort}`;
+      log(`Probing gateway at ${gatewayUrl}...\n`);
+      let gatewayReady = false;
+      for (let attempt = 0; attempt < 15; attempt++) {
+        try {
+          const probe = cp.spawnSync('curl', ['-sf', '-o', '/dev/null', '-w', '%{http_code}', `${gatewayUrl}/health`, '--max-time', '2'], { timeout: 5000, windowsHide: true });
+          const code = probe.stdout?.toString().trim();
+          if (code === '200' || code === '204') {
+            gatewayReady = true;
+            break;
+          }
+        } catch { /* retry */ }
+        log('.');
+        await new Promise(r => setTimeout(r, 2000));
+      }
 
-      if (launchCode !== 0) { fail('Failed to launch gateway container.'); return; }
-      log(`✓ Container started\n`);
+      if (!gatewayReady) {
+        log(`\n⚠ Gateway not responding at ${gatewayUrl}/health (may still be starting)\n`);
+      } else {
+        log(`\n✓ Gateway is healthy at ${gatewayUrl}\n`);
+      }
 
       // Swap workspace folder to show STATE_DIR only (removes ~/.openclaw if present)
       try { setActiveOpenClawWorkspaceFolder(this._dataDir); } catch { /* non-fatal */ }
@@ -1319,7 +1242,7 @@ ${logs.substring(0, 3000)}
       const warningMsg = document.getElementById('docker-warning-msg');
 
       if (!result.docker || !result.compose) {
-        warningMsg.textContent = result.error || 'Docker and docker-compose are required.';
+        warningMsg.textContent = result.error || 'Docker with compose plugin is required.';
         warningBanner.classList.add('show');
         document.getElementById('btn-next').disabled = true;
       } else {
@@ -1633,19 +1556,19 @@ ${logs.substring(0, 3000)}
 
   <!-- Step timeline -->
   <div class="steps">
-    <div class="step-item active" id="s1">
+    <div class="step-item active" id="s1" onclick="back()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">1</div>
       <div class="step-label">Docker<br>Check</div>
     </div>
-    <div class="step-item pending" id="s2">
+    <div class="step-item pending" id="s2" onclick="back()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">2</div>
       <div class="step-label">Pull<br>Image</div>
     </div>
-    <div class="step-item pending" id="s3">
+    <div class="step-item pending" id="s3" onclick="back()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">3</div>
       <div class="step-label">Onboard<br>Config</div>
     </div>
-    <div class="step-item pending" id="s4">
+    <div class="step-item pending" id="s4" onclick="back()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">4</div>
       <div class="step-label">Launch<br>Gateway</div>
     </div>
@@ -1705,6 +1628,7 @@ ${logs.substring(0, 3000)}
         <button class="btn-secondary" onclick="reportErrorToGithub()" id="btn-report-github">🐙 Report to GitHub</button>
         <button class="btn-secondary" onclick="viewErrorLog()" id="btn-view-log" style="display:none;">📄 View Error Log</button>
         <button class="btn-retry" onclick="retry()">🔄 Retry</button>
+        <button class="btn-secondary" onclick="back()">← Back</button>
       </div>
     </div>
 
