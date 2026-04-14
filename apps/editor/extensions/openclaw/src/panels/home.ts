@@ -395,9 +395,15 @@ export class HomePanel {
       isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
     } catch { /* docker not available */ }
 
-    // Both hosts active → show the hosts overview (live status picker).
-    // Also always show it when forcePicker is set (e.g. after disconnect).
-    if ((isConfigured && isDockerRunning) || this._forcePicker) {
+    // Probe the gateway HTTP endpoint — used below to skip the setup picker
+    // when a gateway is already reachable (e.g. container running, editor reloaded).
+    const isGatewayReachable = !isConfigured && !isDockerRunning
+      ? (await this._checkGatewayStatusRaw()) === 'running'
+      : false;
+
+    // Show hosts overview when Docker container is up (regardless of local config),
+    // or when both modes are active, or when forced (e.g. after disconnect).
+    if (isDockerRunning || this._forcePicker) {
       this._stopPolling();
       let localPort = 18789;
       try {
@@ -412,8 +418,10 @@ export class HomePanel {
       return;
     }
 
-    // Show unified setup view when OpenClaw is not fully configured yet.
-    if (!isConfigured) {
+    // Show unified setup view only when there is no evidence of a running gateway.
+    // If the gateway is already reachable (e.g. container running, editor reloaded after
+    // setup) skip straight to the dashboard so the user doesn't see the host picker again.
+    if (!isConfigured && !isGatewayReachable) {
       this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
       this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
     } else {
