@@ -455,6 +455,48 @@ export class DockerSetupPanel {
     return { docker, compose };
   }
 
+  /** Generate docker-compose.yml for the gateway */
+  private _generateDockerCompose(): string {
+    return `version: '3.8'
+
+services:
+  ${CONTAINER}:
+    image: ${this._image}
+    container_name: ${CONTAINER}
+    restart: unless-stopped
+    ports:
+      - "${this._hostPort}:${this._containerPort}"
+    volumes:
+      - ${this._dataDir}:/home/node/.openclaw
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    command: tail -f /dev/null
+    networks:
+      - occ-network
+
+networks:
+  occ-network:
+    driver: bridge
+`;
+  }
+
+  /** Save docker-compose.yml to the docker directory */
+  private _saveDockerCompose(): void {
+    const dockerDir = getDockerDir(this._extensionUri);
+    const composeFile = path.join(dockerDir, 'docker-compose.yml');
+
+    try {
+      fs.mkdirSync(dockerDir, { recursive: true });
+      fs.writeFileSync(composeFile, this._generateDockerCompose(), 'utf-8');
+    } catch (err) {
+      console.error('Failed to save docker-compose.yml:', err);
+    }
+  }
+
   // ── Config Message Handlers ────────────────────────────────────────────────
 
   private async _handleCheckDockerEnvironment(): Promise<void> {
@@ -764,10 +806,17 @@ ${logs.substring(0, 3000)}
     };
 
     try {
-      logCmd(`$ docker pull ${this._image}\n`);
+      // Save docker-compose.yml first
+      this._saveDockerCompose();
+      const dockerDir = getDockerDir(this._extensionUri);
+
+      logCmd(`$ docker-compose pull\n`);
       log(`Pulling ${this._image}...\n`);
       const pullCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', ['pull', this._image], { windowsHide: true });
+        const proc = cp.spawn('docker-compose', ['pull'], {
+          cwd: dockerDir,
+          windowsHide: true,
+        });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
         proc.stderr.on('data', (d: Buffer) => log(d.toString()));
         proc.on('close', (code) => resolve(code ?? -1));
@@ -813,16 +862,14 @@ ${logs.substring(0, 3000)}
     };
 
     try {
-      logCmd(`$ docker run --rm \\\n    -v ${this._volumeMount} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${this._image} \\\n    openclaw onboard --non-interactive --accept-risk \\\n    --flow quickstart --auth-choice custom-api-key \\\n    --custom-base-url https://occ.mba.sh/v1 \\\n    --gateway-auth token --gateway-port ${this._containerPort}\n`);
+      const dockerDir = getDockerDir(this._extensionUri);
+
+      logCmd(`$ docker-compose run --rm ${CONTAINER} openclaw onboard ...\n`);
       log('Running OpenClaw onboard in container...\n');
       const code = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', [
+        const proc = cp.spawn('docker-compose', [
           'run', '--rm',
-          '-v', this._volumeMount,
-          '--security-opt', 'no-new-privileges',
-          '--cap-drop', 'ALL',
-          '--cap-add', 'NET_BIND_SERVICE',
-          this._image,
+          CONTAINER,
           'openclaw', 'onboard',
           '--non-interactive', '--accept-risk',
           '--flow', 'quickstart',
@@ -834,7 +881,10 @@ ${logs.substring(0, 3000)}
           '--gateway-auth', 'token',
           '--gateway-port', String(this._containerPort),
           '--skip-channels', '--skip-skills', '--skip-health',
-        ], { windowsHide: true });
+        ], {
+          cwd: dockerDir,
+          windowsHide: true,
+        });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
         proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
         proc.on('close', (c) => resolve(c ?? -1));
@@ -944,21 +994,17 @@ ${logs.substring(0, 3000)}
         cp.spawnSync('docker', ['rm', '-f', CONTAINER], { timeout: 10000, windowsHide: true });
       }
 
-      logCmd(`$ docker run -d \\\n    --name ${CONTAINER} \\\n    --restart unless-stopped \\\n    -p ${this._hostPort}:${this._containerPort} \\\n    -v ${this._volumeMount} \\\n    --security-opt no-new-privileges \\\n    --cap-drop ALL \\\n    --cap-add NET_BIND_SERVICE \\\n    ${this._image} \\\n    tail -f /dev/null\n`);
+      const dockerDir = getDockerDir(this._extensionUri);
+
+      logCmd(`$ docker-compose up -d\n`);
       log(`Starting ${CONTAINER} container (port ${this._hostPort}:${this._containerPort})...\n`);
       const launchCode = await new Promise<number>((resolve) => {
-        const proc = cp.spawn('docker', [
-          'run', '-d',
-          '--name', CONTAINER,
-          '--restart', 'unless-stopped',
-          '-p', `${this._hostPort}:${this._containerPort}`,
-          '-v', this._volumeMount,
-          '--security-opt', 'no-new-privileges',
-          '--cap-drop', 'ALL',
-          '--cap-add', 'NET_BIND_SERVICE',
-          this._image,
-          'tail', '-f', '/dev/null',
-        ], { windowsHide: true });
+        const proc = cp.spawn('docker-compose', [
+          'up', '-d',
+        ], {
+          cwd: dockerDir,
+          windowsHide: true,
+        });
         proc.stdout.on('data', (d: Buffer) => log(d.toString()));
         proc.stderr.on('data', (d: Buffer) => log(d.toString(), true));
         proc.on('close', (c) => resolve(c ?? -1));
