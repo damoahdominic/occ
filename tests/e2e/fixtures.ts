@@ -131,7 +131,17 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
       let browser: Browser;
       let ownsBrowser = false;
 
-      const endpoint = REMOTE_ENDPOINT ?? await detectLocalChrome();
+      let endpoint = REMOTE_ENDPOINT ?? await detectLocalChrome();
+
+      // 5-second CDP retry loop: handle transient startup delays
+      // (e.g., Playwright container slow to bind port 9225)
+      if (!endpoint) {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          endpoint = await detectLocalChrome();
+          if (endpoint) break;
+        }
+      }
 
       if (endpoint) {
         try {

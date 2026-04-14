@@ -11,8 +11,12 @@
  * The stepper is always visible at the top showing progress.
  */
 
-import { test, expect, type FrameLocator, withCDP } from './fixtures';
+import { test, expect, type FrameLocator, type Page, withCDP } from './fixtures';
 import { waitForHomePanelTab, getInnerFrame } from './test-utils';
+
+const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:9888';
+const WORKSPACE_URL = process.env.VSCODE_WORKSPACE_URL ??
+  `${BASE_URL}/?workspace=/root/.occ/My%20OpenClaw%20Workspace.code-workspace`;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,7 +28,7 @@ import { waitForHomePanelTab, getInnerFrame } from './test-utils';
  * in-place — no panel dispose/recreate.
  */
 async function clickDockerCard(page: Page): Promise<FrameLocator> {
-  await page.goto('/');
+  await page.goto(WORKSPACE_URL);
   await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 
   // Open the home panel
@@ -52,7 +56,7 @@ async function clickDockerCard(page: Page): Promise<FrameLocator> {
 // ---------------------------------------------------------------------------
 
 test('docker card is visible in host picker', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(WORKSPACE_URL);
   await page.locator('.monaco-workbench').waitFor({ timeout: 30_000 });
 
   await page.keyboard.press('F1');

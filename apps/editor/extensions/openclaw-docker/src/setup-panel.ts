@@ -142,8 +142,20 @@ export class DockerSetupPanel {
 
         // Handle config flow messages
         switch (msg.command) {
+          case 'dockerCheckEnvironment':
+            await this._handleCheckDockerEnvironment();
+            break;
+          case 'openDockerDocs':
+            await vscode.env.openExternal(vscode.Uri.parse('https://docs.docker.com/get-docker/'));
+            break;
+          case 'dockerReportError':
+            await this._handleReportError(msg as unknown as { error: string; logs: string; systemInfo: unknown; timestamp: string });
+            break;
           case 'dockerBrowseDir':
             await this._handleBrowseDir();
+            break;
+          case 'dockerValidateFields':
+            await this._handleValidateFields(msg as unknown as { image: string; port: string; dataDir: string; bindHost: string });
             break;
           case 'dockerSaveConfig':
             this._handleSaveConfig(msg as unknown as { image: string; port: string; dataDir: string; freshBuild: boolean; bindHost: string });
@@ -253,7 +265,7 @@ export class DockerSetupPanel {
     fs.renameSync(tempPath, configPath);
   }
 
-  /** Validate config values */
+  /** Validate config values - returns all validation errors */
   private _validateConfig(config: DockerConfig): string | null {
     const port = parseInt(config.port, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
@@ -268,7 +280,271 @@ export class DockerSetupPanel {
     return null;
   }
 
+  /** Run all validation checks for form fields */
+  private async _runValidationChecks(config: Partial<DockerConfig>): Promise<{ [key: string]: string | null }> {
+    const errors: { [key: string]: string | null } = {
+      image: null,
+      port: null,
+      bindHost: null,
+      dataDir: null,
+    };
+
+    // Validate image
+    if (!config.image || config.image.trim() === '') {
+      errors.image = 'Docker image is required';
+    } else if (!config.image.includes(':')) {
+      errors.image = 'Image must include a tag (e.g., :latest)';
+    }
+
+    // Validate port
+    if (!config.port || config.port.trim() === '') {
+      errors.port = 'Port is required';
+    } else {
+      const port = parseInt(config.port, 10);
+      if (isNaN(port) || port < 1024 || port > 65535) {
+        errors.port = 'Port must be between 1024 and 65535';
+      } else if (await this._isPortInUse(port)) {
+        errors.port = `Port ${port} is already in use`;
+      }
+    }
+
+    // Validate bindHost
+    if (config.bindHost && config.bindHost !== '127.0.0.1' && config.bindHost !== '0.0.0.0') {
+      errors.bindHost = 'Bind host must be 127.0.0.1 or 0.0.0.0';
+    }
+
+    // Validate dataDir
+    if (!config.dataDir || config.dataDir.trim() === '') {
+      errors.dataDir = 'Data directory is required';
+    } else {
+      const resolvedPath = path.resolve(config.dataDir);
+      const accessError = await this._checkPathAccess(resolvedPath);
+      if (accessError) {
+        errors.dataDir = accessError;
+      } else {
+        const spaceError = await this._checkDiskSpace(resolvedPath);
+        if (spaceError) {
+          errors.dataDir = spaceError;
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  /** Check if a port is in use */
+  private async _isPortInUse(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const result = cp.spawnSync(
+          'sh',
+          ['-c', `netstat -tuln 2>/dev/null | grep -q ":${port} " || lsof -Pi :${port} -sTCP:LISTEN -t >/dev/null 2>&1`],
+          { timeout: 2000, windowsHide: true },
+        );
+        resolve(result.status === 0);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  /** Check path accessibility and writability */
+  private async _checkPathAccess(fsPath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      try {
+        // Check if parent directory exists and is writable
+        const parentDir = path.dirname(fsPath);
+        const result = cp.spawnSync(
+          'test',
+          ['-w', parentDir],
+          { timeout: 1000, windowsHide: true },
+        );
+
+        if (result.status === 0) {
+          resolve(null);
+        } else {
+          resolve(`No write permission for ${parentDir}. Check directory permissions or choose a different path.`);
+        }
+      } catch {
+        resolve(`Unable to access path: ${fsPath}`);
+      }
+    });
+  }
+
+  /** Check available disk space (minimum 5GB) */
+  private async _checkDiskSpace(fsPath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      try {
+        const parentDir = path.dirname(fsPath);
+        const result = cp.spawnSync(
+          'df',
+          ['-B1', parentDir],
+          { timeout: 2000, windowsHide: true, encoding: 'utf-8' },
+        );
+
+        if (result.status === 0 && result.stdout) {
+          const lines = result.stdout.trim().split('\n');
+          if (lines.length > 1) {
+            const parts = lines[1].split(/\s+/);
+            const available = parseInt(parts[3], 10);
+            const requiredBytes = 5 * 1024 * 1024 * 1024; // 5GB
+
+            if (available < requiredBytes) {
+              const availableGB = (available / (1024 * 1024 * 1024)).toFixed(1);
+              resolve(`Insufficient disk space: ${availableGB}GB available, 5GB required`);
+            } else {
+              resolve(null);
+            }
+          }
+        }
+        resolve(null);
+      } catch {
+        resolve(null); // Don't fail on disk space check errors
+      }
+    });
+  }
+
+  /** Check if Docker is installed and available */
+  private async _checkDockerAvailable(): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const result = cp.spawnSync(
+          'docker',
+          ['--version'],
+          { timeout: 2000, windowsHide: true },
+        );
+        resolve(result.status === 0);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  /** Check if docker-compose is installed and available */
+  private async _checkComposeAvailable(): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const result = cp.spawnSync(
+          'docker-compose',
+          ['--version'],
+          { timeout: 2000, windowsHide: true },
+        );
+        resolve(result.status === 0);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  /** Check both Docker and docker-compose availability */
+  private async _checkDockerEnvironment(): Promise<{ docker: boolean; compose: boolean; error?: string }> {
+    const docker = await this._checkDockerAvailable();
+    const compose = await this._checkComposeAvailable();
+
+    if (!docker || !compose) {
+      const missing = [];
+      if (!docker) missing.push('Docker');
+      if (!compose) missing.push('docker-compose');
+      return {
+        docker,
+        compose,
+        error: `${missing.join(' and ')} not found. Please install Docker Desktop: https://docs.docker.com/get-docker/`,
+      };
+    }
+
+    return { docker, compose };
+  }
+
   // ── Config Message Handlers ────────────────────────────────────────────────
+
+  private async _handleCheckDockerEnvironment(): Promise<void> {
+    const result = await this._checkDockerEnvironment();
+    try {
+      this._panel.webview.postMessage({ type: 'dockerEnvironmentCheck', result });
+    } catch { /* ignore */ }
+  }
+
+  private async _handleReportError(msg: { error: string; logs: string; systemInfo: unknown; timestamp: string }): Promise<void> {
+    const result = await this._createGithubIssue(msg.error, msg.logs, msg.systemInfo, msg.timestamp);
+    try {
+      this._panel.webview.postMessage({ type: 'dockerErrorReported', result });
+    } catch { /* ignore */ }
+  }
+
+  /** Create GitHub issue for error reporting */
+  private async _createGithubIssue(error: string, logs: string, systemInfo: unknown, timestamp: string): Promise<{ success: boolean; url?: string; error?: string }> {
+    try {
+      // Collect system information
+      const osInfo = `${os.platform()} ${os.release()}`;
+      const dockerVersion = this._getDockerVersion();
+      const composeVersion = this._getComposeVersion();
+
+      const title = `[Docker Setup Error] ${error.substring(0, 60)}...`;
+      const body = `
+## Error Report
+
+**Timestamp:** ${timestamp}
+
+### Error Message
+\`\`\`
+${error}
+\`\`\`
+
+### System Information
+- **OS:** ${osInfo}
+- **Docker:** ${dockerVersion}
+- **Docker Compose:** ${composeVersion}
+- **Node:** ${process.version}
+
+### Configuration
+- **Image:** ${this._image}
+- **Port:** ${this._activeConfig?.port || 'N/A'}
+- **Data Directory:** ${this._activeConfig?.dataDir || 'N/A'}
+- **Bind Host:** ${this._activeConfig?.bindHost || 'N/A'}
+
+### Setup Logs
+\`\`\`
+${logs.substring(0, 3000)}
+\`\`\`
+
+---
+*This issue was automatically created by OCC Docker Setup*
+`;
+
+      // Try to open issue creation page with pre-filled data
+      const issueUrl = `https://github.com/openclaw/openclaw/issues/new?labels=area:docker-setup,type:user-reported&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+      await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+
+      return { success: true, url: issueUrl };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  }
+
+  private _getDockerVersion(): string {
+    try {
+      const result = cp.spawnSync('docker', ['--version'], { timeout: 2000, encoding: 'utf-8', windowsHide: true });
+      return (result.stdout || 'unknown').trim();
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private _getComposeVersion(): string {
+    try {
+      const result = cp.spawnSync('docker-compose', ['--version'], { timeout: 2000, encoding: 'utf-8', windowsHide: true });
+      return (result.stdout || 'unknown').trim();
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private async _handleValidateFields(msg: { image: string; port: string; dataDir: string; bindHost: string }): Promise<void> {
+    const errors = await this._runValidationChecks(msg);
+    try {
+      this._panel.webview.postMessage({ type: 'dockerValidationErrors', errors });
+    } catch { /* ignore */ }
+  }
 
   private async _handleBrowseDir(): Promise<void> {
     const uri = await vscode.window.showOpenDialog({
@@ -829,8 +1105,32 @@ export class DockerSetupPanel {
     .checkbox input { width: 16px; height: 16px; }
     .checkbox label { font-size: 13px; color: #aaa; }
 
-    /* Error */
-    .error { color: #f87171; font-size: 12px; text-align: left; background: rgba(248,113,113,0.07); border: 1px solid rgba(248,113,113,0.2); border-radius: 6px; padding: 10px 14px; width: 100%; }
+    /* Validation */
+    .warning-banner {
+      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;
+      display: none; width: min(420px, 96vw);
+    }
+    .warning-banner.show { display: block; }
+    .warning-banner h3 {
+      font-size: 13px; font-weight: 600; color: #ef4444; margin-bottom: 6px;
+    }
+    .warning-banner p {
+      font-size: 12px; color: #fca5a5; line-height: 1.4; margin: 4px 0;
+    }
+    .warning-banner a {
+      color: #fca5a5; text-decoration: underline; cursor: pointer;
+    }
+    .field-error { border-color: #f87171 !important; }
+    .error-msg { color: #f87171; font-size: 11px; margin-top: 4px; display: none; }
+    .error-msg.show { display: block; }
+    .validation-badge {
+      display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600;
+      padding: 2px 6px; border-radius: 3px;
+    }
+    .validation-badge.validating { color: #888; background: rgba(136,136,136,0.1); }
+    .validation-badge.valid { color: #4ade80; background: rgba(74,222,128,0.1); }
+    .validation-badge.invalid { color: #f87171; background: rgba(248,113,113,0.1); }
 
     /* Buttons */
     .btns { display: flex; gap: 12px; margin-top: 16px; width: min(420px, 96vw); justify-content: center; }
@@ -839,7 +1139,10 @@ export class DockerSetupPanel {
       font-size: 13px; font-weight: 600; padding: 10px 28px; border-radius: 8px;
       cursor: pointer; font-family: inherit; transition: background 0.15s;
     }
-    .btn-next:hover { background: #b91c1c; }
+    .btn-next:hover:not(:disabled) { background: #b91c1c; }
+    .btn-next:disabled {
+      background: #444; color: #666; cursor: not-allowed; opacity: 0.5;
+    }
     .btn-cancel {
       background: transparent; border: 1px solid #333; color: #666;
       font-size: 13px; padding: 10px 20px; border-radius: 8px; cursor: pointer;
@@ -881,31 +1184,42 @@ export class DockerSetupPanel {
     </div>
   </div>
 
+  <!-- Docker environment warning -->
+  <div class="warning-banner" id="docker-warning">
+    <h3>⚠️ Docker Environment Not Found</h3>
+    <p id="docker-warning-msg"></p>
+    <p><a href="#" onclick="openDockerDocs(event)">Install Docker Desktop →</a></p>
+  </div>
+
   <!-- Config form -->
   <div class="form" id="config-form">
     <div class="field">
       <label>Docker Image</label>
-      <input type="text" id="image" value="${config.image}" placeholder="ghcr.io/openclaw/openclaw:latest" />
+      <input type="text" id="image" value="${config.image}" placeholder="ghcr.io/openclaw/openclaw:latest" onchange="validateField('image')" onkeyup="debounceValidate('image')" />
+      <div class="error-msg" id="image-error"></div>
     </div>
     <div class="field-row">
       <div class="field">
         <label>Gateway Port (Host)</label>
-        <input type="number" id="port" value="${config.port}" placeholder="18789" min="1" max="65535" />
+        <input type="number" id="port" value="${config.port}" placeholder="18789" min="1" max="65535" onchange="validateField('port')" onkeyup="debounceValidate('port')" />
+        <div class="error-msg" id="port-error"></div>
       </div>
       <div class="field">
         <label>Bind Host</label>
-        <select id="bindHost">
+        <select id="bindHost" onchange="validateField('bindHost')">
           <option value="127.0.0.1" ${config.bindHost === '127.0.0.1' ? 'selected' : ''}>127.0.0.1 (localhost)</option>
           <option value="0.0.0.0" ${config.bindHost === '0.0.0.0' ? 'selected' : ''}>0.0.0.0 (all interfaces)</option>
         </select>
+        <div class="error-msg" id="bindHost-error"></div>
       </div>
     </div>
     <div class="field">
       <label>Data Directory</label>
       <div class="field-with-btn">
-        <input type="text" id="dataDir" value="${config.dataDir}" placeholder="./openclaw_docker_data" />
+        <input type="text" id="dataDir" value="${config.dataDir}" placeholder="./openclaw_docker_data" onchange="validateField('dataDir')" onkeyup="debounceValidate('dataDir')" />
         <button class="btn-browse" onclick="browseDir()">Browse</button>
       </div>
+      <div class="error-msg" id="dataDir-error"></div>
     </div>
     <div class="field checkbox">
       <input type="checkbox" id="freshBuild" ${config.freshBuild ? 'checked' : ''} />
@@ -916,11 +1230,81 @@ export class DockerSetupPanel {
 
   <div class="btns">
     <button class="btn-cancel" onclick="cancel()">Cancel</button>
-    <button class="btn-next" onclick="next()">Next</button>
+    <button class="btn-next" id="btn-next" onclick="next()" disabled>Next</button>
   </div>
 
   <script>
     const vscode = acquireVsCodeApi();
+    let validationState = { image: null, port: null, bindHost: null, dataDir: null };
+    let validationTimeouts = {};
+
+    function getFormState() {
+      return {
+        image: document.getElementById('image').value,
+        port: document.getElementById('port').value,
+        dataDir: document.getElementById('dataDir').value,
+        bindHost: document.getElementById('bindHost').value,
+      };
+    }
+
+    function debounceValidate(fieldName) {
+      if (validationTimeouts[fieldName]) {
+        clearTimeout(validationTimeouts[fieldName]);
+      }
+      validationTimeouts[fieldName] = setTimeout(() => validateField(fieldName), 500);
+    }
+
+    function validateField(fieldName) {
+      const formState = getFormState();
+      vscode.postMessage({ command: 'dockerValidateFields', ...formState });
+    }
+
+    function checkDockerEnvironment() {
+      vscode.postMessage({ command: 'dockerCheckEnvironment' });
+    }
+
+    function openDockerDocs(event) {
+      event.preventDefault();
+      vscode.postMessage({ command: 'openDockerDocs' });
+    }
+
+    function updateDockerWarning(result) {
+      const warningBanner = document.getElementById('docker-warning');
+      const warningMsg = document.getElementById('docker-warning-msg');
+
+      if (!result.docker || !result.compose) {
+        warningMsg.textContent = result.error || 'Docker and docker-compose are required.';
+        warningBanner.classList.add('show');
+        document.getElementById('btn-next').disabled = true;
+      } else {
+        warningBanner.classList.remove('show');
+        validateField('image');
+      }
+    }
+
+    function updateValidationUI(errors) {
+      validationState = errors;
+
+      // Update error messages and field styling
+      Object.keys(errors).forEach(fieldName => {
+        const errorMsg = document.getElementById(fieldName + '-error');
+        const input = document.getElementById(fieldName);
+        const error = errors[fieldName];
+
+        if (error) {
+          errorMsg.textContent = error;
+          errorMsg.classList.add('show');
+          input.classList.add('field-error');
+        } else {
+          errorMsg.classList.remove('show');
+          input.classList.remove('field-error');
+        }
+      });
+
+      // Update Next button state
+      const allValid = Object.values(errors).every(e => e === null);
+      document.getElementById('btn-next').disabled = !allValid;
+    }
 
     function browseDir() {
       vscode.postMessage({ command: 'dockerBrowseDir' });
@@ -931,15 +1315,13 @@ export class DockerSetupPanel {
     }
 
     function next() {
-      const image = document.getElementById('image').value;
-      const port = document.getElementById('port').value;
-      const dataDir = document.getElementById('dataDir').value;
-      const bindHost = document.getElementById('bindHost').value;
+      const formState = getFormState();
       const freshBuild = document.getElementById('freshBuild').checked;
-      
-      vscode.postMessage({ 
-        command: 'dockerSaveConfig', 
-        image, port, dataDir, freshBuild, bindHost 
+
+      vscode.postMessage({
+        command: 'dockerSaveConfig',
+        ...formState,
+        freshBuild
       });
     }
 
@@ -947,12 +1329,20 @@ export class DockerSetupPanel {
       const msg = e.data;
       if (msg.type === 'dockerBrowseResult') {
         document.getElementById('dataDir').value = msg.path;
+        validateField('dataDir');
+      } else if (msg.type === 'dockerEnvironmentCheck') {
+        updateDockerWarning(msg.result);
+      } else if (msg.type === 'dockerValidationErrors') {
+        updateValidationUI(msg.errors);
       } else if (msg.type === 'dockerConfigError') {
         const err = document.getElementById('error');
         err.textContent = msg.message;
         err.style.display = 'block';
       }
     });
+
+    // Initial checks on load
+    checkDockerEnvironment();
   </script>
 </body>
 </html>`;
@@ -1178,6 +1568,15 @@ export class DockerSetupPanel {
       cursor: pointer; font-family: inherit; transition: background 0.15s;
     }
     .btn-retry:hover { background: #b91c1c; }
+    .btn-secondary {
+      background: transparent; border: 1px solid #333; color: #aaa;
+      font-size: 12px; padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      font-family: inherit; transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-secondary:hover { color: #e0e0e0; border-color: #555; }
+    .error-actions {
+      display: flex; gap: 8px; width: 100%; justify-content: center; flex-wrap: wrap;
+    }
     .done-msg { font-size: 13px; color: #4ade80; font-weight: 600; }
   </style>
 </head>
@@ -1252,9 +1651,14 @@ export class DockerSetupPanel {
     <!-- Error view -->
     <div id="view-error" style="display:none;width:100%;flex-direction:column;align-items:center;gap:12px;">
       <div class="status-err" id="error-text"></div>
-      <div style="display:flex;gap:8px;width:100%;justify-content:center;">
-        <button class="btn-retry" onclick="viewErrorLog()" id="btn-view-log" style="display:none;">View Error Log</button>
-        <button class="btn-retry" onclick="retry()">Retry</button>
+      <div class="log-wrap" id="error-log-wrap">
+        <div class="log-box" id="error-log"></div>
+      </div>
+      <div class="error-actions">
+        <button class="btn-secondary" onclick="copyErrorLogs()" id="btn-copy-logs" style="display:none;">📋 Copy Logs</button>
+        <button class="btn-secondary" onclick="reportErrorToGithub()" id="btn-report-github">🐙 Report to GitHub</button>
+        <button class="btn-secondary" onclick="viewErrorLog()" id="btn-view-log" style="display:none;">📄 View Error Log</button>
+        <button class="btn-retry" onclick="retry()">🔄 Retry</button>
       </div>
     </div>
 
@@ -1303,6 +1707,7 @@ export class DockerSetupPanel {
     }
 
     var lastErrorLogPath = null;
+    var errorLogContent = '';
 
     function showError(text, errorLogPath) {
       lastErrorLogPath = errorLogPath || null;
@@ -1310,6 +1715,21 @@ export class DockerSetupPanel {
       var ev = document.getElementById('view-error');
       ev.style.display = 'flex';
       document.getElementById('error-text').textContent = text;
+
+      // Copy all accumulated logs to error view
+      var errorLogBox = document.getElementById('error-log');
+      var allLogs = document.querySelectorAll('.log-box');
+      var hasLogs = false;
+      allLogs.forEach(function(logBox, index) {
+        logBox.querySelectorAll('.log-line').forEach(function(line) {
+          var logLine = document.createElement('div');
+          logLine.className = line.className;
+          logLine.textContent = line.textContent;
+          errorLogBox.appendChild(logLine);
+          hasLogs = true;
+        });
+      });
+
       // Show View Error Log button only if we have a log path
       var btnViewLog = document.getElementById('btn-view-log');
       if (errorLogPath) {
@@ -1317,6 +1737,78 @@ export class DockerSetupPanel {
       } else {
         btnViewLog.style.display = 'none';
       }
+
+      // Show copy logs button if we have any logs
+      var btnCopyLogs = document.getElementById('btn-copy-logs');
+      if (hasLogs || errorLogBox.children.length > 0) {
+        btnCopyLogs.style.display = 'inline-block';
+        document.getElementById('error-log-wrap').style.display = 'block';
+      }
+    }
+
+    function getErrorLogs() {
+      var errorLogBox = document.getElementById('error-log');
+      if (!errorLogBox) return '';
+      var lines = [];
+      errorLogBox.querySelectorAll('.log-line').forEach(function(el) {
+        lines.push(el.textContent);
+      });
+      // If no logs in error box, try to gather from visible logs
+      if (lines.length === 0) {
+        var allLogBoxes = document.querySelectorAll('.log-box');
+        allLogBoxes.forEach(function(box) {
+          box.querySelectorAll('.log-line').forEach(function(el) {
+            lines.push(el.textContent);
+          });
+        });
+      }
+      return lines.join('\\n');
+    }
+
+    function copyErrorLogs() {
+      var logs = getErrorLogs();
+      if (!logs) {
+        // Try to get from any visible log box
+        var logBoxes = document.querySelectorAll('.log-box');
+        var allLogs = [];
+        logBoxes.forEach(function(box) {
+          box.querySelectorAll('.log-line').forEach(function(el) {
+            allLogs.push(el.textContent);
+          });
+        });
+        logs = allLogs.join('\\n');
+      }
+
+      if (logs) {
+        navigator.clipboard.writeText(logs).then(function() {
+          alert('Error logs copied to clipboard');
+        }).catch(function() {
+          alert('Failed to copy logs');
+        });
+      }
+    }
+
+    function reportErrorToGithub() {
+      var errorText = document.getElementById('error-text').textContent;
+      var logs = getErrorLogs();
+      var systemInfo = getSystemInfo();
+
+      vscode.postMessage({
+        command: 'dockerReportError',
+        error: errorText,
+        logs: logs,
+        systemInfo: systemInfo,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    function getSystemInfo() {
+      // This will be populated by the extension with actual system info
+      return {
+        platform: 'linux', // placeholder - will be set by extension
+        nodeVersion: '20.x',
+        timestamp: new Date().toISOString(),
+      };
     }
 
     function viewErrorLog() {
