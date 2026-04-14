@@ -229,7 +229,14 @@ curl -s http://localhost:3080/ | head -5
 
 ### Connection refused
 
-The noVNC container needs to be started with port 3080 exposed:
+⚠️ **DEPRECATED:** Use `docker-compose.openclaw.yml` instead of `docker run`
+
+The MCP browser container should be started via the gateway infrastructure:
+```bash
+docker-compose -f docker/docker-compose.openclaw.yml up -d
+```
+
+Legacy `docker run` approach (not recommended):
 ```bash
 docker run -d --name playwright-novnc \
   --network host \

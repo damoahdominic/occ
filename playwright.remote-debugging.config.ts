@@ -1,7 +1,10 @@
 /**
  * Playwright config for running tests against an existing Chrome via CDP.
  *
- * Requires a browser with remote debugging enabled on port 9222, e.g.:
+ * DEPRECATED: Use docker-compose.openclaw.yml instead:
+ *   docker-compose -f docker/docker-compose.openclaw.yml up -d
+ *
+ * Legacy `docker run` approach (not recommended):
  *   docker run -d --name playwright-novnc --network host \
  *     -e MCP_BROWSER=chromium \
  *     ghcr.io/xtr-dev/mcp-playwright-novnc

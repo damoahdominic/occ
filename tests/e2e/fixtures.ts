@@ -12,9 +12,14 @@
  *   VNC mode  (USE_VNC=1):
  *     USE_VNC=1 npx playwright test --ui --config=playwright.remote-debugging.config.ts
  *     Connects to the Chrome running inside the playwright-novnc container.
- *     Requires the container started with --network=host so port 9222 is on localhost:
+ *
+ *     DEPRECATED: Use docker-compose.openclaw.yml instead:
+ *       docker-compose -f docker/docker-compose.openclaw.yml up -d
+ *
+ *     Legacy `docker run` approach (not recommended):
  *       docker run -d --name playwright-novnc --network host \
  *         -e MCP_BROWSER=chromium ghcr.io/xtr-dev/mcp-playwright-novnc:latest
+ *
  *     Watch the browser live at http://127.0.0.1:6080/vnc.html
  *
  *   CDP mode  (CDP_ENDPOINT=<url>):

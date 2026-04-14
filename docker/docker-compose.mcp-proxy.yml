@@ -1,9 +1,0 @@
-version: '3.8'
-
-services:
-  mcp-proxy:
-    image: ghcr.io/xtr-dev/mcp-playwright-novnc:latest
-    container_name: occ-mcp-proxy
-    network_mode: host
-    stdin_open: true
-    command: mcp-proxy http://localhost:3080/sse
