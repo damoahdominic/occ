@@ -8,6 +8,7 @@
     "packages/control-center"
   ],
   "scripts": {
+    "postinstall": "cd apps/editor && npm install",
     "dev": "npm --prefix apps/editor run watch",
     "editor:dev": "npm --prefix apps/editor run editor:dev",
     "dev:react": "npm --prefix apps/editor run watchreact",

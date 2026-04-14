@@ -9,17 +9,16 @@
 set -e
 cd /workspace
 
-echo "[docker] Installing root dependencies..."
-npm i --ignore-scripts
+# One install to rule them all.
+# Root postinstall cascades into apps/editor → build/npm/postinstall.js which
+# installs build/, remote/, and ~45 extension dirs in parallel.
+echo "[docker] Installing all dependencies..."
+npm install
 
 cd /workspace/apps/editor
 
-echo "[docker] Installing editor dependencies..."
-npm i --ignore-scripts
-
-# @vscode/ripgrep downloads its rg binary via a postinstall script which is
-# skipped by --ignore-scripts.  The Docker image has system ripgrep from apt,
-# so we symlink it to the expected location instead of hitting the network.
+# @vscode/ripgrep downloads its rg binary via postinstall.  The Docker image
+# has system ripgrep from apt, so we symlink it instead of hitting the network.
 if [ -x /usr/bin/rg ]; then
   mkdir -p node_modules/@vscode/ripgrep/bin
   ln -sf /usr/bin/rg node_modules/@vscode/ripgrep/bin/rg
@@ -27,11 +26,19 @@ if [ -x /usr/bin/rg ]; then
 fi
 
 echo "[docker] Starting watch compiler..."
+# Remove stale nls.js so we wait for a fresh compilation, not a leftover from a
+# previous (possibly failed) run.
+rm -f /workspace/apps/editor/out/vs/nls.js
 npm run watch &
 WATCH_PID=$!
 
 echo "[docker] Waiting for initial compilation (out/vs/nls.js)..."
 until [ -f /workspace/apps/editor/out/vs/nls.js ]; do
+  # If the watch process died, bail immediately instead of waiting forever.
+  if ! kill -0 "$WATCH_PID" 2>/dev/null; then
+    echo "[docker] ERROR: watch compiler exited before compilation finished"
+    exit 1
+  fi
   sleep 3
 done
 # Give esbuild a moment to flush the remaining file writes before the server
