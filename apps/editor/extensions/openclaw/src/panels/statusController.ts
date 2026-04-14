@@ -451,6 +451,11 @@ export class StatusPanelController {
       if (args && args.length > 0) {
         void vscode.commands.executeCommand('void.openChatWithMessage', args[0], 'agent');
       }
+    } else if (msg.command === 'openclaw.configure') {
+      void vscode.commands.executeCommand('openclaw.configure').catch(err => {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(`Failed to open web control: ${errorMsg}`);
+      });
     } else {
       return false;
     }
