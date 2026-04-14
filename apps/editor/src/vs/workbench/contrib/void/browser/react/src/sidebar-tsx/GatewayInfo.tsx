@@ -21,12 +21,19 @@ export const GatewayInfo: React.FC<{ isDevMode?: boolean }> = ({ isDevMode = fal
 
   useEffect(() => {
     const checkGateway = async () => {
-      try {
-        // Try to fetch gateway info from localhost:18789 with timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
+      setGatewayStatus(prev => ({ ...prev, status: 'connecting' }));
 
+      // Retry logic: 5 attempts with 1-second delay between attempts
+      const maxRetries = 5;
+      const retryDelay = 1000; // 1 second
+      let lastError: string | null = null;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
+          // Try to fetch gateway info from localhost:18789 with 2-second timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+
           const response = await fetch('http://127.0.0.1:18789/info', {
             method: 'GET',
             signal: controller.signal,
@@ -41,18 +48,35 @@ export const GatewayInfo: React.FC<{ isDevMode?: boolean }> = ({ isDevMode = fal
               health: data.health || 'healthy',
               volumes: data.volumes || [],
             });
+            console.log(`[GatewayInfo] Connected on attempt ${attempt + 1}/${maxRetries}`);
+            return; // Success - exit early
           } else {
-            setGatewayStatus(prev => ({ ...prev, status: 'unavailable' }));
+            // Check for transient errors (409, 502, 503)
+            const isTransient = [409, 502, 503].includes(response.status);
+            if (!isTransient) {
+              lastError = `HTTP ${response.status}`;
+              setGatewayStatus(prev => ({ ...prev, status: 'unavailable' }));
+              return; // Permanent error - exit early
+            }
           }
-        } catch {
-          clearTimeout(timeoutId);
-          // Gateway not available
-          setGatewayStatus(prev => ({ ...prev, status: 'unavailable' }));
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : 'Unknown error';
+          // Log but continue retrying
+          console.log(`[GatewayInfo] Attempt ${attempt + 1}/${maxRetries} failed: ${lastError}`);
         }
-      } catch {
-        // Outer catch for any unexpected errors
-        setGatewayStatus(prev => ({ ...prev, status: 'unavailable' }));
+
+        // Wait before retrying (except on last attempt)
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
       }
+
+      // All retries exhausted
+      console.log(`[GatewayInfo] All ${maxRetries} retry attempts failed`);
+      setGatewayStatus({
+        status: 'unavailable',
+        health: lastError || 'Unable to connect',
+      });
     };
 
     checkGateway();
