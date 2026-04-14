@@ -9,19 +9,8 @@ import type { HostConnection, OpenClawCoreAPI } from '../hosts/types';
 import { DefaultLocalHostConnection } from '../hosts/localDefault';
 import { renderStatusHtml } from './statusHtml';
 import { setActiveOpenClawWorkspaceFolder, closeFilesFromDir } from './statusController';
-import { ErrorReporter } from '../errorReporting';
-import { ErrorCode } from '../errorCodes';
 
 type GatewayStatus = 'checking' | 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting' | 'errored' | 'ai-fixing';
-
-// Interface for Docker configuration data collected in Step 1.
-interface DockerConfig {
-  image: string;
-  port: string;
-  dataDir: string;
-  bindAddress: string;
-  freshBuild: boolean;
-}
 
 // ── Persistent diagnostics log ────────────────────────────────────────────────
 const LOG_PATH     = path.join(os.homedir(), '.openclaw', 'occ-home.log');
@@ -121,10 +110,6 @@ export class HomePanel {
   private _coreAPI: OpenClawCoreAPI | undefined;
   /** When true, always show the host picker — never auto-route to a single installed host. */
   private _forcePicker = false;
-  /** Tracks if we are in the Docker config flow and current step (1, 2, or 3). */
-  private _dockerConfigStep: number | null = null;
-  /** Stores the Docker config from step 1 to use in step 2. */
-  private _dockerConfig: DockerConfig | null = null;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, forcePicker = false) {
     this._forcePicker = forcePicker;
@@ -170,7 +155,7 @@ export class HomePanel {
     homeWatcher.onDidCreate(() => void this._update(), null, this._disposables);
     homeWatcher.onDidDelete(() => void this._update(), null, this._disposables);
     this._disposables.push(homeWatcher);
-    this._panel.webview.onDidReceiveMessage(async msg => {
+    this._panel.webview.onDidReceiveMessage(msg => {
       if (msg.command === 'gatewayAction') {
         void this._handleGatewayAction(msg.action as 'start' | 'stop' | 'restart');
       } else if (msg.command === 'checkVersion') {
@@ -281,55 +266,18 @@ export class HomePanel {
         }
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
-        if (t === 'docker') {
-          // Show Docker config Step 1 in-panel (no dispose/recreate).
-          this._renderDockerConfigStep(1);
-        } else {
-          // Best-effort: close files from the other host's dir (non-blocking).
-          if (t === 'local') { void closeFilesFromDir(path.join(os.homedir(), 'Desktop', 'occ-state-dir')); }
-          // Close the picker immediately — the adapter panel takes over as the sole OCC Home tab.
-          this.dispose();
-          if (t === 'local') {
-            void vscode.commands.executeCommand('openclaw.host.setup.local');
-          } else if (t === 'ssh') {
-            void vscode.commands.executeCommand('openclaw.host.setup.ssh');
-          }
+        // Best-effort: close files from the other host's dir (non-blocking).
+        if (t === 'local') { void closeFilesFromDir(path.join(os.homedir(), 'Desktop', 'occ-state-dir')); }
+        else if (t === 'docker') { void closeFilesFromDir(path.join(os.homedir(), '.openclaw')); }
+        // Close the picker immediately — the adapter panel takes over as the sole OCC Home tab.
+        this.dispose();
+        if (t === 'local') {
+          void vscode.commands.executeCommand('openclaw.host.setup.local');
+        } else if (t === 'docker') {
+          void vscode.commands.executeCommand('openclaw.host.setup.docker');
+        } else if (t === 'ssh') {
+          void vscode.commands.executeCommand('openclaw.host.setup.ssh');
         }
-      } else if (msg.command === 'dockerAdvance') {
-        // User filled Step 1 and clicked Next
-        const config = msg.config as DockerConfig;
-        this._dockerConfig = config;
-        this._renderDockerConfigStep(2, config);
-      } else if (msg.command === 'dockerBack') {
-        // From Step 2, go back to Step 1
-        this._renderDockerConfigStep(1, this._dockerConfig);
-      } else if (msg.command === 'dockerCancel') {
-        // Return to host picker
-        this._dockerConfigStep = null;
-        this._dockerConfig = null;
-        // Force picker mode to show hosts overview
-        this._forcePicker = true;
-        void this._update();
-      } else if (msg.command === 'dockerConfirmStart') {
-        // From Step 2, confirm and go to Step 3
-        this._renderDockerConfigStep(3, this._dockerConfig);
-        void this._startDockerProvision();
-      } else if (msg.command === 'dockerRetry') {
-        // Retry provisioning from Step 3
-        this._renderDockerConfigStep(3, this._dockerConfig);
-        void this._startDockerProvision();
-      } else if (msg.command === 'dockerBrowse') {
-        const uris = await vscode.window.showOpenDialog({
-          canSelectMany: false,
-          canSelectFiles: false,
-          canSelectFolders: true,
-          openLabel: 'Select Data Directory',
-        });
-        if (uris && uris[0]) {
-          try { this._panel.webview.postMessage({ type: 'setConfigDataDir', path: uris[0].fsPath }); } catch { /* ignore */ }
-        }
-      } else if (msg.command === 'dockerReport') {
-        void this._reportDockerError();
       } else if (msg.command === 'checkHostsStatus') {
         void this._handleCheckHostsStatus();
       }
@@ -378,9 +326,6 @@ export class HomePanel {
     this._outputChannel.dispose();
     this._panel.dispose();
     this._disposables.forEach(d => d.dispose());
-    // Reset Docker config state
-    this._dockerConfigStep = null;
-    this._dockerConfig = null;
   }
 
   private async _update() {
@@ -449,12 +394,6 @@ export class HomePanel {
       const st = (dc.stdout?.toString() ?? '').trim();
       isDockerRunning = st.length > 0 && st.toLowerCase().startsWith('up');
     } catch { /* docker not available */ }
-
-    // If we are in the middle of Docker config flow, re-render current step.
-    if (this._dockerConfigStep !== null) {
-      this._renderDockerConfigStep(this._dockerConfigStep, this._dockerConfig);
-      return;
-    }
 
     // Both hosts active → show the hosts overview (live status picker).
     // Also always show it when forcePicker is set (e.g. after disconnect).
@@ -1189,293 +1128,6 @@ export class HomePanel {
       <span class="loading-text">Checking environment<span class="loading-dots"></span></span>
     </div>
   </body>
-</html>`;
-  }
-
-  private _renderDockerConfigStep(step: number, config: DockerConfig | null = null): void {
-    this._dockerConfigStep = step;
-    this._dockerConfig = config;
-    this._panel.webview.html = this._getDockerConfigHtml(step, config);
-  }
-
-  /** Run docker compose and stream status to the webview. */
-  private async _startDockerProvision(): Promise<void> {
-    const config = this._dockerConfig;
-    if (!config) { return; }
-    const post = (msg: Record<string, unknown>) => {
-      try { this._panel.webview.postMessage(msg); } catch { /* panel disposed */ }
-    };
-
-    try {
-      post({ type: 'provisionStatus', text: 'Starting docker compose...' });
-      const composeFile = path.join(os.homedir(), '.openclaw', 'docker-compose.openclaw.yml');
-      const env: Record<string, string> = {
-        ...process.env as Record<string, string>,
-        OCC_GATEWAY_IMAGE: config.image || 'openclaw/pod',
-        OCC_GATEWAY_PORT: config.port || '18789',
-        OCC_BIND_ADDRESS: config.bindAddress || '127.0.0.1',
-      };
-      if (config.dataDir) { env['OCC_DATA_DIR'] = config.dataDir; }
-
-      const args = ['-f', composeFile, 'up', '-d'];
-      if (config.freshBuild) { args.push('--build'); }
-
-      const proc = cp.spawn('docker', ['compose', ...args], { env, windowsHide: true });
-
-      let stderr = '';
-      proc.stdout?.on('data', (chunk: Buffer) => {
-        post({ type: 'provisionStatus', text: chunk.toString().trim() });
-      });
-      proc.stderr?.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
-        post({ type: 'provisionStatus', text: chunk.toString().trim() });
-      });
-
-      const exitCode = await new Promise<number | null>(resolve => {
-        proc.on('close', resolve);
-        proc.on('error', () => resolve(null));
-      });
-
-      if (exitCode !== 0) {
-        const errMsg = stderr.trim().split('\n').pop() || `docker compose exited with code ${exitCode}`;
-        post({ type: 'provisionError', text: errMsg });
-        return;
-      }
-
-      post({ type: 'provisionDone' });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      post({ type: 'provisionError', text: msg });
-    }
-  }
-
-  /** Send docker provision error to the backend error reporting endpoint. */
-  private async _reportDockerError(): Promise<void> {
-    const post = (msg: Record<string, unknown>) => {
-      try { this._panel.webview.postMessage(msg); } catch { /* panel disposed */ }
-    };
-
-    try {
-      post({ type: 'reportStatus', text: 'Sending report...', ok: true });
-      const report = ErrorReporter.createErrorReport(
-        ErrorCode.ERR_DOCKER_CONTAINER_START,
-        `Docker provision failed. Config: ${JSON.stringify(this._dockerConfig)}`,
-      );
-      await ErrorReporter.sendErrorReport(report, undefined, {
-        onSuccess: () => {
-          post({ type: 'reportStatus', text: 'Report sent — thank you!', ok: true });
-        },
-        onFailure: (err) => {
-          ErrorReporter.storeFailedReport(report);
-          post({ type: 'reportStatus', text: `Send failed (saved locally): ${err.message}`, ok: false });
-        },
-      });
-    } catch {
-      post({ type: 'reportStatus', text: 'Could not send report.', ok: false });
-    }
-  }
-
-  private _getDockerConfigHtml(step: number, config: DockerConfig | null = null): string {
-    const bindAddr = config?.bindAddress || '127.0.0.1';
-
-    // Build only the active step's HTML — inactive steps must NOT appear in the DOM.
-    let stepHtml = '';
-
-    if (step === 1) {
-      stepHtml = `
-    <div id="docker-config-step-1">
-      <h2 style="font-size:18px;color:#fff;margin-bottom:20px;">Docker Configuration</h2>
-      <div style="margin-bottom:20px;">
-        <label for="config-gateway-image" style="display:block;font-size:12px;color:#888;margin-bottom:8px;">Gateway Image</label>
-        <input id="config-gateway-image" type="text" placeholder="openclaw/pod" value="${config?.image || ''}" style="width:100%;background:#111;border:1px solid #333;color:#e0e0e0;padding:10px;border-radius:6px;font-size:14px;">
-      </div>
-      <div style="margin-bottom:20px;">
-        <label for="config-gateway-port" style="display:block;font-size:12px;color:#888;margin-bottom:8px;">Gateway Port</label>
-        <input id="config-gateway-port" type="text" placeholder="18789" value="${config?.port || ''}" style="width:100%;background:#111;border:1px solid #333;color:#e0e0e0;padding:10px;border-radius:6px;font-size:14px;">
-      </div>
-      <div style="margin-bottom:20px;">
-        <label for="config-data-dir" style="display:block;font-size:12px;color:#888;margin-bottom:8px;">Data Directory</label>
-        <input id="config-data-dir" type="text" placeholder="Select a directory..." value="${config?.dataDir || ''}" readonly style="width:100%;background:#111;border:1px solid #333;color:#e0e0e0;padding:10px;border-radius:6px;font-size:14px;cursor:pointer;">
-        <button class="btn btn-secondary" style="margin-top:8px;padding:4px 10px;font-size:12px;" onclick="postMsg({command:'dockerBrowse'})">Browse</button>
-      </div>
-      <div style="margin-bottom:20px;">
-        <label style="display:block;font-size:12px;color:#888;margin-bottom:8px;">Bind Address</label>
-        <div style="display:flex;gap:8px;">
-          <button id="bind-127" class="btn ${bindAddr === '127.0.0.1' ? 'btn-primary' : 'btn-secondary'}" onclick="pickBind('127.0.0.1')">127.0.0.1</button>
-          <button id="bind-all" class="btn ${bindAddr === '0.0.0.0' ? 'btn-primary' : 'btn-secondary'}" onclick="pickBind('0.0.0.0')">0.0.0.0</button>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
-        <input id="config-fresh-build" type="checkbox" ${config?.freshBuild ? 'checked' : ''}>
-        <label for="config-fresh-build" style="font-size:13px;color:#ccc;">Fresh build (slower, latest version)</label>
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:30px;">
-        <button class="btn btn-secondary" onclick="postMsg({command:'dockerCancel'})">Cancel</button>
-        <button class="btn btn-primary" onclick="onNext()">Next</button>
-      </div>
-    </div>`;
-    } else if (step === 2) {
-      const img = config?.image || '';
-      const port = config?.port || '';
-      const dir = config?.dataDir || '';
-      const ba = config?.bindAddress || '127.0.0.1';
-      const fb = config?.freshBuild ? 'Yes' : 'No';
-      stepHtml = `
-    <div id="docker-config-step-2">
-      <h2 style="font-size:18px;color:#fff;margin-bottom:20px;">Confirm Configuration</h2>
-      <div style="margin-bottom:16px;"><label style="font-size:12px;color:#888;">Image</label><div id="confirm-image" style="font-size:16px;color:#e0e0e0;">${img}</div></div>
-      <div style="margin-bottom:16px;"><label style="font-size:12px;color:#888;">Port</label><div id="confirm-port" style="font-size:16px;color:#e0e0e0;">${port}</div></div>
-      <div style="margin-bottom:16px;"><label style="font-size:12px;color:#888;">Data Directory</label><div id="confirm-data-dir" style="font-size:16px;color:#e0e0e0;">${dir}</div></div>
-      <div style="margin-bottom:16px;"><label style="font-size:12px;color:#888;">Bind Address</label><div id="confirm-bind-address" style="font-size:16px;color:#e0e0e0;">${ba}</div></div>
-      <div style="margin-bottom:16px;"><label style="font-size:12px;color:#888;">Fresh Build</label><div id="confirm-fresh-build" style="font-size:16px;color:#e0e0e0;">${fb}</div></div>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:30px;">
-        <button class="btn btn-secondary" onclick="postMsg({command:'dockerBack'})">Back</button>
-        <button id="btn-confirm-config" class="btn btn-primary" onclick="postMsg({command:'dockerConfirmStart'})">Confirm & Start</button>
-      </div>
-    </div>`;
-    } else if (step === 3) {
-      stepHtml = `
-    <div id="docker-config-step-3" style="display:flex;gap:24px;min-height:360px;">
-      <!-- Left: log stream -->
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <span id="provision-icon" style="font-size:22px;">&#9203;</span>
-          <span role="status" id="provision-status" style="font-size:14px;color:#888;">Starting OpenClaw gateway...</span>
-        </div>
-        <pre id="provision-log" style="flex:1;background:#111;border:1px solid #333;border-radius:8px;padding:12px;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:12px;line-height:1.6;color:#ccc;overflow-y:auto;max-height:320px;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
-      </div>
-      <!-- Right: action buttons -->
-      <div style="width:180px;flex-shrink:0;display:flex;flex-direction:column;gap:10px;padding-top:36px;">
-        <button id="btn-connect-gateway" class="btn" style="background:#4ade80;color:#000;display:none;width:100%;" disabled>Connect to Gateway</button>
-        <div id="error-actions" style="display:none;flex-direction:column;gap:10px;">
-          <button class="btn btn-secondary" style="width:100%;" onclick="postMsg({command:'dockerRetry'})">Retry</button>
-          <button class="btn btn-secondary" style="width:100%;" onclick="postMsg({command:'dockerBack'})">Back to Config</button>
-          <button class="btn btn-secondary" style="width:100%;" onclick="copyLog()">Copy Log</button>
-          <button class="btn" style="background:#ef4444;color:#fff;width:100%;" onclick="postMsg({command:'dockerReport'})">Report to Developer</button>
-          <div id="report-status" style="display:none;font-size:11px;text-align:center;"></div>
-        </div>
-      </div>
-    </div>`;
-    }
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-      background: #1a1a1a; color: #e0e0e0;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-height: 100vh; padding: 20px; text-align: center;
-    }
-    .docker-container { width: 100%; max-width: 600px; text-align: left; }
-    .stepper {
-      display: flex; justify-content: space-between; margin-bottom: 40px; position: relative;
-    }
-    .stepper::before {
-      content: ''; position: absolute; top: 15px; left: 0; right: 0; height: 2px; background: #333; z-index: 0;
-    }
-    .step-indicator {
-      position: relative; z-index: 1; padding: 6px 14px; font-size: 14px; font-weight: 600;
-      border-radius: 20px; display: inline-flex; align-items: center; gap: 4px;
-    }
-    .step-active { background-color: #2563eb; color: #fff; }
-    .step-inactive { background-color: #1a1a1a; color: #888; }
-    .btn { padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; }
-    .btn-secondary { background: #333; color: #e0e0e0; }
-    .btn-secondary:hover { background: #444; }
-    .btn-primary { background: #3b82f6; color: #fff; }
-    .btn-primary:hover { background: #2563eb; }
-  </style>
-</head>
-<body>
-  <div class="docker-container">
-    <div class="stepper">
-      <div id="config-step-1-indicator" class="step-indicator ${step === 1 ? 'step-active' : 'step-inactive'}">1. Config</div>
-      <div id="config-step-2-indicator" class="step-indicator ${step === 2 ? 'step-active' : 'step-inactive'}">2. Confirm</div>
-      <div id="config-step-3-indicator" class="step-indicator ${step === 3 ? 'step-active' : 'step-inactive'}">3. Start</div>
-    </div>
-    ${stepHtml}
-  </div>
-  <script>
-    (function() {
-      var vscode = acquireVsCodeApi();
-      var selectedBind = '${bindAddr}';
-      function postMsg(msg) { vscode.postMessage(msg); }
-      window.postMsg = postMsg;
-
-      window.pickBind = function(addr) {
-        selectedBind = addr;
-        var b127 = document.getElementById('bind-127');
-        var bAll = document.getElementById('bind-all');
-        if (b127) { b127.className = addr === '127.0.0.1' ? 'btn btn-primary' : 'btn btn-secondary'; }
-        if (bAll) { bAll.className = addr === '0.0.0.0' ? 'btn btn-primary' : 'btn btn-secondary'; }
-      };
-
-      window.onNext = function() {
-        var imageEl = document.getElementById('config-gateway-image');
-        var portEl = document.getElementById('config-gateway-port');
-        var dirEl = document.getElementById('config-data-dir');
-        var fbEl = document.getElementById('config-fresh-build');
-        var image = imageEl ? imageEl.value.trim() : '';
-        var port = portEl ? portEl.value.trim() : '';
-        var dataDir = dirEl ? dirEl.value.trim() : '';
-        var freshBuild = fbEl ? fbEl.checked : false;
-        postMsg({ command: 'dockerAdvance', config: { image: image, port: port, dataDir: dataDir, bindAddress: selectedBind, freshBuild: freshBuild } });
-      };
-
-      window.addEventListener('message', function(e) {
-        var data = e.data;
-        if (data.type === 'setConfigDataDir') {
-          var input = document.getElementById('config-data-dir');
-          if (input) input.value = data.path;
-        }
-        if (data.type === 'provisionStatus') {
-          var logEl = document.getElementById('provision-log');
-          if (logEl && data.text) {
-            logEl.textContent += data.text + '\\n';
-            logEl.scrollTop = logEl.scrollHeight;
-          }
-        }
-        if (data.type === 'provisionDone') {
-          var icon = document.getElementById('provision-icon');
-          var status = document.getElementById('provision-status');
-          var btn = document.getElementById('btn-connect-gateway');
-          if (icon) icon.textContent = '\\u2705';
-          if (status) { status.textContent = 'Docker environment is ready'; status.style.color = '#4ade80'; }
-          if (btn) { btn.disabled = false; btn.style.display = ''; }
-        }
-        if (data.type === 'provisionError') {
-          window._lastError = data.text || 'Docker startup failed';
-          var icon = document.getElementById('provision-icon');
-          var status = document.getElementById('provision-status');
-          var errActions = document.getElementById('error-actions');
-          var logEl = document.getElementById('provision-log');
-          if (icon) icon.textContent = '\\u274C';
-          if (status) { status.textContent = window._lastError; status.style.color = '#ef4444'; }
-          if (errActions) { errActions.style.display = 'flex'; }
-          if (logEl) { logEl.style.borderColor = '#ef4444'; }
-        }
-        if (data.type === 'reportStatus') {
-          var rs = document.getElementById('report-status');
-          if (rs) { rs.style.display = ''; rs.textContent = data.text; rs.style.color = data.ok ? '#4ade80' : '#ef4444'; }
-        }
-      });
-
-      window.copyLog = function() {
-        var logEl = document.getElementById('provision-log');
-        var text = logEl ? logEl.textContent : '';
-        navigator.clipboard.writeText(text).then(function() {
-          var rs = document.getElementById('report-status');
-          if (rs) { rs.style.display = ''; rs.textContent = 'Copied to clipboard'; rs.style.color = '#4ade80'; }
-        });
-      };
-    })();
-  </script>
-</body>
 </html>`;
   }
 
