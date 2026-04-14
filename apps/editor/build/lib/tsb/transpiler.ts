@@ -191,7 +191,7 @@ export interface ITranspiler {
 
 export class TscTranspiler implements ITranspiler {
 
-	static P = Math.floor(cpus().length * .5);
+	static P = Math.floor(cpus().length * (parseFloat(process.env['TSC_TRANSPILE_CPU_RATIO'] || '') || .5));
 
 	private readonly _outputFileNames: OutputFileNameOracle;
 

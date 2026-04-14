@@ -671,8 +671,9 @@ ${logs.substring(0, 3000)}
       // Gateway is responding at the user-configured port — go straight to status panel
       this._activeConfig = config;
       this._panel.webview.html = this._getLoadingHtml(webviewIconUri);
-      void this._showStatusPanel().catch(() => {
+      void this._showStatusPanel().catch((err) => {
         // If status panel fails to load, fall back to the wizard
+        console.error('[openclaw-docker] Status panel failed:', err);
         if (!this._disposed) {
           this._panel.webview.html = this._getConfigHtml(webviewIconUri, config);
         }

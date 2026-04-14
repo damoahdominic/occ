@@ -9,16 +9,62 @@
  */
 
 import * as http from 'http';
+import { execSync } from 'child_process';
 import { test as baseTest, expect as baseExpect, chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL ?? 'http://127.0.0.1:9888';
 const useCDP = !!process.env.CDP_ENDPOINT;
 
 // ---------------------------------------------------------------------------
+// Health Check: Wait for editor container to be ready
+// ---------------------------------------------------------------------------
+
+async function waitForEditorHealthy(maxWaitMs = 30_000): Promise<void> {
+  const startTime = Date.now();
+  const checkIntervalMs = 1000;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const output = execSync('docker compose ps editor --format json', {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'], // suppress stderr
+      }).trim();
+
+      if (!output) {
+        throw new Error('Container not found');
+      }
+
+      const containers = JSON.parse(output);
+      const container = Array.isArray(containers) ? containers[0] : containers;
+
+      if (container.State === 'running' && container.Health === 'healthy') {
+        console.log('✓ Editor container is healthy');
+        return;
+      }
+
+      throw new Error(`Container state: ${container.State}, health: ${container.Health}`);
+    } catch (err) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= maxWaitMs) {
+        throw new Error(
+          `Editor container did not become healthy after ${maxWaitMs}ms. ` +
+          `Run: docker-compose up -d`,
+        );
+      }
+      process.stdout.write('.');
+      await new Promise((resolve) => setTimeout(resolve, checkIntervalMs));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CDP Detection (runs once before all tests)
 // ---------------------------------------------------------------------------
 
 export default async () => {
+  // Wait for editor container to be healthy before proceeding
+  await waitForEditorHealthy();
+
   if (process.env.SKIP_CDP === '1') {
     console.log('ℹ SKIP_CDP=1 - using default browser');
     return;

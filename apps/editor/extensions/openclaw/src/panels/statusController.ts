@@ -241,7 +241,14 @@ export class StatusPanelController {
     // Ensure the workspace explorer shows only this host's state directory.
     const stateDir = this._getStateDir();
     if (fs.existsSync(stateDir) || this._host.type !== 'local') {
-      setActiveOpenClawWorkspaceFolder(stateDir);
+      // Only update workspace folder if it's not already active — avoids reload loops
+      // when VS Code web reloads the extension host on updateWorkspaceFolders().
+      const targetUri = vscode.Uri.file(stateDir);
+      const alreadyActive = (vscode.workspace.workspaceFolders ?? [])
+        .some(f => f.uri.fsPath === targetUri.fsPath);
+      if (!alreadyActive) {
+        setActiveOpenClawWorkspaceFolder(stateDir);
+      }
     }
     await this._update();
   }
