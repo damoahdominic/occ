@@ -22,6 +22,7 @@ import { ChatMode, displayInfoOfProviderName, FeatureName, isFeatureNameDisabled
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
 import { WarningBox } from '../void-settings-tsx/WarningBox.js';
 import { BalanceDisplay } from '../void-settings-tsx/BalanceDisplay.js';
+import { GatewayInfo } from './GatewayInfo.js';
 import { getModelCapabilities, getIsReasoningEnabledState } from '../../../../common/modelCapabilities.js';
 import { AlertTriangle, File, Ban, Check, ChevronRight, Dot, FileIcon, Pencil, Undo, Undo2, X, Flag, Copy as CopyIcon, Info, CirclePlus, Ellipsis, CircleEllipsis, Folder, ALargeSmall, TypeOutline, Text } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
@@ -3165,6 +3166,12 @@ export const SidebarChat = () => {
 		<ErrorBoundary>
 			{landingPageInput}
 		</ErrorBoundary>
+
+		{/* TODO: Enable GatewayInfo once gateway port/network is properly configured
+		<ErrorBoundary>
+			<GatewayInfo isDevMode={process.env.NODE_ENV === 'development'} />
+		</ErrorBoundary>
+		*/}
 
 		{Object.keys(chatThreadsState.allThreads).length > 1 ? // show if there are threads
 			<ErrorBoundary>
