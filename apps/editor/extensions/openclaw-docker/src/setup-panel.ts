@@ -1555,19 +1555,19 @@ ${logs.substring(0, 3000)}
 
   <!-- Step timeline -->
   <div class="steps">
-    <div class="step-item active" id="s1" onclick="back()" style="cursor:pointer;" title="Back to config">
+    <div class="step-item active" id="s1" onclick="backToConfig()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">1</div>
       <div class="step-label">Docker<br>Check</div>
     </div>
-    <div class="step-item pending" id="s2" onclick="back()" style="cursor:pointer;" title="Back to config">
+    <div class="step-item pending" id="s2" onclick="backToConfig()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">2</div>
       <div class="step-label">Pull<br>Image</div>
     </div>
-    <div class="step-item pending" id="s3" onclick="back()" style="cursor:pointer;" title="Back to config">
+    <div class="step-item pending" id="s3" onclick="backToConfig()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">3</div>
       <div class="step-label">Onboard<br>Config</div>
     </div>
-    <div class="step-item pending" id="s4" onclick="back()" style="cursor:pointer;" title="Back to config">
+    <div class="step-item pending" id="s4" onclick="backToConfig()" style="cursor:pointer;" title="Back to config">
       <div class="step-dot">4</div>
       <div class="step-label">Launch<br>Gateway</div>
     </div>
@@ -1623,11 +1623,11 @@ ${logs.substring(0, 3000)}
         <div class="log-box" id="error-log"></div>
       </div>
       <div class="error-actions">
-        <button class="btn-secondary" onclick="copyErrorLogs()" id="btn-copy-logs" style="display:none;">📋 Copy Logs</button>
+        <button class="btn-secondary" onclick="copyErrorLogs()" id="btn-copy-logs">📋 Copy Logs</button>
         <button class="btn-secondary" onclick="reportErrorToGithub()" id="btn-report-github">🐙 Report to GitHub</button>
         <button class="btn-secondary" onclick="viewErrorLog()" id="btn-view-log" style="display:none;">📄 View Error Log</button>
         <button class="btn-retry" onclick="retry()">🔄 Retry</button>
-        <button class="btn-secondary" onclick="back()">← Back</button>
+        <button class="btn-secondary" onclick="backToConfig()">← Back</button>
       </div>
     </div>
 
@@ -1645,6 +1645,10 @@ ${logs.substring(0, 3000)}
 
     function goBack() {
       vscode.postMessage({ command: 'closePanel' });
+    }
+
+    function backToConfig() {
+      vscode.postMessage({ command: 'dockerBack' });
     }
 
     function retry() {
