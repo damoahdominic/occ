@@ -6,105 +6,11 @@ import * as os from 'os';
 import type { OpenClawCoreAPI } from '../../openclaw/src/hosts/types';
 import { DockerHostAdapter } from './adapter';
 import { DockerSetupPanel } from './setup-panel';
+import { COMPOSE_YML } from './assets.generated';
 
 const CONTAINER = 'occ-openclaw';
 const DEFAULT_PORT = 18789;
 
-// Embedded compose file — written to docker/docker-compose.openclaw.yml on
-// first run if the file is missing (e.g. fresh clone or installed build).
-const COMPOSE_YML = `# OpenClaw Gateway — Base Production Configuration
-#
-# PURPOSE:
-#   Production-ready configuration for OpenClaw gateway and supporting services
-#   (PostgreSQL, Redis). This is the ONLY config used for builds and CI/CD.
-#   No dev-specific logic or overrides.
-#
-# USAGE:
-#   Production/CI: docker compose -f docker/docker-compose.openclaw.yml up -d
-#   Development:   docker compose -f docker/docker-compose.openclaw.yml \\
-#                    -f docker/docker-compose.openclaw.override.yml up -d
-#
-# SERVICES:
-#   - occ-gateway  : OpenClaw gateway (port 18789)
-#   - occ-postgres : PostgreSQL 16 (port 5432)
-#   - occ-redis    : Redis 7 (port 6379)
-#
-# NETWORKS:
-#   - occ-network  : Custom bridge network for service communication
-#
-# VOLUMES:
-#   - occ-postgres-data : Persistent PostgreSQL data
-#   - occ-redis-data    : Persistent Redis data (not currently used)
-#
-# ENVIRONMENT:
-#   Load variables from docker/.env.openclaw
-#   Required: POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_USER, DATABASE_URL, REDIS_URL
-#
-# See DOCKER.md for detailed configuration and usage.
-
-services:
-  occ-gateway:
-    container_name: occ-openclaw
-    image: \${OCC_GATEWAY_IMAGE:-ghcr.io/openclaw/openclaw:latest}
-    command: ["openclaw", "gateway", "run", "--allow-unconfigured", "--bind", "lan"]
-    restart: unless-stopped
-    ports:
-      - "\${GATEWAY_BIND_HOST:-127.0.0.1}:\${GATEWAY_PORT:-18789}:18789"
-    environment:
-      DATABASE_URL: postgresql://openclaw:occdev@occ-postgres:5432/openclaw
-      REDIS_URL: redis://occ-redis:6379
-    volumes:
-      - \${OPENCLAW_DATA_DIR:-./openclaw_docker_data}:/home/node/.openclaw
-    networks:
-      - occ-network
-    depends_on:
-      occ-postgres:
-        condition: service_healthy
-      occ-redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:18789/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  occ-postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_PASSWORD: occdev
-      POSTGRES_DB: openclaw
-      POSTGRES_USER: openclaw
-    volumes:
-      - occ-postgres-data:/var/lib/postgresql/data
-    networks:
-      - occ-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U openclaw"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  occ-redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    networks:
-      - occ-network
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-networks:
-  occ-network:
-    driver: bridge
-
-volumes:
-  occ-openclaw-data:
-  occ-postgres-data:
-`;
 
 /**
  * Write docker/docker-compose.openclaw.yml from the embedded constant if it

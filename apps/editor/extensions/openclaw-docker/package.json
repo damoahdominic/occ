@@ -14,6 +14,7 @@
 		"commands": [{ "command": "openclaw.host.setup.docker", "title": "OpenClaw: Set up Docker" }]
 	},
 	"scripts": {
+		"precompile": "node scripts/generate-assets.js",
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./"
 	},
