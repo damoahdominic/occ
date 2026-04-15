@@ -80,6 +80,25 @@ export class DockerSetupPanel {
     }
     return dataDir;
   }
+  /**
+   * The HOST-side absolute path for the data directory.
+   *
+   * When the extension runs inside occ-editor-dev (docker-in-docker via the
+   * mounted socket), _dataDir resolves to a container-internal path like
+   * /workspace/docker/openclaw_docker_data. The host Docker daemon has no
+   * /workspace mount, so it creates that path as root → EACCES in the
+   * gateway container. HOST_WORKSPACE is injected by docker-compose.yml so
+   * we can translate the container path to the real host path.
+   */
+  private get _hostDataDir(): string {
+    const containerPath = this._dataDir;
+    const hostWorkspace = process.env.HOST_WORKSPACE;
+    if (hostWorkspace && containerPath.startsWith('/workspace')) {
+      return containerPath.replace(/^\/workspace/, hostWorkspace);
+    }
+    return containerPath;
+  }
+
   private get _bindHost(): string { return this._activeConfig.bindHost; }
   private get _freshBuild(): boolean { return this._activeConfig.freshBuild; }
   private get _volumeMount(): string { return `${this._dataDir}:/home/node/.openclaw`; }
@@ -464,12 +483,11 @@ export class DockerSetupPanel {
       OCC_GATEWAY_IMAGE: this._image,
       GATEWAY_PORT: String(this._hostPort),
       GATEWAY_BIND_HOST: this._bindHost,
-      // Pass the raw config value (e.g. "./openclaw_docker_data") so Docker
-      // Compose resolves it relative to the compose file directory (docker/).
-      // Passing the resolved absolute path via this._dataDir was causing the
-      // volume to mount at a stale absolute path (e.g. /tmp/openclaw_docker_data)
-      // that Docker created as root, triggering EACCES in the gateway container.
-      OPENCLAW_DATA_DIR: this._activeConfig.dataDir,
+      // Use the HOST-side absolute path so the host Docker daemon mounts the
+      // correct directory. When running inside occ-editor-dev, _hostDataDir
+      // translates the container path (/workspace/...) to the real host path
+      // using the HOST_WORKSPACE env var injected by docker-compose.yml.
+      OPENCLAW_DATA_DIR: this._hostDataDir,
     };
   }
 

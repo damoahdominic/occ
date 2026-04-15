@@ -38,6 +38,11 @@ services:
       NODE_OPTIONS: --max-old-space-size=7096
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
       TSC_TRANSPILE_CPU_RATIO: ${TSC_TRANSPILE_CPU_RATIO:-0.75}
+      # HOST_WORKSPACE lets extensions resolve host-side paths when invoking
+      # docker-in-docker (via the mounted socket). Without it, volume paths
+      # resolve to container-internal paths (e.g. /workspace/...) which the
+      # host Docker daemon creates as root, causing EACCES in child containers.
+      HOST_WORKSPACE: ${PWD}
     command: ['bash','-lc','/workspace/scripts/docker-dev.sh']
     volumes:
       - .:/workspace
