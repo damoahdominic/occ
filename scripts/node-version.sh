@@ -6,6 +6,26 @@
 
 set -e
 
+# Compare semantic versions: returns 0 if $1 >= $2
+version_gte() {
+    local v1="$1" v2="$2"
+    # Remove leading 'v' if present
+    v1="${v1#v}" v2="${v2#v}"
+    # Split into components and compare
+    local IFS='.' i=0
+    read -ra V1 <<< "$v1"
+    read -ra V2 <<< "$v2"
+    while [ $i -lt ${#V1[@]} ] && [ $i -lt ${#V2[@]} ]; do
+        local n1="${V1[$i]:-0}" n2="${V2[$i]:-0}"
+        n1="${n1%%[^0-9]*}" n2="${n2%%[^0-9]*}"
+        if [ "$n1" -gt "$n2" ] 2>/dev/null; then return 0; fi
+        if [ "$n1" -lt "$n2" ] 2>/dev/null; then return 1; fi
+        ((i++))
+    done
+    # If all compared parts equal, longer version is greater
+    [ ${#V1[@]} -ge ${#V2[@]} ]
+}
+
 detect_and_use_node() {
     local ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
     local NODE_VERSION="$(cat "$ROOT/apps/editor/.nvmrc" 2>/dev/null || echo "20.18.2")"
@@ -48,6 +68,16 @@ detect_and_use_node() {
             else
                 echo "fnm: install failed (permission denied?), falling through to next option..." >&2
             fi
+        fi
+    fi
+
+    # Check if we have a compatible/higher system node - if so, skip installation
+    if command -v node >/dev/null 2>&1; then
+        local CURRENT_NODE_VERSION
+        CURRENT_NODE_VERSION="$(node --version | sed 's/^v//')"
+        if version_gte "$CURRENT_NODE_VERSION" "$NODE_VERSION"; then
+            echo "System Node.js $CURRENT_NODE_VERSION is compatible (>= $NODE_VERSION), skipping installation"
+            return 0
         fi
     fi
 
