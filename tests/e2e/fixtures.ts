@@ -232,6 +232,19 @@ export const test = baseTest.extend<TestFixtures, WorkerFixtures>({
        .find(p => p.url().startsWith(BASE_URL));
      const targetUrl = vsCodePage?.url() ?? VSCODE_WORKSPACE_URL;
 
+     // Dismiss Chrome's "Sign in to Chrome" nag page if it appears on the new tab.
+     // This can happen in CDP mode when opening a new page in a signed-out Chrome profile.
+     const dismissSignInNag = async () => {
+       const dontSignInBtn = page.locator('button').filter({ hasText: /Don't sign in/i });
+       const nagVisible = await dontSignInBtn.first().isVisible({ timeout: 2_000 }).catch(() => false);
+       if (nagVisible) {
+         await dontSignInBtn.first().click({ timeout: 3_000 }).catch(() => null);
+         // Wait briefly for the page to settle before navigating
+         await page.waitForTimeout(500);
+       }
+     };
+     await dismissSignInNag();
+
      // Ensure every test starts at the workspace‑aware URL so the OCC extension activates.
      // Increased timeout to 90s for CDP and slower systems with workspace loading
      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 90_000 });
