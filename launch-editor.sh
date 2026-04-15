@@ -28,7 +28,8 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 # Use shared Node.js version detection
-if ! source "$ROOT/scripts/node-version.sh" "$ROOT"; then
+source "$ROOT/scripts/node-version.sh"
+if ! detect_and_use_node "$ROOT"; then
     exit 1
 fi
 

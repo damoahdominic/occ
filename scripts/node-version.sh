@@ -41,11 +41,13 @@ detect_and_use_node() {
             echo "Using Node.js $(node --version) via fnm"
             return 0
         else
-            echo "fnm: Node.js $NODE_VERSION not installed, installing..."
-            fnm install "$NODE_VERSION"
-            fnm use "$NODE_VERSION"
-            echo "Using Node.js $(node --version) via fnm"
-            return 0
+            echo "fnm: Node.js $NODE_VERSION not installed, trying to install..."
+            if fnm install "$NODE_VERSION" 2>/dev/null && fnm use "$NODE_VERSION" 2>/dev/null; then
+                echo "Using Node.js $(node --version) via fnm"
+                return 0
+            else
+                echo "fnm: install failed (permission denied?), falling through to next option..." >&2
+            fi
         fi
     fi
 
@@ -65,17 +67,17 @@ detect_and_use_node() {
         fi
     fi
 
-    # 4. CHECK SYSTEM NODE (if version matches)
+    # 4. CHECK SYSTEM NODE
     if command -v node >/dev/null 2>&1; then
         local CURRENT_NODE_VERSION
         CURRENT_NODE_VERSION="$(node --version | sed 's/^v//')"
         if [ "$CURRENT_NODE_VERSION" = "$NODE_VERSION" ]; then
             echo "Using existing system Node.js $CURRENT_NODE_VERSION (matches required version)"
-            return 0
         else
             echo "WARNING: System Node.js $CURRENT_NODE_VERSION found, but $NODE_VERSION required." >&2
-            echo "         Attempting to install nvm with correct version..." >&2
+            echo "         Consider installing fnm or nvm for better version management." >&2
         fi
+        return 0
     fi
 
     # 5. AUTO-INSTALL NVM (if nothing else works)

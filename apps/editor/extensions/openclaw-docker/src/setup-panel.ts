@@ -464,7 +464,12 @@ export class DockerSetupPanel {
       OCC_GATEWAY_IMAGE: this._image,
       GATEWAY_PORT: String(this._hostPort),
       GATEWAY_BIND_HOST: this._bindHost,
-      OPENCLAW_DATA_DIR: this._dataDir,
+      // Pass the raw config value (e.g. "./openclaw_docker_data") so Docker
+      // Compose resolves it relative to the compose file directory (docker/).
+      // Passing the resolved absolute path via this._dataDir was causing the
+      // volume to mount at a stale absolute path (e.g. /tmp/openclaw_docker_data)
+      // that Docker created as root, triggering EACCES in the gateway container.
+      OPENCLAW_DATA_DIR: this._activeConfig.dataDir,
     };
   }
 

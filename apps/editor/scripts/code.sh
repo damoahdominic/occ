@@ -42,19 +42,23 @@ function code() {
 	cd "$ROOT"
 
 	if [[ "$OSTYPE" == "darwin"* ]]; then
-		NAME=`node -p "require('./product.json').nameLong"`
+		NAME=$(python3 -c "import json; print(json.load(open('product.json'))['nameLong'])")
 		CODE="./.build/electron/$NAME.app/Contents/MacOS/Electron"
 	else
-		NAME=`node -p "require('./product.json').applicationName"`
+		NAME=$(python3 -c "import json; print(json.load(open('product.json'))['applicationName'])")
 		CODE=".build/electron/$NAME"
 	fi
 
-	# Clean out directory to avoid permission conflicts during rebuild
-	rm -rf out/ 2>/dev/null || true
-
 	# Get electron, compile, built-in extensions
+	# out/main.js is the compilation sentinel — skip the compile step if already built,
+	# but always ensure the Electron binary is present via preLaunch.js.
 	if [[ -z "${VSCODE_SKIP_PRELAUNCH}" ]]; then
-		node build/lib/preLaunch.js
+		if [[ -f "out/main.js" && -f "$CODE" ]]; then
+			echo "[launch] Existing compilation detected — skipping recompile"
+		else
+			echo "[launch] No compilation found — compiling now..."
+			node build/lib/preLaunch.js
+		fi
 	fi
 
 	# Manage built-in extensions
