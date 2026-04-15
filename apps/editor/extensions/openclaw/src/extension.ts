@@ -8,7 +8,7 @@ import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
 import { setActiveOpenClawWorkspaceFolder } from './panels/statusController';
-import { stopConfigProxy, getDashboardUrl } from './panels/config';
+import { stopConfigProxy, getDashboardUrl, ConfigPanel } from './panels/config';
 import { HostRegistry } from './hosts/registry';
 import { HostManager } from './hosts/manager';
 import { HostStatusBarItem } from './hosts/statusbar';
@@ -30,6 +30,44 @@ function getConfiguredGatewayPort(): number {
   } catch {
     return DEFAULT_GATEWAY_PORT;
   }
+}
+
+interface DockerDashboardResult {
+  url: string;
+  port: number;
+}
+
+function getDockerDashboardUrl(container: string, hostPort: number): DockerDashboardResult {
+  const containerConfigPath = '/home/node/.openclaw/openclaw.json';
+  const containerPort = 18789;
+
+  try {
+    const result = cp.spawnSync(
+      'docker',
+      ['exec', container, 'cat', containerConfigPath],
+      { timeout: 5000, windowsHide: true, encoding: 'utf-8' },
+    );
+    if (result.status === 0 && result.stdout) {
+      const config = JSON.parse(result.stdout as string) as Record<string, unknown>;
+      const gateway = config['gateway'] as Record<string, unknown> | undefined;
+      const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
+      const token = auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string' ? auth['token'] as string : '';
+
+      if (token) {
+        return {
+          url: `http://localhost:${hostPort}/#token=${token}`,
+          port: hostPort,
+        };
+      }
+    }
+  } catch {
+    // Config read failed — fall through to token-less URL
+  }
+
+  return {
+    url: `http://localhost:${hostPort}/`,
+    port: hostPort,
+  };
 }
 
 // ── Window host binding ─────────────────────────────────────────────────────
@@ -686,7 +724,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       if (windowHostBinding?.type === 'docker') {
         const container = windowHostBinding.hostId.replace(/^docker:/, '') || 'occ-openclaw';
         const hostPort = windowHostBinding.port; // e.g. 18790
-        const containerPort = 18789;
 
         // 1. Start the gateway inside the container (detached — safe if already running)
         cp.spawn('docker', ['exec', '-d', container, 'openclaw', 'gateway', 'run'], {
@@ -694,43 +731,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
           detached: true,
         }).unref();
 
-        // 2. Give it a moment to start, then get the tokenized dashboard URL
+        // 2. Give it a moment to start, then get the dashboard URL with token
         await new Promise<void>(r => setTimeout(r, 2000));
 
-        const dashResult = cp.spawnSync(
-          'docker',
-          ['exec', container, 'openclaw', 'dashboard', '--no-open'],
-          { timeout: 10000, windowsHide: true, encoding: 'utf-8' },
-        );
-        let rawUrl = (dashResult.stdout as string ?? '').trim();
+        const dashInfo = getDockerDashboardUrl(container, hostPort);
 
-        // Check if a custom proxy URL is configured in openclaw.json
-        let proxyUrl: string | undefined;
-        try {
-          const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-          const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-          const gateway = configData['gateway'] as Record<string, unknown> | undefined;
-          proxyUrl = gateway?.['proxyUrl'] ?? gateway?.['proxy_url'] ?? configData['proxyUrl'] ?? configData['proxy_url'];
-          if (typeof proxyUrl !== 'string' || proxyUrl.length === 0) {
-            proxyUrl = undefined;
-          }
-        } catch {
-          // Config not available — use default behavior
-        }
-
-        if (rawUrl) {
-          // Use mergeDashboardWithProxy utility to handle URL rewriting
-          // (either with proxy URL or port mapping)
-          const url = mergeDashboardWithProxy(rawUrl, proxyUrl, {
-            containerPort,
-            hostPort,
-          });
-          await vscode.env.openExternal(vscode.Uri.parse(url));
-        } else {
-          // dashboard command failed — open plain URL as fallback
-          const fallbackUrl = proxyUrl ?? `http://localhost:${hostPort}/`;
-          await vscode.env.openExternal(vscode.Uri.parse(fallbackUrl));
-        }
+        // 3. Open the web panel with the tokenized URL
+        await ConfigPanel.createOrShow(dashInfo);
         return;
       }
 
@@ -738,8 +745,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       const effectivePort = windowHostBinding ? windowHostBinding.port : getConfiguredGatewayPort();
       const reachable = await isWebServerReachable(effectivePort);
       if (reachable) {
-        const url = getDashboardUrl()?.url ?? `http://localhost:${effectivePort}/`;
-        await vscode.env.openExternal(vscode.Uri.parse(url));
+        // Open the web panel - it will use getDashboardUrl() which reads from ~/.openclaw/openclaw.json
+        await ConfigPanel.createOrShow();
       } else {
         const configUrl = `http://localhost:${effectivePort}/`;
         const message =

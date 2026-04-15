@@ -375,9 +375,11 @@ export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private _customDashboardUrl: { url: string; port: number } | undefined;
 
-  private constructor(panel: vscode.WebviewPanel) {
+  private constructor(panel: vscode.WebviewPanel, customDashboardUrl?: { url: string; port: number }) {
     this._panel = panel;
+    this._customDashboardUrl = customDashboardUrl;
     // When the user closes the tab, bring the AI chat back.
     this._panel.onDidDispose(() => {
       this.dispose();
@@ -402,7 +404,7 @@ export class ConfigPanel {
     void this._load();
   }
 
-  public static async createOrShow(): Promise<void> {
+  public static async createOrShow(customDashboardUrl?: { url: string; port: number }): Promise<void> {
     // Close both sidebars (File Explorer on left, AI Chat on right) so the
     // browser gets the full editor width.
     await vscode.commands.executeCommand('workbench.action.closeSidebar');
@@ -418,7 +420,7 @@ export class ConfigPanel {
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true },
     );
-    ConfigPanel.currentPanel = new ConfigPanel(panel);
+    ConfigPanel.currentPanel = new ConfigPanel(panel, customDashboardUrl);
   }
 
   public dispose(): void {
@@ -429,7 +431,7 @@ export class ConfigPanel {
 
   private async _load(): Promise<void> {
     try {
-      const dashInfo = getDashboardUrl();
+      const dashInfo = this._customDashboardUrl ?? getDashboardUrl();
       const targetPort = dashInfo?.port ?? DEFAULT_GATEWAY_PORT;
       const proxyPort = await getOrStartConfigProxy(targetPort);
 
