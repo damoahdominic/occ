@@ -16,6 +16,7 @@ test-results/
 tmp/
 docker/openclaw_docker_data/
 docker/windows-storage/
+docker/.env.openclaw
 
 # Internal infrastructure docs — keep private
 APPLE.md
