@@ -24,7 +24,7 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
 
 ## 4. Acceptance Criteria
 
-- [ ] Startup flow (gateway detection → setup view / status panel) has complete Gherkin BDD spec
+- [x] Startup flow (gateway detection → setup view / status panel) has complete Gherkin BDD spec
 - [x] All 6 original user flows have complete Gherkin BDD specifications
 - [x] Each scenario includes clear Given-When-Then steps
 - [x] Background sections define common prerequisites for related scenarios
@@ -37,20 +37,20 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
 
 ## 5. Task Breakdown
 
-- [ ] Task 0: Startup Flow BDD Specification
+- [x] Task 0: Startup Flow BDD Specification
   - **Problem**: No BDD spec exists for the core startup branch — gateway detection is the root decision point for every user session
   - **Test**: BDD spec covering gateway detected vs. not detected, setup view card options, and disconnect loop
   - **Subtasks**:
-    - [ ] Subtask 0.1: Write Feature: Startup Flow — gateway detected path
+    - [x] Subtask 0.1: Write Feature: Startup Flow — gateway detected path
       - **Objective**: Scenario where gateway is already running → skip setup → go straight to Status Panel
       - **Test**: Given gateway healthy, When app starts, Then Status Panel shown without setup view
-    - [ ] Subtask 0.2: Write Feature: Startup Flow — no gateway path
+    - [x] Subtask 0.2: Write Feature: Startup Flow — no gateway path
       - **Objective**: Scenario where no gateway detected → Setup View with 3 cards
       - **Test**: Given no gateway, When app starts, Then Setup View shown with Local, Docker, SSH cards
-    - [ ] Subtask 0.3: Write SSH card disabled scenario
+    - [x] Subtask 0.3: Write SSH card disabled scenario
       - **Objective**: SSH card is visible but non-interactive (todo)
       - **Test**: SSH card has "Soon" badge and click is a no-op
-    - [ ] Subtask 0.4: Write disconnect loop scenario
+    - [x] Subtask 0.4: Write disconnect loop scenario
       - **Objective**: Disconnect from Status Panel returns user to Setup View
       - **Test**: Given Status Panel, When user clicks Disconnect, Then Setup View shown
   - **Implementation**: `tests/e2e/startup-flow.spec.ts`
@@ -132,35 +132,6 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
       - **Objective**: Cover HTML report generation on failure
       - **Test**: Scenario covers artifact creation and accessibility
   - **Implementation**: `tests/e2e/ci-integration.spec.ts`
-      - **Objective**: Create Gherkin Feature with Background and Scenarios
-      - **Test**: Verify all Given-When-Then steps are clear and executable
-    - [ ] Subtask 4.2: Add balance display and actions
-      - **Objective**: Cover "Buy More Credits" link presence
-      - **Test**: Scenarios cover UI elements in authenticated state
-
-- [ ] Task 5: Balance Polling and Deduction BDD Specification
-  - **Problem**: Convert task 8 from ticket-016 into BDD format for balance flow
-  - **Test**: BDD spec with scenarios for initial display, deduction, warning, refresh
-  - **Depends on**: Task 4
-  - **Subtasks**:
-    - [ ] Subtask 5.1: Write Feature: Balance Polling and Deduction BDD spec
-      - **Objective**: Create Gherkin Feature with Background and Scenarios
-      - **Test**: Verify all Given-When-Then steps are clear and executable
-    - [ ] Subtask 5.2: Add insufficient balance scenario
-      - **Objective**: Cover zero balance warning
-      - **Test**: Scenario covers warning display and prompt to purchase
-
-- [ ] Task 6: CI Integration BDD Specification
-  - **Problem**: Convert task 9 from ticket-016 into BDD format for CI pipeline
-  - **Test**: BDD spec with scenarios for PR, release, failure report, release gate
-  - **Depends on**: Task 5
-  - **Subtasks**:
-    - [ ] Subtask 6.1: Write Feature: CI Integration BDD spec
-      - **Objective**: Create Gherkin Feature with Background and Scenarios
-      - **Test**: Verify all Given-When-Then steps are clear and executable
-    - [ ] Subtask 6.2: Add artifact upload scenario
-      - **Objective**: Cover HTML report generation on failure
-      - **Test**: Scenario covers artifact creation and accessibility
 
 ---
 

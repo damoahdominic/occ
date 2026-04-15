@@ -135,8 +135,24 @@ Reviewed startup user flow diagram (`docs/plans/multihost/08-ui-design.md` §0) 
 - Updated acceptance criteria to include startup flow
 - Implementation target: `tests/e2e/startup-flow.spec.ts`
 
-**Status:** Task 0 added as `[ ]` (not yet implemented)
+**Status:** Task 0 implemented 2026-04-15 — `tests/e2e/startup-flow.spec.ts` created with 6 tests.
+
+## Updates - 2026-04-15 (Task 0 Implementation)
+
+Implemented the Startup Flow BDD spec and Playwright test file:
+
+- Created `tests/e2e/startup-flow.spec.ts` with 6 tests:
+  1. `gateway detected on startup — Status Panel shown without Setup View` (Subtask 0.1)
+  2. `no gateway detected on startup — Setup View shown with three cards` (Subtask 0.2)
+  3. `SSH card has Soon badge and is non-interactive` (Subtask 0.3)
+  4. `disconnect from Status Panel returns to Setup View` (Subtask 0.4)
+  5. `Local card routes away from Setup View` (additional scenario from BDD spec)
+  6. `Docker card routes away from Setup View` (additional scenario from BDD spec)
+- Updated prd.md: all Task 0 subtasks marked `[x]`, acceptance criterion marked `[x]`, duplicate dangling content removed
+- All 7 tasks now complete (Tasks 0–6)
 
 ## Completion
 
-Original 6 tasks (Tasks 1–6) completed. Task 0 (Startup Flow) added 2026-04-15, pending implementation. Total planned: 7 tasks, 42 scenarios across 7 test files.
+All 7 tasks completed. Total: 7 tasks, ~48 scenarios across 7 test files.
+- Task 0: Startup Flow — `tests/e2e/startup-flow.spec.ts` (6 tests)
+- Tasks 1–6: Previously implemented
