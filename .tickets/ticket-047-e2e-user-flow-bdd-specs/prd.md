@@ -7,6 +7,7 @@ This ticket extracts the user flow test specifications from ticket-016 (Automate
 ## 2. Proposed Solution
 
 Create BDD specifications and task breakdown for the following user flows from ticket-016:
+- **Task 0: Startup Flow** — gateway detection branch point (added from diagram audit)
 - Task 4: Install OpenClaw flow test
 - Task 5: Gateway start test
 - Task 6: Onboarding and auth flow test
@@ -23,7 +24,8 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
 
 ## 4. Acceptance Criteria
 
-- [x] All 6 user flows have complete Gherkin BDD specifications
+- [ ] Startup flow (gateway detection → setup view / status panel) has complete Gherkin BDD spec
+- [x] All 6 original user flows have complete Gherkin BDD specifications
 - [x] Each scenario includes clear Given-When-Then steps
 - [x] Background sections define common prerequisites for related scenarios
 - [x] All acceptance criteria reference original ticket-016 tasks
@@ -34,6 +36,24 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
 ---
 
 ## 5. Task Breakdown
+
+- [ ] Task 0: Startup Flow BDD Specification
+  - **Problem**: No BDD spec exists for the core startup branch — gateway detection is the root decision point for every user session
+  - **Test**: BDD spec covering gateway detected vs. not detected, setup view card options, and disconnect loop
+  - **Subtasks**:
+    - [ ] Subtask 0.1: Write Feature: Startup Flow — gateway detected path
+      - **Objective**: Scenario where gateway is already running → skip setup → go straight to Status Panel
+      - **Test**: Given gateway healthy, When app starts, Then Status Panel shown without setup view
+    - [ ] Subtask 0.2: Write Feature: Startup Flow — no gateway path
+      - **Objective**: Scenario where no gateway detected → Setup View with 3 cards
+      - **Test**: Given no gateway, When app starts, Then Setup View shown with Local, Docker, SSH cards
+    - [ ] Subtask 0.3: Write SSH card disabled scenario
+      - **Objective**: SSH card is visible but non-interactive (todo)
+      - **Test**: SSH card has "Soon" badge and click is a no-op
+    - [ ] Subtask 0.4: Write disconnect loop scenario
+      - **Objective**: Disconnect from Status Panel returns user to Setup View
+      - **Test**: Given Status Panel, When user clicks Disconnect, Then Setup View shown
+  - **Implementation**: `tests/e2e/startup-flow.spec.ts`
 
 - [x] Task 1: OpenClaw Installation BDD Specification
   - **Problem**: Convert task 4 from ticket-016 into BDD format for the OpenClaw installation flow
@@ -145,6 +165,61 @@ Each specification follows Gherkin format with Feature, Background, and Scenario
 ---
 
 ## 6. BDD Specifications
+
+### Feature: Startup User Flow
+
+**Background:**
+Given the editor is launched
+And the mock backend server is running on localhost:3001
+
+**Related to:** diagram in `docs/plans/multihost/08-ui-design.md` — Section 0
+
+#### Scenario: Gateway detected on startup — skip setup
+Given a gateway is already running and healthy on the configured port
+When the app starts
+Then the Setup View should not be shown
+And the Status Panel should be displayed immediately
+And the Status Panel should show the gateway as connected
+
+#### Scenario: No gateway detected on startup — show Setup View
+Given no gateway is running on the configured port
+When the app starts
+Then the Setup View should be displayed
+And three host cards should be visible: "Local", "Docker", and "SSH"
+
+#### Scenario: SSH card is visible but disabled
+Given the Setup View is displayed
+When the user views the SSH card
+Then the SSH card should display a "Soon" badge
+And clicking the SSH card should have no effect
+And no navigation or command should be triggered
+
+#### Scenario: Local card routes to Local Setup
+Given the Setup View is displayed
+When the user clicks the "Local" card
+Then the Setup View should close
+And the Local Setup panel should open
+
+#### Scenario: Docker card routes to Docker Setup Wizard
+Given the Setup View is displayed
+When the user clicks the "Docker" card
+Then the Setup View should close
+And the Docker Setup Wizard should open at Step 0 (Config)
+
+#### Scenario: Setup completes — gateway now running — Status Panel shown
+Given the user has completed either Local Setup or Docker Setup Wizard
+And the gateway is now running
+When setup finishes
+Then the Status Panel should be shown
+And the gateway should appear as connected
+
+#### Scenario: Disconnect from Status Panel returns to Setup View
+Given the Status Panel is displayed
+When the user clicks the "Disconnect" button
+Then the Status Panel should close
+And the Setup View should be shown again with all three cards
+
+---
 
 ### Feature: OpenClaw Installation
 

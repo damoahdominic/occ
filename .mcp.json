@@ -8,11 +8,7 @@
        ]
     },
     "chrome-devtools": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "exec npx chrome-devtools-mcp@latest --wsEndpoint \"$(curl -s -H 'Host: localhost' http://localhost:9222/json/version | awk '/Socket/{print $2}' | tr -d '\"' | sed 's|://localhost/|://localhost:9222/|')\""
-      ]
+      "command": "/home/linuxdev/Desktop/workshop/studio/hustle/occ/chrome-devtools-mcp-wrapper"
     }
   }
 }

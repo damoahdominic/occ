@@ -119,6 +119,24 @@ Updated spec (prd.md) with 6 new BDD scenarios covering:
 - Retry after failure
 - Error log file accessibility
 
+## Updates - 2026-04-15 (Diagram Audit)
+
+Reviewed startup user flow diagram (`docs/plans/multihost/08-ui-design.md` §0) and found the specs were missing the root-level flow entirely. Added:
+
+- **Task 0** to task breakdown: Startup Flow BDD Specification (4 subtasks)
+- **Feature: Startup User Flow** to section 6 with 7 scenarios covering:
+  - Gateway detected → Status Panel (skip setup)
+  - No gateway → Setup View with 3 cards
+  - SSH card visible but disabled ("Soon" badge, click no-op)
+  - Local card → Local Setup
+  - Docker card → Docker Setup Wizard (Step 0)
+  - Setup completes → Status Panel
+  - Disconnect → back to Setup View
+- Updated acceptance criteria to include startup flow
+- Implementation target: `tests/e2e/startup-flow.spec.ts`
+
+**Status:** Task 0 added as `[ ]` (not yet implemented)
+
 ## Completion
 
-All tasks completed successfully. The BDD specifications are now implemented as Playwright E2E tests ready for execution against the OCCode editor. Total: 35 tests across 6 test files.
+Original 6 tasks (Tasks 1–6) completed. Task 0 (Startup Flow) added 2026-04-15, pending implementation. Total planned: 7 tasks, 42 scenarios across 7 test files.

@@ -1,5 +1,41 @@
 # UI Design — MultiHost Experience
 
+## 0. Startup User Flow
+
+```
+                              ┌──────────────┐
+                              │   APP START  │
+                              └──────┬───────┘
+                                     │
+                         ┌───────────▼───────────┐
+                         │   Detect Gateway?     │
+                         └───────────┬───────────┘
+                    YES ─────────────┴───────────── NO
+                    │                                │
+         ┌──────────▼──────────┐       ┌────────────▼──────────────┐
+         │   Connect to        │       │        SETUP VIEW          │
+         │   Gateway           │       │  ────────────────────────  │
+         └──────────┬──────────┘       │  [💻 Local] [🐳 Docker]   │
+                    │                  │  [🌐 SSH — disabled/soon] │
+         ┌──────────▼──────────┐       └───┬──────────┬────────────┘
+         │   STATUS PANEL      │      Local │     Docker│      SSH │
+         │  ─────────────────  │           │           │          │
+         │  • Health / version │    ┌──────▼──────┐ ┌──▼──────────────┐ ┌──────────────┐
+         │  • Start / Stop     │    │ Local Setup │ │ Docker Setup    │ │ SSH Setup    │
+         │  • AI sign-in       │    └──────┬──────┘ │ Wizard          │ │ * todo       │
+         │  • Restart          │           │        └──────┬──────────┘ └──────────────┘
+         └──────────┬──────────┘           └──────────────┘
+                    │                             │ gateway now running
+                    │◄────────────────────────────┘
+                    │
+         ┌──────────▼──────────┐
+         │   [Disconnect]      │
+         └──────────┬──────────┘
+                    │
+                    ▼
+               SETUP VIEW  (loops back)
+```
+
 ## 1. Status Bar Host Picker
 
 The most-used UI element. Shows the active host in the VS Code status bar.
