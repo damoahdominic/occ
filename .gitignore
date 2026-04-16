@@ -10,8 +10,7 @@ apps/editor/core.*
 apps/VSCode-*/
 app/web/
 
-# Temporary directories
-.tmp/
+
 test-results/
 tmp/
 docker/openclaw_docker_data/

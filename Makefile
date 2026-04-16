@@ -163,6 +163,7 @@ build-macos-x64:
 ## container-build-linux: Run full Linux editor build inside the container
 container-build-linux:
 	@echo "Building editor image and running Linux build inside container..."
+	@mkdir -p .tmp
 	docker compose run --rm \
 		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
