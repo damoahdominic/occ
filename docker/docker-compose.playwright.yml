@@ -1,0 +1,49 @@
+# Playwright Test Automation
+#
+# PURPOSE:
+#   Isolated test/automation environment with Playwright browser,
+#   visual display (noVNC), and MCP server for agent integration.
+#   Used for E2E testing and browser automation tasks.
+#
+# USAGE:
+#   docker compose -f docker/docker-compose.playwright.yml up -d
+#
+# SERVICES:
+#   - playwright-display : Playwright with Chromium + display + MCP server
+#
+# PORTS:
+#   - 6080 : noVNC web interface (visual browser debugging)
+#   - 3080 : MCP SSE endpoint (for agent/tool integration)
+#
+# NETWORKS:
+#   - playwright-network : Isolated network for test services
+#
+# NOTES:
+#   - Separate from OpenClaw services (different network)
+#   - Uses public image from ghcr.io; no local build
+#   - See Playwright E2E Test Patterns in project memory for integration details
+#
+# See DOCKER.md for detailed configuration and usage.
+
+version: "3.9"
+
+services:
+  playwright-display:
+    image: ghcr.io/xtr-dev/mcp-playwright-novnc:latest
+    container_name: playwright-display
+    ports:
+      - "6080:6080"  # noVNC web interface
+      - "3080:3080"  # MCP SSE endpoint
+    environment:
+      - SCREEN_WIDTH=1920
+      - SCREEN_HEIGHT=1080
+      - MCP_BROWSER=chromium
+    networks:
+      - playwright-network
+    # Use host networking for Chrome to access localhost:9888
+    # network_mode: "host"
+
+networks:
+  playwright-network:
+    name: playwright-network
+    driver: bridge

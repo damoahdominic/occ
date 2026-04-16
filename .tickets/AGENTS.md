@@ -24,6 +24,7 @@ Each ticket lives in `.tickets/ticket-XXX-name/` with:
 - `prd.md` — specification document (required)
 - `agent-history.md` — logs of agent work (created when task begins)
 - Optional: `diagrams/`, `research/`, `test-results/`
+- **Formatting**: All `prd.md` specifications must be written in Gherkin BDD format (Given-When-Then).
 
 ### Ignoring Tickets
 
@@ -43,6 +44,7 @@ High-level approach and architecture.
 
 ### 2.3 Acceptance Criteria
 Measurable requirements for completion.
+All acceptance criteria will be written as Gherkin BDD specifications (Given-When-Then).
 
 ### 2.4 Technical Considerations
 Constraints, performance, security, integration points.
@@ -214,7 +216,7 @@ Always include ticket number.
 
 ## 8. Verification & Testing
 
-- Each subtask must have defined **Test** criteria
+- Each subtask must have defined **Test** criteria written in Gherkin BDD format (Given-When-Then) written in Gherkin BDD format (Given-When-Then)
 - Follow TDD: write tests before or alongside implementation
 - Include unit, edge case, and integration tests
 - Verify acceptance criteria before marking `[x]`

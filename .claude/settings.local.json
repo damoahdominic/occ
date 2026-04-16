@@ -28,7 +28,13 @@
       "Bash(npx commit-and-tag-version:*)",
       "Bash(git commit:*)",
       "Bash(find /home/linuxdev/Desktop/workshop/studio/hustle/occ -path *extensions/openclaw/src/panels/home.ts -o -path *extensions/*/panels/home.ts)",
-      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "mcp__chrome-devtools__list_pages",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\)[0]; print\\('Ports:', d['NetworkSettings']['Ports']\\); print\\('State:', d['State']['Status']\\)\")",
+      "Bash(curl -s --max-time 3 http://localhost:9888/)",
+      "Bash(xargs dirname:*)",
+      "Bash(ls:*)",
+      "Bash(grep -h \"task.define\" /home/linuxdev/Desktop/workshop/studio/hustle/occ/apps/editor/build/gulpfile*.js)"
     ]
   }
 }

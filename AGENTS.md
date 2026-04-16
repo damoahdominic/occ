@@ -34,6 +34,36 @@ When in doubt: navigator asks, driver waits.
 
 ---
 
+### 3PS and 3PM Pair Programming Models
+
+In addition to the standard driver-navigator model, OCcode supports two specialized pair programming configurations:
+
+#### 3PS (Three-Person Sub-agent)
+Both the driver and navigator roles are filled by sub-agents. This configuration is used for:
+- Tasks requiring specialized expertise from multiple sub-agents
+- Complex operations where both agents benefit from sub-agent capabilities
+- Training scenarios where sub-agents learn from each other
+
+In 3PS:
+- Driver sub-agent handles execution tasks
+- Navigator sub-agent provides review and guidance
+- Both operate with sub-agent permissions and capabilities
+
+#### 3PM (Three-Person Main-agent)
+Both the driver and navigator roles are filled by main agents. This configuration is used for:
+- High-stakes operations requiring main-agent authority
+- Tasks needing full access to repository privileges
+- Critical path development requiring main-agent decision making
+
+In 3PM:
+- Driver main-agent has full execution authority
+- Navigator main-agent provides oversight and approval
+- Both operate with main-agent permissions
+
+The standard agent operating protocol applies to both 3PS and 3PM configurations, with the distinction being the agent type filling each role rather than changing the fundamental collaboration pattern.
+
+---
+
 ## Project Overview
 
 **OCcode** is a branded IDE built on the [Void editor](https://github.com/voideditor/void) fork
@@ -93,7 +123,7 @@ occ/
 - **No local rebuilds required** — the watch process runs inside the container, picking up source changes automatically
 - **Consistent environment** — Node 20.18.2, all dependencies, and build tools are pre-configured
 - **Instant verification** — UI and functionality changes are visible through the running editor at `http://localhost:9888`
-- **Playwright testing** — browser automation tests (including MCP) run against the live editor without manual setup
+- **Playwright testing** — browser automation tests (including MCP) run against the live editor; browser setup requires checking for existing connections and user approval
 
 ### Development Container
 
@@ -105,8 +135,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "9888:9888"
+    network_mode: host
     volumes:
       - .:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -151,27 +180,245 @@ npx playwright test tests/e2e/ --reporter=list
 | CSS/HTML in webviews | No — served directly | Playwright tests, manual browser check |
 | `docker-compose.*.yml` | No — changes apply on next `docker compose up` | `docker compose ps` |
 
-### Playwright & Browser Automation Testing
+### Testing
 
-Playwright tests run against the live editor at `http://localhost:9888`:
+- Editor container running: `docker compose up -d`
+- Editor accessible at `http://localhost:9888`
+
+#### npm Test Scripts
 
 ```bash
-# Run all e2e tests
-npx playwright test tests/e2e/ --reporter=list
+# Start the dev environment (first time builds the image)
+docker compose up -d
 
-# Run specific test file
-npx playwright test tests/e2e/docker-setup.spec.ts --reporter=list
+# Run all E2E tests with standard Playwright (headless)
+npm run test:e2e
 
-# Run with browser (debug mode)
-npx playwright test tests/e2e/docker-setup.spec.ts --headed
+# Run all E2E tests with Playwright UI (headed, interactive)
+npm run test:e2e:ui
+
+# Run tests with an existing Chrome instance via CDP
+npm run test:e2e:cdp
 ```
 
+**⚠️ IMPORTANT: CDP tests must run serially (1 worker)**
+
+The E2E fixture shares a single browser context across tests via CDP. This is incompatible with parallel test execution.
+
+```bash
+# ✓ CORRECT — uses 1 worker by default
+npm run test:e2e tests/e2e/onboarding-auth.spec.ts
+
+# ✓ CORRECT — explicitly serial
+npm run test:e2e -- --workers=1 tests/e2e/onboarding-auth.spec.ts
+
+# ✗ WRONG — parallel workers interfere with shared context
+npm run test:e2e -- --workers=4 tests/e2e/onboarding-auth.spec.ts
+```
+
+When using `--workers=4` with CDP tests, you will see:
+- Tests run in 4 parallel workers
+- Multiple workers open pages simultaneously on the same context
+- Network and page state conflicts occur
+- Tests timeout waiting for `.monaco-workbench` or fail with page content errors
+- **Solution: Always use `--workers=1` for CDP E2E tests**
+
+**Filter tests by file or pattern:**
+
+```bash
+# Run a specific test file
+npx playwright test tests/e2e/docker-to-ide-flow.spec.ts
+
+# Run tests matching a pattern
+npx playwright test --grep "home panel"
+
+# Run tests matching a pattern (inverted)
+npx playwright test --grep-invert "slow"
+
+# Run a specific test by name
+npx playwright test -t "should open home panel"
+```
+
+**Test Result Interpretation & Next Actions**
+
+After running tests, check `./test-results/` for detailed failure diagnostics:
+
+| Symptom | Cause | Next Action |
+|---------|-------|-------------|
+| Many tests timeout at `.monaco-workbench` | Tests running in parallel (`--workers=4`) | Re-run with `--workers=1` |
+| Single test fails with "Page content should be visible" | Test logic issue (OCC Home panel not loading) | Check test `beforeEach`, webview iframe structure, or OCC extension activation |
+| "OCC Home panel tab not found after Xs" | Timeout in `waitForHomePanelTab()` | Increase `beforeEach` timeout or improve panel open strategy |
+| First test passes, later tests fail with blank pages | Page fixture navigation to wrong URL (e.g., `chrome://newtab/`) | Check if page.goto() is landing on expected VS Code URL; URL fallback in fixture should recover |
+| All tests hang indefinitely | Chrome CDP disconnected | Verify Chrome is running with `--remote-debugging-port=9222` |
+
+**Investigating Failed Tests:**
+1. **Screenshots**: `test-results/*test-failed-*.png` show what the page looked like at failure time
+2. **Trace files**: `test-results/trace.zip` contains Playwright trace (viewable at https://trace.playwright.dev)
+3. **Error context**: `test-results/*error-context.md` shows the page's a11y tree snapshot at failure
+4. **Test output**: Re-run failing test with `-t "test name"` to isolate and debug
+
+```bash
+# Run a single test for debugging
+npx playwright test -t "home panel shows onboarding steps"
+
+# Inspect trace in Playwright Inspector
+npx playwright show-trace test-results/trace.zip
+```
+
+---
+
+**Webview Panel Access:**
+
 The editor's webview panels are accessible via iframe chains:
+
 ```ts
 const inner = page
   .frameLocator('iframe.webview').first()
   .frameLocator('iframe#active-frame');
 ```
+
+---
+
+#### Playwright Test Modes
+
+All test files use one import that never changes:
+
+```ts
+import { test, expect, type Page, type FrameLocator, withCDP } from './fixtures';
+```
+
+`fixtures.ts` selects mode based on environment variables:
+
+| Mode | Env vars | When to use |
+|------|----------|-------------|
+| **Standard** | _(none)_ | CI, fast headless local runs |
+| **CDP** | `CDP_ENDPOINT=<url>` | Connect to existing Chrome via DevTools |
+| **VNC** | `USE_VNC=1` | Watch tests live in noVNC (requires explicit setup) |
+
+---
+
+#### Playwright Configuration
+
+**Test Results Output:**
+
+Test results, screenshots, and videos are saved to `./test-results/`. This directory is configured in `playwright.config.ts`:
+
+```ts
+outputDir: './test-results',
+```
+
+After test runs, check this directory for:
+- `test-results/*.png` — screenshots from failed tests
+- `test-results/*.webm` — video recordings (on failure)
+- `test-results/trace.zip` — Playwright trace files for debugging
+
+---
+
+#### Chrome DevTools Protocol (CDP) with Playwright
+
+Playwright can connect to an externally-launched Chrome instance via CDP.
+
+**Test for existing Chrome CDP connection first:**
+
+```bash
+# Check if Chrome is already running with remote debugging enabled
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    echo "✓ Chrome CDP endpoint found at $candidate"
+    exit 0
+  fi
+done
+
+echo "✗ No Chrome CDP connection found"
+```
+
+**One-time wrapper setup (if user approves):**
+
+```bash
+sudo tee /usr/local/bin/chrome-devtools-mcp-wrapper > /dev/null << 'EOF'
+#!/bin/bash
+ACTIVE_PORT_FILE=""
+for candidate in \
+  "/root/.config/google-chrome-beta/DevToolsActivePort" \
+  "/root/.config/google-chrome/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome-beta/DevToolsActivePort" \
+  "/home/linuxdev/.config/google-chrome/DevToolsActivePort"; do
+  if [ -f "$candidate" ]; then
+    ACTIVE_PORT_FILE="$candidate"
+    break
+  fi
+done
+
+if [ -z "$ACTIVE_PORT_FILE" ]; then
+  exec npx chrome-devtools-mcp@latest "$@"
+fi
+
+CDP_PORT=$(sed -n '1p' "$ACTIVE_PORT_FILE")
+CDP_PATH=$(sed -n '2p' "$ACTIVE_PORT_FILE")
+WS_ENDPOINT="ws://127.0.0.1:${CDP_PORT}${CDP_PATH}"
+
+exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS_ENDPOINT" "$@"
+EOF
+sudo chmod +x /usr/local/bin/chrome-devtools-mcp-wrapper
+```
+
+> **⚠️ Chrome 136+:** You **must** use `--user-data-dir` with a custom profile for CDP to work.
+> **⚠️ Port 9222 conflict:** If using the noVNC container, stop it before Chrome debugging:
+> `docker kill playwright-novnc`
+
+---
+
+#### MCP Browser Automation (optional — requires explicit user request)
+
+**Only start the noVNC container when the user explicitly requests headed browser testing or MCP automation.**
+
+```bash
+# Start only if user requests: "I want to watch the browser tests run"
+docker run -d --name playwright-novnc \
+  --network host \
+  -e SCREEN_WIDTH=1920 \
+  -e SCREEN_HEIGHT=1080 \
+  -e MCP_BROWSER=chromium \
+  ghcr.io/xtr-dev/mcp-playwright-novnc
+
+sleep 5
+```
+
+**MCP servers available:**
+
+**1. `playwright-novnc`** — via noVNC container:
+```json
+{
+  "command": "docker",
+  "args": ["run","--rm","-i","--network=host",
+           "ghcr.io/xtr-dev/mcp-playwright-novnc","mcp-proxy","http://localhost:3080/sse"]
+}
+```
+
+**2. `chrome-devtools`** — direct Chrome CDP:
+```json
+{
+  "command": "npx",
+  "args": ["chrome-devtools-mcp@latest", "--autoConnect", "--channel", "beta"]
+}
+```
+
+**Available MCP tools:** `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill_form`, `browser_take_screenshot`, `browser_list_pages`
+
+**Access noVNC interface:** http://localhost:6080/vnc.html
+
+**Clean up when done:**
+
+```bash
+docker stop playwright-novnc
+docker rm playwright-novnc
+```
+
+---
 
 ### Container Management
 
@@ -194,11 +441,35 @@ docker compose down
 
 ### OpenClaw Docker Gateway
 
-The OpenClaw gateway services (postgres, redis, gateway) are managed via `docker/docker-compose.openclaw.yml`:
+The OpenClaw gateway services (postgres, redis, gateway) are managed via two docker-compose files:
+
+**Development** (with local overrides for faster iteration):
 
 ```bash
-# Start gateway services
-OPENCLAW_DATA_DIR=~/.openclaw docker compose -f docker/docker-compose.openclaw.yml up -d
+# Start gateway services with dev overrides
+docker compose \
+  -f docker/docker-compose.openclaw.yml \
+  -f docker/docker-compose.openclaw.override.yml \
+  up -d
+
+# Or with env vars
+OPENCLAW_DATA_DIR=./.openclaw docker compose \
+  -f docker/docker-compose.openclaw.yml \
+  -f docker/docker-compose.openclaw.override.yml \
+  up -d
+
+# Check service health
+docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml ps
+
+# View gateway logs
+docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml logs -f occ-gateway
+```
+
+**Production** (base config only — used in CI/builds):
+
+```bash
+# Start gateway services (production-like)
+docker compose -f docker/docker-compose.openclaw.yml up -d
 
 # Check service health
 docker compose -f docker/docker-compose.openclaw.yml ps
@@ -210,7 +481,18 @@ docker compose -f docker/docker-compose.openclaw.yml logs -f occ-gateway
 docker compose -f docker/docker-compose.openclaw.yml down
 ```
 
-The gateway is accessible at `http://127.0.0.1:18789`. Postgres and Redis run on the internal Docker network only (no host port exposure).
+**Convenience alias** (for development):
+
+```bash
+alias docker-dev="docker compose -f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml"
+docker-dev up -d
+docker-dev logs -f occ-gateway
+docker-dev ps
+```
+
+The gateway is accessible at `http://127.0.0.1:${GATEWAY_PORT:-18789}`. Postgres and Redis run on the internal Docker network only (no host port exposure).
+
+**See [DOCKER.md](./DOCKER.md) for detailed OpenClaw setup, environment variables, and troubleshooting.**
 
 ---
 

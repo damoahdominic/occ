@@ -1,4 +1,4 @@
-.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows container-build-linux
+.PHONY: help test run-all run-fnm run-nvm run-node-only run-node-setup build-linux-container build-core build-linux build-windows build-macos build-macos-arm64 build-macos-x64 container-build-linux launch add-dev-build del-dev-build cdp
 
 # Default target
 .DEFAULT_GOAL := help
@@ -47,35 +47,6 @@ run-node-setup:
 	@echo "Running node-setup test scenario..."
 	docker run --rm -v $(PROJECT_ROOT):/app $(UBUNTU_IMAGE) bash -c "apt-get update && apt-get install -y curl wget git && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && export NVM_DIR=\"/root/.nvm\" && echo 'export NVM_DIR=\"\$$HOME/.nvm\"' >> ~/.bashrc && echo '[ -s \"\$$NVM_DIR/nvm.sh\" ] && source \"\$$NVM_DIR/nvm.sh\"' >> ~/.bashrc && cd /app && npm ci --ignore-scripts && source ~/.bashrc && source ./scripts/activate_env.sh && ./launch-editor.sh --setup-and-run"
 
-## docker-test: Run all tests using docker-compose
-docker-test:
-	@echo "Running all test scenarios with docker-compose..."
-	docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-
-## docker-test-fnm: Run fnm test with docker-compose
-docker-test-fnm:
-	@echo "Running fnm test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-fnm
-
-## docker-test-nvm: Run nvm test with docker-compose
-docker-test-nvm:
-	@echo "Running nvm test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-nvm
-
-## docker-test-node-only: Run node-only test with docker-compose
-docker-test-node-only:
-	@echo "Running node-only test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-node-only
-
-## docker-test-node-setup: Run node-setup test with docker-compose
-docker-test-node-setup:
-	@echo "Running node-setup test scenario with docker-compose..."
-	docker-compose -f docker-compose.test.yml run --rm test-node-setup
-
-## build-linux-container: Build the Linux build container image
-build-linux-container:
-	@echo "Building $(BUILD_LINUX_IMAGE) container..."
-	docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
 ## build-core: Shared build (rebuild + npm ci + tsc + extensions + React + bundle + minify + Electron)
 build-core:
@@ -85,8 +56,6 @@ build-core:
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor + build dependencies (parallel)" && \
 	( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ) && \
-	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
-	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \
@@ -194,8 +163,62 @@ build-macos-x64:
 ## container-build-linux: Run full Linux editor build inside the container
 container-build-linux:
 	@echo "Building editor image and running Linux build inside container..."
-	docker compose build editor
+	@mkdir -p .tmp
 	docker compose run --rm \
 		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
-		editor build-linux PROJECT_ROOT=/workspace
+		editor build-linux PROJECT_ROOT=/workspace | tee ./.tmp/container-build-linux-$(shell date +%Y-%m-%d_%H-%M-%S).log
+
+## launch: Launch the compiled editor (run after watch-editor.sh)
+launch:
+	@if [ ! -f "$(PROJECT_ROOT)/launch-editor.sh" ]; then \
+		echo "Error: launch-editor.sh not found"; \
+		exit 1; \
+	fi
+	@echo "Launching OCcode editor..."
+	@./launch-editor.sh | tee .tmp/lauch-editor.log
+
+## add-dev-build: Install dev build package (platform-specific)
+add-dev-build:
+	@echo "Installing OCcode development build..."
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		DEB_FILE=$$(find $(PROJECT_ROOT)/apps/editor/.build/linux/deb -name "*.deb" -type f | head -1); \
+		if [ -z "$$DEB_FILE" ]; then \
+			echo "Error: .deb package not found. Run 'make build-linux' first"; \
+			exit 1; \
+		fi; \
+		echo "Found: $$DEB_FILE"; \
+		sudo dpkg -i "$$DEB_FILE" || (sudo apt-get install -f -y && sudo dpkg -i "$$DEB_FILE") || exit 1; \
+		echo "✓ OCcode installed successfully"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Error: macOS installation not yet implemented"; \
+		exit 1; \
+	elif [ "$$(uname -s)" = "MINGW64_NT"* ] || [ "$$(uname -s)" = "MSYS_NT"* ] || [ "$$(uname -s)" = "CYGWIN_NT"* ]; then \
+		echo "Error: Windows installation not yet implemented"; \
+		exit 1; \
+	else \
+		echo "Error: Unsupported platform: $$(uname -s)"; \
+		exit 1; \
+	fi
+
+## del-dev-build: Uninstall dev build package (platform-specific)
+del-dev-build:
+	@echo "Uninstalling OCcode development build..."
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		sudo dpkg --remove occ || exit 1; \
+		echo "✓ OCcode uninstalled successfully"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		echo "Error: macOS uninstallation not yet implemented"; \
+		exit 1; \
+	elif [ "$$(uname -s)" = "MINGW64_NT"* ] || [ "$$(uname -s)" = "MSYS_NT"* ] || [ "$$(uname -s)" = "CYGWIN_NT"* ]; then \
+		echo "Error: Windows uninstallation not yet implemented"; \
+		exit 1; \
+	else \
+		echo "Error: Unsupported platform: $$(uname -s)"; \
+		exit 1; \
+	fi
+
+## cdp: Start Google Chrome with Chrome DevTools Protocol enabled
+cdp:
+	@echo "Starting Google Chrome with Chrome DevTools Protocol on port 9222..."
+	google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/cdp

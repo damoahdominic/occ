@@ -8,6 +8,7 @@ import { ProviderName, SettingName, displayInfoOfSettingName, providerNames, Voi
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { VoidButtonBgDarken, VoidCustomDropdownBox, VoidInputBox2, VoidSimpleInputBox, VoidSwitch } from '../util/inputs.js'
 import { useAccessor, useIsDark, useIsOptedOut, useRefreshModelListener, useRefreshModelState, useSettingsState } from '../util/services.js'
+import { OCCCreditsCard } from './OCCCreditsCard';
 import { X, RefreshCw, Loader2, Check, Asterisk, Plus, MonitorPlay } from 'lucide-react'
 import { URI } from '../../../../../../../base/common/uri.js'
 import { ModelDropdown } from './ModelDropdown.js'
@@ -31,6 +32,7 @@ type Tab =
 	| 'providers'
 	| 'featureOptions'
 	| 'mcp'
+	| 'billing'
 	| 'general'
 	| 'all';
 
@@ -1042,6 +1044,7 @@ export const Settings = () => {
 
 	const navItems: { tab: Tab; label: string }[] = [
 		{ tab: 'models', label: 'Models' },
+		{ tab: 'billing', label: 'Billing' },
 		{ tab: 'general', label: 'General' },
 		{ tab: 'all', label: 'All Settings' },
 	];
@@ -1470,6 +1473,37 @@ Use Model Context Protocol to provide Agent mode with more tools.
 									<ErrorBoundary>
 										<MCPServersList />
 									</ErrorBoundary>
+								</ErrorBoundary>
+							</div>
+
+							{/* Billing section */}
+							<div className={shouldShowTab('billing') ? `` : 'hidden'}>
+								<ErrorBoundary>
+									<h2 className='text-3xl mb-2'>Billing</h2>
+									<div style={{ padding: '16px' }}>
+										<OCCCreditsCard
+											isAuthenticated={!!settingsState.globalSettings.occLegacyJwt}
+											email={settingsState.globalSettings.occUserEmail || null}
+											balance={settingsState.globalSettings.occBalance}
+											isLoading={false}
+											error={settingsState.globalSettings.occBalanceError}
+											onSignIn={() => {
+												// Trigger auth flow - placeholder for now
+												dispatch({ type: 'AUTH_SIGN_IN' });
+											}}
+											onSignOut={() => {
+												// Clear JWT and auth state
+												dispatch({
+													type: 'UPDATE_GLOBAL_SETTINGS',
+													payload: { occLegacyJwt: '', occUserEmail: '' }
+												});
+											}}
+											onBuyCredits={() => {
+												// Open billing URL
+												window.open('https://occ.mba.sh/billing', '_blank');
+											}}
+										/>
+									</div>
 								</ErrorBoundary>
 							</div>
 

@@ -7,10 +7,16 @@ apps/editor/extensions/**/package-lock.json
 .DS_Store
 apps/editor/.build/
 apps/editor/core.*
-apps/VSCode-linux-x64/
-apps/VSCode-darwin-*/
-apps/VSCode-win32-*/
+apps/VSCode-*/
+app/web/
 
+
+test-results/
+tmp/
+docker/openclaw_docker_data/
+docker/windows-storage/
+docker/.env.openclaw
+apps/editor/extensions/openclaw-docker/src/assets.generated.ts
 
 # Internal infrastructure docs — keep private
 APPLE.md
@@ -26,3 +32,5 @@ occ-backend
 .worktrees/
 
 package-lock.json
+
+core.*

@@ -133,6 +133,7 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 					'.svg': 'file',
 					'.png': 'file',
 					'.sh': 'file',
+					'.css': 'file',
 				},
 				assetNames: 'media/[name]', // moves media assets into a sub-folder "media"
 				banner: entryPoint.name === 'vs/workbench/workbench.web.main' ? undefined : banner, // TODO@esm remove line when we stop supporting web-amd-esm-bridge
@@ -205,7 +206,7 @@ export interface IBundleESMTaskOpts {
 
 export function bundleTask(opts: IBundleESMTaskOpts): () => NodeJS.ReadWriteStream {
 	return function () {
-		return bundleESMTask(opts.esm).pipe(gulp.dest(opts.out));
+		return bundleESMTask(opts.esm).pipe(gulp.dest(opts.out, { mode: 0o664 }));
 	};
 }
 
@@ -263,7 +264,7 @@ export function minifyTask(src: string, sourceMapBaseUrl?: string): (cb: any) =>
 				includeContent: true,
 				addComment: true
 			} as any),
-			gulp.dest(src + '-min'),
+			gulp.dest(src + '-min', { mode: 0o664 }),
 			(err: any) => cb(err));
 	};
 }

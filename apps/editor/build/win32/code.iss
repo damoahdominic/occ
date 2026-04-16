@@ -23,7 +23,7 @@ SetupMutex={#AppMutex}setup
 ; this is a // Void icon comment. Old: WizardImageFile="{#RepoDir}\resources\win32\inno-big-100.bmp,{#RepoDir}\resources\win32\inno-big-125.bmp,{#RepoDir}\resources\win32\inno-big-150.bmp,{#RepoDir}\resources\win32\inno-big-175.bmp,{#RepoDir}\resources\win32\inno-big-200.bmp,{#RepoDir}\resources\win32\inno-big-225.bmp,{#RepoDir}\resources\win32\inno-big-250.bmp"
 ; this is a // Void icon comment. Old: WizardSmallImageFile="{#RepoDir}\resources\win32\inno-small-100.bmp,{#RepoDir}\resources\win32\inno-small-125.bmp,{#RepoDir}\resources\win32\inno-small-150.bmp,{#RepoDir}\resources\win32\inno-small-175.bmp,{#RepoDir}\resources\win32\inno-small-200.bmp,{#RepoDir}\resources\win32\inno-small-225.bmp,{#RepoDir}\resources\win32\inno-small-250.bmp"
 ; COMMENTED OUT WizardImageFile=""
-WizardSmallImageFile="{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp,{#RepoDir}\resources\win32\inno-void.bmp"
+WizardSmallImageFile="{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp,{#RepoDir}\resources\win32\inno-occode.bmp"
 SetupIconFile={#RepoDir}\resources\win32\occode.ico
 UninstallDisplayIcon={app}\{#ExeBasename}.exe
 ChangesEnvironment=true
@@ -38,8 +38,8 @@ ArchitecturesInstallIn64BitMode={#ArchitecturesInstallIn64BitMode}
 WizardStyle=modern
 
 // We've seen an uptick on broken installations from updates which were unable
-// to shutdown VS Code. We rely on the fact that the update signals
-// that VS Code is ready to be shutdown, so we're good to use `force` here.
+// to shutdown OCcode. We rely on the fact that the update signals
+// that OCcode is ready to be shutdown, so we're good to use `force` here.
 CloseApplications=force
 
 #ifdef Sign
@@ -1325,7 +1325,7 @@ begin
 
   #if "user" == InstallTarget
     if not WizardSilent() and IsAdmin() then begin
-      if MsgBox('This User Installer is not meant to be run as an Administrator. If you would like to install VS Code for all users in this system, download the System Installer instead from https://code.visualstudio.com. Are you sure you want to continue?', mbError, MB_OKCANCEL) = IDCANCEL then begin
+      if MsgBox('This User Installer is not meant to be run as an Administrator. If you would like to install OCcode for all users in this system, download the System Installer instead from https://openclawcode.ai. Are you sure you want to continue?', mbError, MB_OKCANCEL) = IDCANCEL then begin
         Result := False;
       end;
     end;
@@ -1426,7 +1426,7 @@ begin
   	Result := '';
 end;
 
-// VS Code will create a flag file before the update starts (/update=C:\foo\bar)
+// OCcode will create a flag file before the update starts (/update=C:\foo\bar)
 // - if the file exists at this point, the user quit Code before the update finished, so don't start Code after update
 // - otherwise, the user has accepted to apply the update and Code should start
 function LockFileExists(): Boolean;

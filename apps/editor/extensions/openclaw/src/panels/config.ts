@@ -343,6 +343,22 @@ export function getDashboardUrl(): { url: string; port: number } | undefined {
     const auth = gateway?.['auth'] as Record<string, unknown> | undefined;
     const token = auth?.['mode'] === 'token' && typeof auth?.['token'] === 'string' ? auth['token'] as string : '';
 
+    // Proxy URL: if gateway.proxyUrl is configured, use it instead of constructing localhost URL.
+    // Useful for: reverse proxies, external gateways, custom domains, load balancers, non-standard ports.
+    const proxyUrl = gateway?.['proxyUrl'] ?? gateway?.['proxy_url'] ?? config['proxyUrl'] ?? config['proxy_url'];
+    if (typeof proxyUrl === 'string' && proxyUrl.length > 0) {
+      try {
+        const url = new URL(proxyUrl);
+        const fullUrl = token
+          ? `${url.toString().replace(/\/$/, '')}/#token=${token}`
+          : url.toString();
+        return { url: fullUrl, port };
+      } catch {
+        // Invalid URL — fall through to default
+      }
+    }
+
+    // Default: construct localhost URL with configured port
     const url = token
       ? `http://127.0.0.1:${port}/#token=${token}`
       : `http://127.0.0.1:${port}/`;
@@ -359,9 +375,11 @@ export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private _customDashboardUrl: { url: string; port: number } | undefined;
 
-  private constructor(panel: vscode.WebviewPanel) {
+  private constructor(panel: vscode.WebviewPanel, customDashboardUrl?: { url: string; port: number }) {
     this._panel = panel;
+    this._customDashboardUrl = customDashboardUrl;
     // When the user closes the tab, bring the AI chat back.
     this._panel.onDidDispose(() => {
       this.dispose();
@@ -386,7 +404,7 @@ export class ConfigPanel {
     void this._load();
   }
 
-  public static async createOrShow(): Promise<void> {
+  public static async createOrShow(customDashboardUrl?: { url: string; port: number }): Promise<void> {
     // Close both sidebars (File Explorer on left, AI Chat on right) so the
     // browser gets the full editor width.
     await vscode.commands.executeCommand('workbench.action.closeSidebar');
@@ -402,7 +420,7 @@ export class ConfigPanel {
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true },
     );
-    ConfigPanel.currentPanel = new ConfigPanel(panel);
+    ConfigPanel.currentPanel = new ConfigPanel(panel, customDashboardUrl);
   }
 
   public dispose(): void {
@@ -413,7 +431,7 @@ export class ConfigPanel {
 
   private async _load(): Promise<void> {
     try {
-      const dashInfo = getDashboardUrl();
+      const dashInfo = this._customDashboardUrl ?? getDashboardUrl();
       const targetPort = dashInfo?.port ?? DEFAULT_GATEWAY_PORT;
       const proxyPort = await getOrStartConfigProxy(targetPort);
 

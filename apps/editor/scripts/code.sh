@@ -13,20 +13,52 @@ else
 	fi
 fi
 
+# Self-healing: Fix permission issues from previous builds
+function _heal() {
+	local out_dirs=("out" "out-build" "out-vscode" "out-vscode-min")
+	local healed=0
+
+	for dir in "${out_dirs[@]}"; do
+		if [ -d "$dir" ]; then
+			# Check if we have write permission issues
+			if [ ! -w "$dir" ] 2>/dev/null; then
+				# Fix permissions: make directory writable
+				chmod -R u+w "$dir" 2>/dev/null && ((healed++))
+			fi
+			# Clean up broken symlinks and stale files
+			find "$dir" -type l -delete 2>/dev/null || true
+		fi
+	done
+
+	# Remove incomplete builds that might cause issues
+	rm -rf out-build 2>/dev/null || true
+	rm -rf out-vscode 2>/dev/null || true
+	rm -rf out-vscode-min 2>/dev/null || true
+
+	[ $healed -gt 0 ] && echo "[build-heal] Fixed permissions on $healed directories"
+}
+
 function code() {
 	cd "$ROOT"
 
 	if [[ "$OSTYPE" == "darwin"* ]]; then
-		NAME=`node -p "require('./product.json').nameLong"`
+		NAME=$(python3 -c "import json; print(json.load(open('product.json'))['nameLong'])")
 		CODE="./.build/electron/$NAME.app/Contents/MacOS/Electron"
 	else
-		NAME=`node -p "require('./product.json').applicationName"`
+		NAME=$(python3 -c "import json; print(json.load(open('product.json'))['applicationName'])")
 		CODE=".build/electron/$NAME"
 	fi
 
 	# Get electron, compile, built-in extensions
+	# out/main.js is the compilation sentinel — skip the compile step if already built,
+	# but always ensure the Electron binary is present via preLaunch.js.
 	if [[ -z "${VSCODE_SKIP_PRELAUNCH}" ]]; then
-		node build/lib/preLaunch.js
+		if [[ -f "out/main.js" && -f "$CODE" ]]; then
+			echo "[launch] Existing compilation detected — skipping recompile"
+		else
+			echo "[launch] No compilation found — compiling now..."
+			node build/lib/preLaunch.js
+		fi
 	fi
 
 	# Manage built-in extensions
@@ -83,6 +115,9 @@ function code-wsl()
 		fi
 	fi
 }
+
+# Run healing before every build
+_heal
 
 if [ "$IN_WSL" == "true" ] && [ -z "$DISPLAY" ]; then
 	code-wsl "$@"

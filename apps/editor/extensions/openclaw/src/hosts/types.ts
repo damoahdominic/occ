@@ -256,7 +256,6 @@ export interface HostConnection extends vscode.Disposable {
 	gatewayStart(onLog: LogFn): Promise<void>;
 	gatewayStop(onLog: LogFn): Promise<void>;
 	gatewayRestart(onLog: LogFn): Promise<void>;
-	gatewayReboot(onLog: LogFn): Promise<void>;
 
 	// ── Full install+onboard ──
 	runSetup(params: SetupParams, onLog: LogFn): Promise<void>;
@@ -300,7 +299,7 @@ export interface HostAdapter {
 export interface OpenClawCoreAPI {
 	readonly version: string;
 
-	registerHostAdapter(adapter: HostAdapter): vscode.Disposable;
+	registerHostAdapter(adapter: HostAdapter, extensionId: string): vscode.Disposable;
 
 	getActiveHost(): HostConnection | undefined;
 	getHost(id: string): HostConnection | undefined;

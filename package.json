@@ -1,6 +1,6 @@
 {
   "name": "occode",
-  "version": "3.4.3",
+  "version": "3.5.4",
   "private": true,
   "description": "OCcode — branded cross-platform IDE wrapper with OpenClaw extension",
   "workspaces": [
@@ -8,6 +8,7 @@
     "packages/control-center"
   ],
   "scripts": {
+    "postinstall": "cd apps/editor && npm install",
     "dev": "npm --prefix apps/editor run watch",
     "editor:dev": "npm --prefix apps/editor run editor:dev",
     "dev:react": "npm --prefix apps/editor run watchreact",
@@ -18,6 +19,7 @@
     "editor:watch-react": "npm --prefix apps/editor run watchreact",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:cdp": "CDP_ENDPOINT=http://127.0.0.1:9222 playwright test",
     "bump-version": "yes | npx commit-and-tag-version -n"
   },
   "devDependencies": {

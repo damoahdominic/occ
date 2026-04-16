@@ -6,6 +6,26 @@
 
 set -e
 
+# Compare semantic versions: returns 0 if $1 >= $2
+version_gte() {
+    local v1="$1" v2="$2"
+    # Remove leading 'v' if present
+    v1="${v1#v}" v2="${v2#v}"
+    # Split into components and compare
+    local IFS='.' i=0
+    read -ra V1 <<< "$v1"
+    read -ra V2 <<< "$v2"
+    while [ $i -lt ${#V1[@]} ] && [ $i -lt ${#V2[@]} ]; do
+        local n1="${V1[$i]:-0}" n2="${V2[$i]:-0}"
+        n1="${n1%%[^0-9]*}" n2="${n2%%[^0-9]*}"
+        if [ "$n1" -gt "$n2" ] 2>/dev/null; then return 0; fi
+        if [ "$n1" -lt "$n2" ] 2>/dev/null; then return 1; fi
+        ((i++))
+    done
+    # If all compared parts equal, longer version is greater
+    [ ${#V1[@]} -ge ${#V2[@]} ]
+}
+
 detect_and_use_node() {
     local ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
     local NODE_VERSION="$(cat "$ROOT/apps/editor/.nvmrc" 2>/dev/null || echo "20.18.2")"
@@ -13,17 +33,24 @@ detect_and_use_node() {
     echo "Desired Node.js version: $NODE_VERSION"
     echo "Node.js version management: checking..."
 
-    # 1. INSIDE DOCKER: Use system Node (skip version managers entirely)
+    # Priority 2: INSIDE DOCKER - Only skip version managers if running as root
+    # Non-root users should still be able to use fnm/nvm if available
     if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        if command -v node >/dev/null 2>&1; then
-            local CURRENT_NODE_VERSION
-            CURRENT_NODE_VERSION="$(node --version 2>/dev/null || echo "unknown")"
-            echo "Docker environment detected, using system Node $CURRENT_NODE_VERSION"
-            return 0
+        # Only apply Docker bypass for root users (typical container setup)
+        if [ "$(id -u)" = "0" ]; then
+            if command -v node >/dev/null 2>&1; then
+                local CURRENT_NODE_VERSION
+                CURRENT_NODE_VERSION="$(node --version 2>/dev/null || echo "unknown")"
+                echo "Docker environment (root), using system Node $CURRENT_NODE_VERSION"
+                return 0
+            else
+                echo "ERROR: Running inside Docker but no system node found." >&2
+                echo "Make sure your Docker image includes Node.js $NODE_VERSION." >&2
+                return 1
+            fi
         else
-            echo "ERROR: Running inside Docker but no system node found." >&2
-            echo "Make sure your Docker image includes Node.js $NODE_VERSION." >&2
-            return 1
+            # Non-root in Docker: proceed to version manager detection (fnm/nvm)
+            echo "Docker environment detected (non-root), checking version managers..."
         fi
     fi
 
@@ -34,10 +61,22 @@ detect_and_use_node() {
             echo "Using Node.js $(node --version) via fnm"
             return 0
         else
-            echo "fnm: Node.js $NODE_VERSION not installed, installing..."
-            fnm install "$NODE_VERSION"
-            fnm use "$NODE_VERSION"
-            echo "Using Node.js $(node --version) via fnm"
+            echo "fnm: Node.js $NODE_VERSION not installed, trying to install..."
+            if fnm install "$NODE_VERSION" 2>/dev/null && fnm use "$NODE_VERSION" 2>/dev/null; then
+                echo "Using Node.js $(node --version) via fnm"
+                return 0
+            else
+                echo "fnm: install failed (permission denied?), falling through to next option..." >&2
+            fi
+        fi
+    fi
+
+    # Check if we have a compatible/higher system node - if so, skip installation
+    if command -v node >/dev/null 2>&1; then
+        local CURRENT_NODE_VERSION
+        CURRENT_NODE_VERSION="$(node --version | sed 's/^v//')"
+        if version_gte "$CURRENT_NODE_VERSION" "$NODE_VERSION"; then
+            echo "System Node.js $CURRENT_NODE_VERSION is compatible (>= $NODE_VERSION), skipping installation"
             return 0
         fi
     fi
@@ -58,17 +97,17 @@ detect_and_use_node() {
         fi
     fi
 
-    # 4. CHECK SYSTEM NODE (if version matches)
+    # 4. CHECK SYSTEM NODE
     if command -v node >/dev/null 2>&1; then
         local CURRENT_NODE_VERSION
         CURRENT_NODE_VERSION="$(node --version | sed 's/^v//')"
         if [ "$CURRENT_NODE_VERSION" = "$NODE_VERSION" ]; then
             echo "Using existing system Node.js $CURRENT_NODE_VERSION (matches required version)"
-            return 0
         else
             echo "WARNING: System Node.js $CURRENT_NODE_VERSION found, but $NODE_VERSION required." >&2
-            echo "         Attempting to install nvm with correct version..." >&2
+            echo "         Consider installing fnm or nvm for better version management." >&2
         fi
+        return 0
     fi
 
     # 5. AUTO-INSTALL NVM (if nothing else works)

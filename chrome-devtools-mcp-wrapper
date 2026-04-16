@@ -1,0 +1,52 @@
+#!/bin/bash
+# Dynamic CDP launcher
+#
+# 1. Tries existing Chrome on port 9225 (Playwright Chromium) then 9222 (novnc container)
+# 2. If OCC_BROWSER_CMD is set and no existing session found, launches that browser
+#    with --remote-debugging-port=9222 then connects to it
+# 3. Falls back to chrome-devtools-mcp auto-detect
+
+BROWSER_CMD="${OCC_BROWSER_CMD:-}"
+DEBUG_PORT=9222
+
+_connect() {
+  local PORT="$1"
+  local RAW
+  RAW=$(curl -s "http://localhost:${PORT}/json/version" 2>/dev/null)
+  [ -z "$RAW" ] && return 1
+  local WS
+  WS=$(python3 -c "
+import sys, json, re
+d = json.loads(sys.argv[1])
+ws = d.get('webSocketDebuggerUrl', '')
+ws = re.sub(r'://localhost/', '://localhost:${PORT}/', ws)
+print(ws)
+" "$RAW" 2>/dev/null)
+  [ -z "$WS" ] && return 1
+  exec npx chrome-devtools-mcp@latest --wsEndpoint "$WS" "$@"
+}
+
+# 1. Try existing sessions
+for PORT in 9225 9222; do
+  _connect "$PORT" "$@" && exit 0
+done
+
+# 2. Launch configurable browser if set
+if [ -n "$BROWSER_CMD" ]; then
+  $BROWSER_CMD \
+    --remote-debugging-port=${DEBUG_PORT} \
+    --no-first-run \
+    --no-default-browser-check \
+    --user-data-dir=/tmp/occ-cdp-profile \
+    about:blank &
+  BROWSER_PID=$!
+  # Wait up to 5s for CDP to come up
+  for i in $(seq 1 10); do
+    sleep 0.5
+    _connect "$DEBUG_PORT" "$@" && exit 0
+  done
+  kill "$BROWSER_PID" 2>/dev/null
+fi
+
+# 3. Fallback: let chrome-devtools-mcp auto-detect
+exec npx chrome-devtools-mcp@latest "$@"

@@ -3,6 +3,18 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+
+/** Build a filtered environment — only safe variables, no leaked credentials. */
+function safeExecEnv(): Record<string, string | undefined> {
+	const safe = ['PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE',
+		'TERM', 'TMPDIR', 'XDG_RUNTIME_DIR', 'DISPLAY', 'WAYLAND_DISPLAY',
+		'NODE_ENV', 'NVM_DIR', 'NVM_BIN', 'DOCKER_HOST'];
+	const env: Record<string, string | undefined> = {};
+	for (const key of safe) {
+		if (process.env[key]) { env[key] = process.env[key]; }
+	}
+	return env;
+}
 import type {
 	HostConnection,
 	HostType,
@@ -235,17 +247,21 @@ export class LocalHostConnection implements HostConnection {
 	}
 
 	private async _installUnix(onLog: LogFn): Promise<void> {
-		onLog('Downloading OpenClaw installer...\n');
-		// Use curl to pipe the official install script
-		const code = await this.execStream(
-			'bash',
-			['-c', 'curl -fsSL https://get.openclaw.sh | bash'],
-			{ timeout: 120_000 },
-			onLog,
-			onLog,
-		);
-		if (code !== 0) {
-			throw new Error(`Installer exited with code ${code}`);
+		// Download script, verify checksum, then execute — never pipe curl directly to bash.
+		const steps = [
+			{ label: 'Downloading installer...\n', cmd: 'curl -fsSL https://get.openclaw.sh -o /tmp/occ-install.sh' },
+			{ label: 'Fetching checksum...\n', cmd: 'curl -fsSL https://releases.openclaw.sh/install.sh.sha256 -o /tmp/occ-install.sha256' },
+			{ label: 'Verifying installer integrity...\n', cmd: 'cd /tmp && sha256sum -c occ-install.sha256' },
+			{ label: 'Running installer...\n', cmd: 'bash /tmp/occ-install.sh' },
+			{ label: '', cmd: 'rm -f /tmp/occ-install.sh /tmp/occ-install.sha256' },
+		];
+		for (const step of steps) {
+			if (step.label) { onLog(step.label); }
+			const code = await this.execStream('bash', ['-c', step.cmd], { timeout: 120_000 }, onLog, onLog);
+			if (code !== 0 && step.label) {
+				await this.exec('rm', ['-f', '/tmp/occ-install.sh', '/tmp/occ-install.sha256']).catch(() => {});
+				throw new Error(`Install step failed: ${step.label.trim()}`);
+			}
 		}
 		onLog('OpenClaw installed.\n');
 	}
@@ -346,24 +362,6 @@ export class LocalHostConnection implements HostConnection {
 		if (code !== 0) { throw new Error(`gateway restart exited with code ${code}`); }
 	}
 
-	async gatewayReboot(onLog: LogFn): Promise<void> {
-		const cliPath = await this.findOpenClawPath();
-		if (cliPath) {
-			try {
-				const code = await this.execStream(cliPath, ['gateway', 'reboot'], {}, onLog, onLog);
-				if (code === 0) return;
-			} catch { /* fall through to OS-level reboot */ }
-		}
-		onLog('openclaw gateway reboot unavailable — falling back to OS reboot');
-		if (process.platform === 'win32') {
-			const code = await this.execStream('shutdown', ['/r', '/t', '0'], { windowsHide: true }, onLog, onLog);
-			if (code !== 0) { throw new Error(`OS reboot command exited with code ${code}`); }
-		} else {
-			const code = await this.execStream('sudo', ['reboot'], {}, onLog, onLog);
-			if (code !== 0) { throw new Error(`OS reboot command exited with code ${code}`); }
-		}
-	}
-
 	// ── Full install + onboard ────────────────
 
 	async runSetup(params: SetupParams, onLog: LogFn): Promise<void> {
@@ -372,19 +370,19 @@ export class LocalHostConnection implements HostConnection {
 
 		onLog(`Setting up OpenClaw with provider=${params.provider}, port=${params.port}\n`);
 
+		// Pass API key via environment variable — never as a CLI argument (visible in ps).
 		const args = ['onboard',
 			'--provider', params.provider,
-			'--api-key', params.apiKey,
 			'--port', params.port,
 		];
 
-		const code = await this.execStream(cliPath, args, {}, onLog, onLog);
+		const code = await this.execStream(cliPath, args, { env: { OPENCLAW_API_KEY: params.apiKey } }, onLog, onLog);
 		if (code !== 0) { throw new Error(`onboard exited with code ${code}`); }
 	}
 
 	// ── Environment ───────────────────────────
 
 	buildExecEnv(): Record<string, string | undefined> {
-		return { ...process.env };
+		return safeExecEnv();
 	}
 }

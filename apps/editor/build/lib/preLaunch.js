@@ -11,7 +11,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const path_1 = __importDefault(require("path"));
 const child_process_1 = require("child_process");
 const fs_1 = require("fs");
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+// Priority 1: Try to use fnm npm first, fall back to system npm
+// This avoids issues with bun's node wrapper breaking npm's shebang
+let npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+// Check for fnm npm (higher priority as it's verified to work)
+const fnmNpm = '/opt/fnm/aliases/default/bin/npm';
+if (fs_1.existsSync(fnmNpm)) {
+    npm = fnmNpm;
+}
+
 const rootDir = path_1.default.resolve(__dirname, '..', '..');
 function runProcess(command, args = []) {
     return new Promise((resolve, reject) => {

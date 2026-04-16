@@ -1,0 +1,53 @@
+# OpenClaw Gateway — Development Overrides
+#
+# PURPOSE:
+#   Development-only overrides for OpenClaw gateway. Use WITH base config
+#   (docker-compose.openclaw.yml) via multi-file composition.
+#   NEVER used in production or CI/CD builds.
+#
+# USAGE:
+#   Development only: docker compose \
+#     -f docker/docker-compose.openclaw.yml \
+#     -f docker/docker-compose.openclaw.override.yml \
+#     up -d
+#
+# OVERRIDES:
+#   - Image: bunny:latest (fast iteration) instead of openclaw/pod:latest
+#   - Volumes: Local data dir and docker socket for docker-in-docker
+#   - Ports: Configurable via env for local dev access
+#
+# ENVIRONMENT:
+#   OPENCLAW_DATA_DIR : Where to persist local openclaw.json (default: ./openclaw_docker_data)
+#   GATEWAY_PROXY_URL : (Optional) Proxy URL for gateway dashboard if behind reverse proxy
+#
+# PROXY URL EXAMPLES:
+#   For development with reverse proxy:
+#     GATEWAY_PROXY_URL=http://localhost:8443/gateway/
+#   For external access:
+#     GATEWAY_PROXY_URL=https://gateway.example.com/
+#   Unset to use default:
+#     http://{GATEWAY_BIND_HOST}:{GATEWAY_PORT}/
+#
+# NOTES:
+#   - bunny image provides faster dev iteration than production image
+#   - Docker socket mount enables container to access host Docker
+#   - Local data persists across container restarts
+#   - This file is git-ignored in production contexts
+#   - proxyUrl (if set) takes precedence over port-based construction
+#
+# See DOCKER.md for detailed configuration and usage.
+
+version: "3.9"
+
+services:
+  occ-gateway:
+    image: bunny:latest
+    command: bash -lc "mkdir -p /root/.openclaw && echo '{\"gateway\":{\"controlUi\":{\"dangerouslyAllowHostHeaderOriginFallback\":true}}}' > /root/.openclaw/openclaw.json; bun i -g @buape/carbon @larksuiteoapi/node-sdk @slack/web-api grammy && openclaw gateway run --allow-unconfigured --bind lan"
+    environment:
+      # Optional: Set proxy URL for gateway when behind reverse proxy
+      # GATEWAY_PROXY_URL: ${GATEWAY_PROXY_URL:-}
+    ports:
+      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_PORT:-18789}:18789"
+    volumes:
+      - ${OPENCLAW_DATA_DIR:-./openclaw_docker_data}:/root/.openclaw
+      - /var/run/docker.sock:/var/run/docker.sock

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "playwright-novnc": {
+       "command": "bash",
+       "args": [
+         "-c",
+         "docker ps -q -f name=playwright-novnc || docker run -d --name playwright-novnc --network host ghcr.io/xtr-dev/mcp-playwright-novnc; docker exec -i playwright-novnc mcp-proxy http://localhost:3080/sse"
+       ]
+    },
+    "chrome-devtools": {
+      "command": "/home/linuxdev/Desktop/workshop/studio/hustle/occ/chrome-devtools-mcp-wrapper"
+    }
+  }
+}

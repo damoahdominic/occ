@@ -21,3 +21,6 @@ export const THREAD_STORAGE_KEY = 'void.chatThreadStorageII'
 
 
 export const OPT_OUT_KEY = 'void.app.optOutAll'
+
+export const OCC_BALANCE_STORAGE_KEY = 'void.occBalanceState'
+export const OCC_BALANCE_UPDATE_TIME_KEY = 'void.occBalanceUpdateTime'

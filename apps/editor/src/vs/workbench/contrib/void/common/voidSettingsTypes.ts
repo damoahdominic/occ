@@ -474,6 +474,9 @@ export type GlobalSettings = {
 	occMoltpilotKey: string; // sk-mp-* virtual key from occ.mba.sh (proxied through OCC backend)
 	occUserEmail: string;   // cached from /api/v1/me
 	occUserPicture: string; // cached from /api/v1/me (profile photo URL)
+	occBalance: number | null;
+	occBalanceLastFetch: number | null;
+	occBalanceError: string | null;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -739,6 +742,9 @@ When you use the terminal to run commands, **always clean up after yourself**:
 	occMoltpilotKey: '',
 	occUserEmail: '',
 	occUserPicture: '',
+	occBalance: null,
+	occBalanceLastFetch: null,
+	occBalanceError: null,
 }
 
 export type GlobalSettingName = keyof GlobalSettings
