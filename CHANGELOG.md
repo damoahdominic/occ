@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.5.3](https://github.com/asieduernest12/occ/compare/v3.5.2...v3.5.3) (2026-04-16)
+
+
+### Bug Fixes
+
+* **ci:** ensure .tmp dir exists before tee and unignore it ([75e5e5e](https://github.com/asieduernest12/occ/commit/75e5e5e79cc54e463d63f5507eb7f853c586a9c7))
+* **make:** redundant build of linux docker image' ([a23fab2](https://github.com/asieduernest12/occ/commit/a23fab297c6d8f4e2ac3de280e2ed87721abb57d))
+
+## [3.5.2](https://github.com/asieduernest12/occ/compare/v3.5.1...v3.5.2) (2026-04-15)
+
+
+### Features
+
+* add cdp Makefile target for Chrome DevTools Protocol ([27e20bf](https://github.com/asieduernest12/occ/commit/27e20bf75595cbad0256be011d7c3a12972a894f))
+* add gateway.proxyUrl config support for custom gateway URLs ([6b31398](https://github.com/asieduernest12/occ/commit/6b313987a65fcd5d6f93beec9a65d282663cee32))
+* add global teardown hook to close all browser tabs after tests ([e1cbc14](https://github.com/asieduernest12/occ/commit/e1cbc1436fc69aedf92c7484b0c80112d0f4c292))
+* **billing:** implement OCC Credits card and balance display components ([7c5d75a](https://github.com/asieduernest12/occ/commit/7c5d75ac5934d3706af8d25c865a2c351341498b))
+* **docker-setup:** implement input validation and error reporting ([6171f5f](https://github.com/asieduernest12/occ/commit/6171f5f2d549c08fccf0ea1c2ee1be7701e9b5e0))
+* **docker-setup:** migrate from docker run to docker-compose ([50e29cc](https://github.com/asieduernest12/occ/commit/50e29ccfac6da67accc23269e4695540d8356b04))
+* **gateway-info:** add gateway status display component with collapsed UI ([18f3670](https://github.com/asieduernest12/occ/commit/18f367015c668b67c7e2d8d62f90337c51539454))
+* **gateway-info:** add retry logic and transient error handling ([8b0c9a1](https://github.com/asieduernest12/occ/commit/8b0c9a1c8ba7390753cdead76c8ed955a4c2cd3a))
+* **openclaw-docker:** embed compose file, restore on first run if missing ([baca31d](https://github.com/asieduernest12/occ/commit/baca31d789d843c7e1201ebe6fac34e8a26cbf37))
+* **openclaw:** open web panel with token instead of external browser ([145634c](https://github.com/asieduernest12/occ/commit/145634cb6d27389385e3e0955bd4d3337b4d086c))
+* **ticket-047:** implement startup flow BDD spec and E2E test ([0e142a3](https://github.com/asieduernest12/occ/commit/0e142a30a65de984f6903d962aa72a5f840e26a0))
+* **ticket-047:** strengthen E2E tests and integrate proxyUrl validation ([e210158](https://github.com/asieduernest12/occ/commit/e21015877bb27ec6cae805c35528b2c7e1bd0ffa))
+
+
+### Bug Fixes
+
+* **build:** add codeWeb entry point to web bundle task ([75707a8](https://github.com/asieduernest12/occ/commit/75707a88321396e689c12c06bcd8e99d5e55b438))
+* deprecate docker run, enforce docker-compose.openclaw.yml as single source of truth ([709dcb9](https://github.com/asieduernest12/occ/commit/709dcb9933856bde2713c68593102fab3231d57b))
+* **docker-compose:** migrate all docker run commands to docker-compose ([663aa29](https://github.com/asieduernest12/occ/commit/663aa296a469af98deec5a69e3b8e57109ef580d))
+* **docker-setup:** fix missing/broken buttons in provisioning error view ([0391814](https://github.com/asieduernest12/occ/commit/03918142bcd45d30b67a2098ebb17031d990af2f))
+* **docker-setup:** make image field optional, fall back to default ([263ddb1](https://github.com/asieduernest12/occ/commit/263ddb11cd3ce1a41e8d5b094b01db354f354773))
+* **docker-setup:** prevent reload loop on gateway auto-detection ([751f403](https://github.com/asieduernest12/occ/commit/751f403349583188827add642831d335bfe8cfb6))
+* **docker-setup:** restore routing to DockerSetupPanel on docker card click ([c1ec97c](https://github.com/asieduernest12/occ/commit/c1ec97c861421f4b5b247568863ebfa35ac4a192))
+* **docker:** migrate setup panel from docker-compose V1 to docker compose V2 and use canonical compose file ([e7569f5](https://github.com/asieduernest12/occ/commit/e7569f553849d4395e9435e1b1f4c936c5fc2460))
+* explicitly close CDP sessions and pages after each test ([4ee74a2](https://github.com/asieduernest12/occ/commit/4ee74a274b2cc0333ac13bc01b35c76a8c84f6e4))
+* **home:** skip host-picker on first load if gateway or Docker detected ([4fc413a](https://github.com/asieduernest12/occ/commit/4fc413ab84c284d8373c7e8742e424db65ad52e5))
+* increase E2E test timeouts and improve page navigation reliability ([66bfc3a](https://github.com/asieduernest12/occ/commit/66bfc3ae8af16f320e883681b7ab7e596c130d4e))
+* **install:** parallelize postinstall and cascade from root npm install ([e412fc9](https://github.com/asieduernest12/occ/commit/e412fc91705d87329fd88adc8a1bb8ca6270e20b))
+* only close CDP sessions that the test created ([f224949](https://github.com/asieduernest12/occ/commit/f2249491085dac1f68b9ccb2c89f58d127283b29))
+* **openclaw-docker:** resolve EACCES in docker-in-docker gateway setup ([bc6ac80](https://github.com/asieduernest12/occ/commit/bc6ac805d31247f16bc2c3bd1e37a5f2767edbd2))
+* **openclaw:** stop setup panel from mounting gateway data dir as root ([12a2301](https://github.com/asieduernest12/occ/commit/12a230148a5ba64ad8ebe7add917b3f9b6e90413))
+* resolve E2E test fixture URL handling in CDP mode ([ed99fe0](https://github.com/asieduernest12/occ/commit/ed99fe05124467d9b682670de9bd4f91954c76a8))
+* skip node install if higher version already available ([5febd12](https://github.com/asieduernest12/occ/commit/5febd12be82870026a932d1ee88befbcc26ebd3e))
+* **ui:** add missing webview message handler for 'Open Web Control' button ([3c8c1a5](https://github.com/asieduernest12/occ/commit/3c8c1a55207ab351bbcbdc8272777a258ae28613))
+* use configured host port when opening docker dashboard ([f9f38a4](https://github.com/asieduernest12/occ/commit/f9f38a4166a3e7281c5f535dd9fc6cd480521554))
+
 ## [3.5.2](https://github.com/asieduernest12/occ/compare/v3.5.1...v3.5.2) (2026-04-15)
 
 
