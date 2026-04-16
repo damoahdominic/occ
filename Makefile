@@ -47,10 +47,6 @@ run-node-setup:
 	@echo "Running node-setup test scenario..."
 	docker run --rm -v $(PROJECT_ROOT):/app $(UBUNTU_IMAGE) bash -c "apt-get update && apt-get install -y curl wget git && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash && export NVM_DIR=\"/root/.nvm\" && echo 'export NVM_DIR=\"\$$HOME/.nvm\"' >> ~/.bashrc && echo '[ -s \"\$$NVM_DIR/nvm.sh\" ] && source \"\$$NVM_DIR/nvm.sh\"' >> ~/.bashrc && cd /app && npm ci --ignore-scripts && source ~/.bashrc && source ./scripts/activate_env.sh && ./launch-editor.sh --setup-and-run"
 
-## build-linux-container: Build the Linux build container image
-build-linux-container:
-	@echo "Building $(BUILD_LINUX_IMAGE) container..."
-	docker build -f Dockerfile.build-linux -t $(BUILD_LINUX_IMAGE) .
 
 ## build-core: Shared build (rebuild + npm ci + tsc + extensions + React + bundle + minify + Electron)
 build-core:
@@ -167,7 +163,6 @@ build-macos-x64:
 ## container-build-linux: Run full Linux editor build inside the container
 container-build-linux:
 	@echo "Building editor image and running Linux build inside container..."
-	docker compose build editor
 	docker compose run --rm \
 		--entrypoint make \
 		-e NODE_OPTIONS="--max-old-space-size=7168" \
