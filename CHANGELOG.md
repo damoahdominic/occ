@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.6.1](https://github.com/asieduernest12/occ/compare/v3.6.0...v3.6.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* **macos-ci:** publish unsigned artifacts when signing secrets missing ([1d5c5b9](https://github.com/asieduernest12/occ/commit/1d5c5b9205c06639bb01a0f26ec1df739c2042a8))
+
+## [3.6.0](https://github.com/asieduernest12/occ/compare/v3.5.4...v3.6.0) (2026-04-17)
+
+
+### Features
+
+* **ci:** per-platform npm and electron caching for Windows & macOS ([797f11f](https://github.com/asieduernest12/occ/commit/797f11f314b54950583545c0bc4cac34b8f41a04))
+* **ci:** skip macOS signing/notarization when secrets missing ([45afba1](https://github.com/asieduernest12/occ/commit/45afba1b282e0e2b421c5966ae83a77ae3f9989e))
+
+
+### Bug Fixes
+
+* **native-modules:** add explicit npm rebuild on Windows for vscode-policy-watcher.node ([cb79286](https://github.com/asieduernest12/occ/commit/cb792862fa5df6671973ee0f1c396437dc9e4fa7))
+* **ticket-039:** apply branded icons across all platforms ([77d7676](https://github.com/asieduernest12/occ/commit/77d7676e7549ccb3ff61fe97a75444108bdb052c))
+* **ticket-039:** remove stale branding across all platform manifests ([e0d8f06](https://github.com/asieduernest12/occ/commit/e0d8f063804a2000b0e7e1552dba71d868039edd))
+* **ticket-039:** replace web server icons and fix manifest branding ([152433e](https://github.com/asieduernest12/occ/commit/152433eac56eeb1493376ee53d8a924422124f5c))
+* **windows-build:** ensure native modules rebuild even on npm cache hit ([46f894e](https://github.com/asieduernest12/occ/commit/46f894e40bee8396b21cd8e7698a2085a9aa05fb))
+
+## [3.6.0](https://github.com/asieduernest12/occ/compare/v3.5.4...v3.6.0) (2026-04-17)
+
+
+### Features
+
+* **ci:** per-platform npm and electron caching for Windows & macOS ([797f11f](https://github.com/asieduernest12/occ/commit/797f11f314b54950583545c0bc4cac34b8f41a04))
+* **ci:** skip macOS signing/notarization when secrets missing ([45afba1](https://github.com/asieduernest12/occ/commit/45afba1b282e0e2b421c5966ae83a77ae3f9989e))
+
+
+### Bug Fixes
+
+* **native-modules:** add explicit npm rebuild on Windows for vscode-policy-watcher.node ([cb79286](https://github.com/asieduernest12/occ/commit/cb792862fa5df6671973ee0f1c396437dc9e4fa7))
+* **ticket-039:** apply branded icons across all platforms ([77d7676](https://github.com/asieduernest12/occ/commit/77d7676e7549ccb3ff61fe97a75444108bdb052c))
+* **ticket-039:** remove stale branding across all platform manifests ([e0d8f06](https://github.com/asieduernest12/occ/commit/e0d8f063804a2000b0e7e1552dba71d868039edd))
+* **ticket-039:** replace web server icons and fix manifest branding ([152433e](https://github.com/asieduernest12/occ/commit/152433eac56eeb1493376ee53d8a924422124f5c))
+* **windows-build:** ensure native modules rebuild even on npm cache hit ([46f894e](https://github.com/asieduernest12/occ/commit/46f894e40bee8396b21cd8e7698a2085a9aa05fb))
+
+## [3.5.4](https://github.com/asieduernest12/occ/compare/v3.5.3...v3.5.4) (2026-04-16)
+
+## [3.5.5](https://github.com/asieduernest12/occ/compare/v3.5.4...v3.5.5) (2026-04-17)
+
+
+### Bug Fixes
+
+* **native-modules:** add explicit npm rebuild on Windows for vscode-policy-watcher.node ([cb79286](https://github.com/asieduernest12/occ/commit/cb792862fa5df6671973ee0f1c396437dc9e4fa7))
+* **ticket-039:** apply branded icons across all platforms ([77d7676](https://github.com/asieduernest12/occ/commit/77d7676e7549ccb3ff61fe97a75444108bdb052c))
+* **ticket-039:** remove stale branding across all platform manifests ([e0d8f06](https://github.com/asieduernest12/occ/commit/e0d8f063804a2000b0e7e1552dba71d868039edd))
+* **ticket-039:** replace web server icons and fix manifest branding ([152433e](https://github.com/asieduernest12/occ/commit/152433eac56eeb1493376ee53d8a924422124f5c))
+
+## [3.5.4](https://github.com/asieduernest12/occ/compare/v3.5.3...v3.5.4) (2026-04-16)
+
 ## [3.5.4](https://github.com/asieduernest12/occ/compare/v3.5.3...v3.5.4) (2026-04-16)
 
 ## [3.5.3](https://github.com/asieduernest12/occ/compare/v3.4.3...v3.5.3) (2026-04-16)

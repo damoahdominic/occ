@@ -55,7 +55,13 @@ build-core:
 	cd $(PROJECT_ROOT)/apps/editor && \
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor + build dependencies (parallel)" && \
-	( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ) && \
+	if [ "$$CI_DEPS_READY" != "true" ]; then \
+		( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ); \
+	else \
+		echo "==> Skipping npm ci (node_modules cache hit)"; \
+	fi && \
+	echo "==> Rebuild native modules for Electron ($(ELECTRON_ARCH))" && \
+	npx --yes @electron/rebuild -v 34.3.2 -a $(ELECTRON_ARCH) && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \

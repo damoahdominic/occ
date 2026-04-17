@@ -56,6 +56,9 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
+    env:
+      P12_CHECK: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      API_KEY_CHECK: ${{ secrets.APPLE_API_KEY_P8 }}
 
     steps:
       - name: Checkout
@@ -68,7 +71,26 @@ jobs:
         with:
           node-version: '20.18.2'
           cache: 'npm'
-          cache-dependency-path: apps/editor/package-lock.json
+          cache-dependency-path: |
+            apps/editor/package-lock.json
+            apps/editor/build/package-lock.json
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/editor/node_modules
+            apps/editor/build/node_modules
+          key: node-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/editor/package-lock.json', 'apps/editor/build/package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Electron gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.electron-gyp
+          key: electron-gyp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/editor/package.json') }}
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -92,8 +114,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_OPTIONS: --max-old-space-size=7168
+          CI_DEPS_READY: ${{ steps.cache-node-modules.outputs.cache-hit }}
 
       - name: Import certificate to keychain
+        if: ${{ env.P12_CHECK != '' }}
         env:
           P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -112,6 +136,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "keychain-password" "$KEYCHAIN_PATH"
 
       - name: Sign app
+        if: ${{ env.P12_CHECK != '' }}
         env:
           CODESIGN_IDENTITY: "Developer ID Application: HITL, Inc (SQZ9VHYXJ3)"
           AGENT_BUILDDIRECTORY: ${{ github.workspace }}/apps
@@ -126,6 +151,7 @@ jobs:
           zip -Xry "$RUNNER_TEMP/OCcode-${{ matrix.artifact_name }}-${GITHUB_REF_NAME}.zip" "OCcode.app"
 
       - name: Notarize
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -144,32 +170,40 @@ jobs:
             --timeout 30m
 
       - name: Staple notarization ticket
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         run: |
           xcrun stapler staple "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app"
 
       - name: Re-zip stapled app
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         run: |
           cd "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}"
           zip -Xry "$RUNNER_TEMP/OCcode-${{ matrix.artifact_name }}-${GITHUB_REF_NAME}-signed.zip" "OCcode.app"
 
       - name: Verify signature
+        if: ${{ env.P12_CHECK != '' }}
         run: |
           codesign -dv --deep --verbose=4 "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
 
-      - name: Upload signed app artifact
+      - name: Upload app artifact (signed or unsigned)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed
-          path: ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+          name: OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}.zip
           retention-days: 30
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        continue-on-error: true
         with:
-          files: ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+          files: |
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}.zip
           name: OCcode ${{ github.ref_name }}
           body_path: CHANGELOG.md
           draft: false
@@ -197,7 +231,26 @@ jobs:
         with:
           node-version: '20.18.2'
           cache: 'npm'
-          cache-dependency-path: apps/editor/package-lock.json
+          cache-dependency-path: |
+            apps/editor/package-lock.json
+            apps/editor/build/package-lock.json
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/editor/node_modules
+            apps/editor/build/node_modules
+          key: node-modules-${{ runner.os }}-x64-${{ hashFiles('apps/editor/package-lock.json', 'apps/editor/build/package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-x64-
+
+      - name: Cache Electron gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Roaming/electron-gyp
+          key: electron-gyp-${{ runner.os }}-x64-${{ hashFiles('apps/editor/package.json') }}
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -220,6 +273,7 @@ jobs:
         run: make build-windows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_DEPS_READY: ${{ steps.cache-node-modules.outputs.cache-hit }}
 
       - name: Sign Windows installers (Azure Trusted Signing)
         if: ${{ env.AZURE_CLIENT_ID_CHECK != '' }}
