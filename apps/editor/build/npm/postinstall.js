@@ -175,6 +175,27 @@ function removeParcelWatcherPrebuild(dir) {
 	}
 }
 
+/**
+ * Rebuild native modules explicitly on Windows.
+ * @param {string} dir
+ * @param {*} [opts]
+ */
+function npmRebuild(dir, opts) {
+	opts = {
+		env: { ...process.env },
+		...(opts ?? {}),
+		cwd: dir,
+		stdio: 'inherit',
+		shell: true
+	};
+
+	// Only rebuild on Windows where build_from_source might need explicit rebuild
+	if (process.platform === 'win32') {
+		log(dir, 'Rebuilding native modules...');
+		run(npm, ['rebuild'], opts);
+	}
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -252,6 +273,13 @@ async function main() {
 
 	const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 	log('.', `Parallel install done — ${plainDirs.length} dirs in ${elapsed}s`);
+
+	// ── Native module rebuild (Windows) ─────────────────────────────────────
+	// On Windows, explicitly rebuild native modules after npm install
+	// to ensure modules like vscode-policy-watcher.node are compiled
+	if (process.platform === 'win32') {
+		npmRebuild('', { env: { ...process.env } });
+	}
 
 	// ── Git config ──────────────────────────────────────────────────────────
 	try {
