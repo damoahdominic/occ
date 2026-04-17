@@ -55,7 +55,11 @@ build-core:
 	cd $(PROJECT_ROOT)/apps/editor && \
 	export NODE_OPTIONS="--max-old-space-size=7168" && \
 	echo "==> Install editor + build dependencies (parallel)" && \
-	( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ) && \
+	if [ "$$CI_DEPS_READY" = "true" ]; then \
+		echo "==> Skipping npm ci (node_modules cache hit)"; \
+	else \
+		( npm ci --ignore-scripts & (cd build && npm ci --ignore-scripts) & wait ); \
+	fi && \
 	echo "==> Patch compilation.js" && \
 	node -e " \
 		const fs = require('fs'); \

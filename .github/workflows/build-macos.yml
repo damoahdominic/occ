@@ -71,7 +71,26 @@ jobs:
         with:
           node-version: '20.18.2'
           cache: 'npm'
-          cache-dependency-path: apps/editor/package-lock.json
+          cache-dependency-path: |
+            apps/editor/package-lock.json
+            apps/editor/build/package-lock.json
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/editor/node_modules
+            apps/editor/build/node_modules
+          key: node-modules-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/editor/package-lock.json', 'apps/editor/build/package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Electron gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.electron-gyp
+          key: electron-gyp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/editor/package.json') }}
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -95,6 +114,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_OPTIONS: --max-old-space-size=7168
+          CI_DEPS_READY: ${{ steps.cache-node-modules.outputs.cache-hit }}
 
       - name: Import certificate to keychain
         if: ${{ env.P12_CHECK != '' }}
@@ -206,7 +226,26 @@ jobs:
         with:
           node-version: '20.18.2'
           cache: 'npm'
-          cache-dependency-path: apps/editor/package-lock.json
+          cache-dependency-path: |
+            apps/editor/package-lock.json
+            apps/editor/build/package-lock.json
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/editor/node_modules
+            apps/editor/build/node_modules
+          key: node-modules-${{ runner.os }}-x64-${{ hashFiles('apps/editor/package-lock.json', 'apps/editor/build/package-lock.json') }}
+          restore-keys: |
+            node-modules-${{ runner.os }}-x64-
+
+      - name: Cache Electron gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Roaming/electron-gyp
+          key: electron-gyp-${{ runner.os }}-x64-${{ hashFiles('apps/editor/package.json') }}
 
       - name: Stamp release version in product.json
         if: startsWith(github.ref, 'refs/tags/')
@@ -229,6 +268,7 @@ jobs:
         run: make build-windows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_DEPS_READY: ${{ steps.cache-node-modules.outputs.cache-hit }}
 
       - name: Sign Windows installers (Azure Trusted Signing)
         if: ${{ env.AZURE_CLIENT_ID_CHECK != '' }}
