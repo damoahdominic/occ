@@ -187,7 +187,7 @@ jobs:
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
 
       - name: Upload app artifact (signed or unsigned)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         continue-on-error: true
         with:
           name: OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}
@@ -314,7 +314,7 @@ jobs:
              "$RUNNER_TEMP/OCcode-win32-x64-${GITHUB_REF_NAME}-user-setup.exe"
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         continue-on-error: true
         with:
           name: OCcode-win32-x64-${{ github.ref_name }}
@@ -389,7 +389,7 @@ jobs:
           cp "$DEB" "$RUNNER_TEMP/OCcode-linux-x64-${GITHUB_REF_NAME}.deb"
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         continue-on-error: true
         with:
           name: OCcode-linux-x64-${{ github.ref_name }}
