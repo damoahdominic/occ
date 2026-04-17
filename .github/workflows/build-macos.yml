@@ -186,19 +186,24 @@ jobs:
           codesign -dv --deep --verbose=4 "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
 
-      - name: Upload signed app artifact
+      - name: Upload app artifact (signed or unsigned)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         continue-on-error: true
         with:
-          name: OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed
-          path: ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+          name: OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}.zip
           retention-days: 30
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        continue-on-error: true
         with:
-          files: ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+          files: |
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}-signed.zip
+            ${{ runner.temp }}/OCcode-${{ matrix.artifact_name }}-${{ github.ref_name }}.zip
           name: OCcode ${{ github.ref_name }}
           body_path: CHANGELOG.md
           draft: false
