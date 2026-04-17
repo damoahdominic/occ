@@ -56,6 +56,9 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: write
+    env:
+      P12_CHECK: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      API_KEY_CHECK: ${{ secrets.APPLE_API_KEY_P8 }}
 
     steps:
       - name: Checkout
@@ -94,6 +97,7 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=7168
 
       - name: Import certificate to keychain
+        if: ${{ env.P12_CHECK != '' }}
         env:
           P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -112,6 +116,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "keychain-password" "$KEYCHAIN_PATH"
 
       - name: Sign app
+        if: ${{ env.P12_CHECK != '' }}
         env:
           CODESIGN_IDENTITY: "Developer ID Application: HITL, Inc (SQZ9VHYXJ3)"
           AGENT_BUILDDIRECTORY: ${{ github.workspace }}/apps
@@ -126,6 +131,7 @@ jobs:
           zip -Xry "$RUNNER_TEMP/OCcode-${{ matrix.artifact_name }}-${GITHUB_REF_NAME}.zip" "OCcode.app"
 
       - name: Notarize
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -144,15 +150,18 @@ jobs:
             --timeout 30m
 
       - name: Staple notarization ticket
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         run: |
           xcrun stapler staple "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app"
 
       - name: Re-zip stapled app
+        if: ${{ env.P12_CHECK != '' && env.API_KEY_CHECK != '' }}
         run: |
           cd "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}"
           zip -Xry "$RUNNER_TEMP/OCcode-${{ matrix.artifact_name }}-${GITHUB_REF_NAME}-signed.zip" "OCcode.app"
 
       - name: Verify signature
+        if: ${{ env.P12_CHECK != '' }}
         run: |
           codesign -dv --deep --verbose=4 "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
           spctl -a -vvv -t install "$GITHUB_WORKSPACE/apps/${{ matrix.output_dir }}/OCcode.app" 2>&1
