@@ -272,19 +272,13 @@ async function openOpenClawFolder(context?: vscode.ExtensionContext): Promise<vo
   }
 
   // Workspace file lives in ~/.occ, points at ~/.openclaw as the folder.
+  // Only write on first creation. Never rewrite an existing file — the adapter
+  // status controllers legitimately swap folders (e.g. to a Docker state dir),
+  // which can leave folders=[] in the file briefly. Rewriting it to ~/.openclaw
+  // here caused a reload loop: VS Code detects the external change → reload →
+  // activate → statusController swaps folders again → folders=[] again → rewrite…
   const workspaceFilePath = path.join(occPath, WORKSPACE_FILENAME);
-  let needsWrite = !fs.existsSync(workspaceFilePath);
-  if (!needsWrite) {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(workspaceFilePath, 'utf-8'));
-      if (!Array.isArray(parsed?.folders) || parsed.folders.length === 0) {
-        needsWrite = true;
-      }
-    } catch {
-      needsWrite = true;
-    }
-  }
-  if (needsWrite) {
+  if (!fs.existsSync(workspaceFilePath)) {
     fs.writeFileSync(
       workspaceFilePath,
       JSON.stringify(
@@ -716,31 +710,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     // Always shows the host picker regardless of what is installed — used after disconnect.
     vscode.commands.registerCommand('openclaw.home.picker', () => {
       routeHome(context.extensionUri, context, true);
-    }),
-    // Host-specific setup commands — invoked by routeHome() and the host picker in HomePanel.
-    // Each sets the window binding for this host type then opens the home panel,
-    // which renders the appropriate dashboard or setup wizard based on the binding.
-    vscode.commands.registerCommand('openclaw.host.setup.local', async () => {
-      const existing = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-      if (!existing || existing.type !== 'local') {
-        await context.workspaceState.update(WINDOW_HOST_KEY, {
-          type: 'local', hostId: 'local:main', port: getConfiguredGatewayPort(), label: 'Local',
-        } satisfies WindowHostBinding);
-      }
-      HomePanel.createOrShow(context.extensionUri);
-    }),
-    vscode.commands.registerCommand('openclaw.host.setup.docker', async () => {
-      const existing = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);
-      if (!existing || existing.type !== 'docker') {
-        await context.workspaceState.update(WINDOW_HOST_KEY, {
-          type: 'docker', hostId: 'docker:occ-openclaw', port: DEFAULT_GATEWAY_PORT, label: 'Docker',
-        } satisfies WindowHostBinding);
-      }
-      HomePanel.createOrShow(context.extensionUri);
-    }),
-    vscode.commands.registerCommand('openclaw.host.setup.ssh', () => {
-      // SSH host details are entered via the home panel UI — open it and let the panel drive.
-      HomePanel.createOrShow(context.extensionUri);
     }),
     vscode.commands.registerCommand('openclaw.configure', async () => {
       const windowHostBinding = context.workspaceState.get<WindowHostBinding>(WINDOW_HOST_KEY);

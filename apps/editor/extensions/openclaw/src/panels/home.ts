@@ -278,8 +278,6 @@ export class HomePanel {
         } else if (t === 'ssh') {
           void vscode.commands.executeCommand('openclaw.host.setup.ssh');
         }
-      } else if (msg.command === 'checkHostsStatus') {
-        void this._handleCheckHostsStatus();
       }
     }, null, this._disposables);
   }
@@ -401,58 +399,43 @@ export class HomePanel {
       ? (await this._checkGatewayStatusRaw()) === 'running'
       : false;
 
-    // Show hosts overview when Docker container is up (regardless of local config),
-    // or when both modes are active, or when forced (e.g. after disconnect).
-    if (isDockerRunning || this._forcePicker) {
+    // Host picker — single 3-card view (Local / Docker / SSH).
+    // Shown when Docker is up, when forced (e.g. after disconnect/cancel), or
+    // when there's no evidence of a running gateway anywhere.
+    if (isDockerRunning || this._forcePicker || (!isConfigured && !isGatewayReachable)) {
       this._stopPolling();
-      let localPort = 18789;
-      try {
-        const raw = fs.readFileSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'), 'utf-8');
-        const cfg = JSON.parse(raw) as Record<string, unknown>;
-        const gateway = cfg['gateway'] as Record<string, unknown> | undefined;
-        const p = gateway?.['port'] ?? cfg['port'] ?? cfg['gateway_port'] ?? cfg['gatewayPort'];
-        const n = typeof p === 'string' ? parseInt(p, 10) : typeof p === 'number' ? p : NaN;
-        if (Number.isFinite(n) && n > 0 && n < 65536) { localPort = n; }
-      } catch { /* use default */ }
-      this._panel.webview.html = this._getHostsOverviewHtml(iconUri.toString(), localPort);
+      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
+      this._autoUpdateTriggered = false;
       return;
     }
 
-    // Show unified setup view only when there is no evidence of a running gateway.
-    // If the gateway is already reachable (e.g. container running, editor reloaded after
-    // setup) skip straight to the dashboard so the user doesn't see the host picker again.
-    if (!isConfigured && !isGatewayReachable) {
-      this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
-      this._autoUpdateTriggered = false; // reset so check fires when they reach the dashboard
-    } else {
-      // Local is configured and Docker is not running — show local status.
-      setActiveOpenClawWorkspaceFolder(path.join(os.homedir(), '.openclaw'));
+    // Local is configured and Docker is not running — show local status.
+    setActiveOpenClawWorkspaceFolder(path.join(os.homedir(), '.openclaw'));
 
-      const emojiBaseUri = this._panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(this._extensionUri, 'media', 'emojis')
-      ).toString();
-      let aiModelName = '';
-      try {
-        const cfg = await this._host.readConfig() as Record<string, unknown>;
-        const primaryModel = (cfg as Record<string, Record<string, Record<string, Record<string, string>>>>)
-          ?.agents?.defaults?.model?.primary ?? '';
-        if (primaryModel) {
-          const slashIdx = primaryModel.indexOf('/');
-          const providerId = slashIdx >= 0 ? primaryModel.slice(0, slashIdx) : '';
-          const modelId    = slashIdx >= 0 ? primaryModel.slice(slashIdx + 1) : primaryModel;
-          const providers = (cfg as Record<string, Record<string, Record<string, Record<string, { id: string; name?: string; input?: string[] }[]>>>>)
-            ?.models?.providers ?? {};
-          const providerModels = providers[providerId]?.models ?? [];
-          const modelDef = providerModels.find((m: { id: string; name?: string; input?: string[] }) => m.id === modelId);
-          aiModelName = modelDef?.name ?? primaryModel;
-        }
-      } catch { /* openclaw.json unreadable or missing fields */ }
-
-      this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
-      if (!this._autoUpdateTriggered) {
-        this._autoUpdateTriggered = true;
-        setTimeout(() => void this._autoUpdateIfOutdated(), 3000);
+    const emojiBaseUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'media', 'emojis')
+    ).toString();
+    let aiModelName = '';
+    try {
+      const cfg = await this._host.readConfig() as Record<string, unknown>;
+      const primaryModel = (cfg as Record<string, Record<string, Record<string, Record<string, string>>>>)
+        ?.agents?.defaults?.model?.primary ?? '';
+      if (primaryModel) {
+        const slashIdx = primaryModel.indexOf('/');
+        const providerId = slashIdx >= 0 ? primaryModel.slice(0, slashIdx) : '';
+        const modelId    = slashIdx >= 0 ? primaryModel.slice(slashIdx + 1) : primaryModel;
+        const providers = (cfg as Record<string, Record<string, Record<string, Record<string, { id: string; name?: string; input?: string[] }[]>>>>)
+          ?.models?.providers ?? {};
+        const providerModels = providers[providerId]?.models ?? [];
+        const modelDef = providerModels.find((m: { id: string; name?: string; input?: string[] }) => m.id === modelId);
+        aiModelName = modelDef?.name ?? primaryModel;
       }
+    } catch { /* openclaw.json unreadable or missing fields */ }
+
+    this._panel.webview.html = this._getHtml(isInstalled, dirExists, cliCheck, iconUri.toString(), occJwt, occUser, emojiBaseUri, aiModelName);
+    if (!this._autoUpdateTriggered) {
+      this._autoUpdateTriggered = true;
+      setTimeout(() => void this._autoUpdateIfOutdated(), 3000);
     }
     this._startPolling();
     if (isInstalled) {
@@ -755,171 +738,6 @@ export class HomePanel {
       req.on('error', () => resolve('stopped'));
       req.on('timeout', () => { req.destroy(); resolve('stopped'); });
     });
-  }
-
-  private async _handleCheckHostsStatus(): Promise<void> {
-    // Local: "running" = config file exists (OpenClaw is installed & configured).
-    // Gateway port check is unreliable because the gateway may not be auto-started.
-    const localConfigured = fs.existsSync(path.join(os.homedir(), '.openclaw', 'openclaw.json'));
-    const localStatus: 'running' | 'stopped' = localConfigured ? 'running' : 'stopped';
-
-    // Docker: "running" = container is up (regardless of whether gateway is started inside it).
-    const dockerContainerRunning = await new Promise<boolean>(resolve => {
-      try {
-        const result = cp.spawnSync(
-          'docker',
-          ['ps', '--filter', 'name=^/occ-openclaw$', '--format', '{{.Status}}'],
-          { timeout: 3000, windowsHide: true },
-        );
-        const st = (result.stdout?.toString() ?? '').trim();
-        resolve(st.length > 0 && st.toLowerCase().startsWith('up'));
-      } catch { resolve(false); }
-    });
-    const dockerStatus: 'running' | 'stopped' = dockerContainerRunning ? 'running' : 'stopped';
-
-    try {
-      this._panel.webview.postMessage({ type: 'hostsStatus', local: localStatus, docker: dockerStatus });
-    } catch { /* ignore */ }
-  }
-
-  private _getHostsOverviewHtml(iconUri: string, localPort: number): string {
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
-      background: #1a1a1a; color: #e0e0e0;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-height: 100vh; padding: 32px 20px 48px; text-align: center;
-    }
-    .logo { width: 52px; height: 52px; filter: drop-shadow(0 4px 12px rgba(220,40,40,0.3)); margin-bottom: 12px; }
-    h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 4px; }
-    h1 .accent { color: #dc2828; }
-    .tagline { color: #666; font-size: 12px; margin-bottom: 32px; }
-    .cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 640px; }
-    .card {
-      flex: 1 1 220px; max-width: 300px;
-      background: #1e1e1e; border: 1.5px solid rgba(255,255,255,0.08);
-      border-radius: 16px; padding: 24px 20px; cursor: pointer;
-      transition: border-color 0.15s, background 0.15s, transform 0.12s;
-      display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
-      text-align: left; position: relative;
-    }
-    .card:hover { border-color: rgba(220,40,40,0.45); background: #222; transform: translateY(-2px); }
-    .card:active { transform: translateY(0); }
-    .card-header { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-    .card-icon { font-size: 28px; line-height: 1; }
-    .badge-recommended {
-      font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-      padding: 2px 7px; border-radius: 20px;
-      background: rgba(220,40,40,0.15); color: #dc2828; border: 1px solid rgba(220,40,40,0.3);
-    }
-    .status-pill {
-      display: flex; align-items: center; gap: 5px;
-      font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-      padding: 3px 8px; border-radius: 20px;
-      background: rgba(255,255,255,0.05); color: #555; border: 1px solid rgba(255,255,255,0.07);
-      transition: background 0.3s, color 0.3s;
-    }
-    .status-pill.running { background: rgba(74,222,128,0.1); color: #4ade80; border-color: rgba(74,222,128,0.2); }
-    .status-pill.stopped { background: rgba(255,255,255,0.04); color: #555; border-color: rgba(255,255,255,0.07); }
-    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .status-pill.checking .status-dot { animation: pulse-dot 1s ease-in-out infinite; color: #888; }
-    .card-title { font-size: 16px; font-weight: 700; color: #fff; }
-    .card-port { font-size: 11px; color: #444; font-family: monospace; }
-    .best-if { font-size: 11px; color: #555; margin-top: 2px; }
-    .best-if strong { color: #666; font-weight: 600; }
-    .best-if ul { padding-left: 14px; margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
-    .best-if li { color: #555; line-height: 1.4; }
-  </style>
-</head>
-<body>
-  <img class="logo" src="${iconUri}" alt="OpenClaw" />
-  <h1>OCC <span class="accent">Home</span></h1>
-  <p class="tagline">Choose a host to open</p>
-
-  <div class="cards">
-    <button class="card" data-card="local" onclick="pick('local')">
-      <div class="card-header">
-        <span class="card-icon">&#x1F4BB;</span>
-        <span class="status-pill checking" id="pill-local">
-          <span class="status-dot"></span>
-          <span id="pill-local-text">checking</span>
-        </span>
-      </div>
-      <div class="card-title">Local</div>
-      <div class="card-port">localhost:${localPort}</div>
-      <div class="best-if">
-        <strong>Best if:</strong>
-        <ul>
-          <li>Dedicated device (Mac mini, home server)</li>
-          <li>No personal data on the machine</li>
-          <li>You want direct, unrestricted access</li>
-        </ul>
-      </div>
-    </button>
-
-    <button class="card" data-card="docker" onclick="pick('docker')">
-      <div class="card-header">
-        <span class="card-icon">&#x1F433;</span>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span class="badge-recommended">Recommended</span>
-          <span class="status-pill checking" id="pill-docker">
-            <span class="status-dot"></span>
-            <span id="pill-docker-text">checking</span>
-          </span>
-        </div>
-      </div>
-      <div class="card-title">Docker</div>
-      <div class="card-port">localhost:18790</div>
-      <div class="best-if">
-        <strong>Best if:</strong>
-        <ul>
-          <li>This is your personal computer</li>
-          <li>You want a contained, isolated environment</li>
-          <li>Easy to reset or wipe without affecting your system</li>
-        </ul>
-      </div>
-    </button>
-  </div>
-
-  <script>
-    const vscode = acquireVsCodeApi();
-    function pick(hostType) {
-      vscode.postMessage({ command: 'chooseHostType', hostType });
-    }
-    function applyStatus(pill, textEl, status) {
-      pill.className = 'status-pill ' + status;
-      textEl.textContent = status === 'running' ? 'running' : status === 'stopped' ? 'stopped' : 'checking';
-    }
-    function poll() {
-      vscode.postMessage({ command: 'checkHostsStatus' });
-    }
-    window.addEventListener('message', function(e) {
-      var msg = e.data;
-      if (msg.type === 'hostsStatus') {
-        applyStatus(
-          document.getElementById('pill-local'),
-          document.getElementById('pill-local-text'),
-          msg.local,
-        );
-        applyStatus(
-          document.getElementById('pill-docker'),
-          document.getElementById('pill-docker-text'),
-          msg.docker,
-        );
-      }
-    });
-    poll();
-    setInterval(poll, 5000);
-  </script>
-</body>
-</html>`;
   }
 
   private _getHostTypeSelectionHtml(iconUri: string): string {

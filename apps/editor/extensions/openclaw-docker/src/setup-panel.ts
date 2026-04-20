@@ -299,12 +299,18 @@ export class DockerSetupPanel {
   }
 
   /** Run all validation checks for form fields */
-  private async _runValidationChecks(config: Partial<DockerConfig>): Promise<{ [key: string]: string | null }> {
-    const errors: { [key: string]: string | null } = {
-      image: null,
-      port: null,
-      bindHost: null,
-      dataDir: null,
+  private async _runValidationChecks(config: Partial<DockerConfig>): Promise<{
+    errors:   { image: string | null; port: string | null; bindHost: string | null; dataDir: string | null };
+    warnings: { dataDir: string | null };
+  }> {
+    const errors = {
+      image: null as string | null,
+      port: null as string | null,
+      bindHost: null as string | null,
+      dataDir: null as string | null,
+    };
+    const warnings = {
+      dataDir: null as string | null,
     };
 
     // Validate image — blank is fine (defaults to DEFAULT_CONFIG.image)
@@ -329,7 +335,8 @@ export class DockerSetupPanel {
       errors.bindHost = 'Bind host must be 127.0.0.1 or 0.0.0.0';
     }
 
-    // Validate dataDir
+    // Validate dataDir — "required" and path-access remain blocking errors.
+    // Disk space is a soft recommendation surfaced as a warning, never blocking.
     if (!config.dataDir || config.dataDir.trim() === '') {
       errors.dataDir = 'Data directory is required';
     } else {
@@ -337,15 +344,11 @@ export class DockerSetupPanel {
       const accessError = await this._checkPathAccess(resolvedPath);
       if (accessError) {
         errors.dataDir = accessError;
-      } else {
-        const spaceError = await this._checkDiskSpace(resolvedPath);
-        if (spaceError) {
-          errors.dataDir = spaceError;
-        }
       }
+      warnings.dataDir = await this._checkDiskSpace(resolvedPath);
     }
 
-    return errors;
+    return { errors, warnings };
   }
 
   /** Check if a port is in use */
@@ -387,7 +390,7 @@ export class DockerSetupPanel {
     });
   }
 
-  /** Check available disk space (minimum 5GB) */
+  /** Soft disk-space recommendation (5 GB). Returns advisory text, never blocks. */
   private async _checkDiskSpace(fsPath: string): Promise<string | null> {
     return new Promise((resolve) => {
       try {
@@ -403,13 +406,14 @@ export class DockerSetupPanel {
           if (lines.length > 1) {
             const parts = lines[1].split(/\s+/);
             const available = parseInt(parts[3], 10);
-            const requiredBytes = 5 * 1024 * 1024 * 1024; // 5GB
+            const recommendedBytes = 5 * 1024 * 1024 * 1024; // 5 GB recommended
 
-            if (available < requiredBytes) {
+            if (available < recommendedBytes) {
               const availableGB = (available / (1024 * 1024 * 1024)).toFixed(1);
-              resolve(`Insufficient disk space: ${availableGB}GB available, 5GB required`);
-            } else {
-              resolve(null);
+              resolve(
+                `Only ${availableGB} GB free here — we recommend at least 5 GB. You can continue, but setup may run out of space.`,
+              );
+              return;
             }
           }
         }
@@ -576,9 +580,9 @@ ${logs.substring(0, 3000)}
   }
 
   private async _handleValidateFields(msg: { image: string; port: string; dataDir: string; bindHost: string }): Promise<void> {
-    const errors = await this._runValidationChecks(msg);
+    const { errors, warnings } = await this._runValidationChecks(msg);
     try {
-      this._panel.webview.postMessage({ type: 'dockerValidationErrors', errors });
+      this._panel.webview.postMessage({ type: 'dockerValidationErrors', errors, warnings });
     } catch { /* ignore */ }
   }
 
@@ -1115,6 +1119,8 @@ ${logs.substring(0, 3000)}
     .field-error { border-color: #f87171 !important; }
     .error-msg { color: #f87171; font-size: 11px; margin-top: 4px; display: none; }
     .error-msg.show { display: block; }
+    .warn-msg { color: #fbbf24; font-size: 11px; margin-top: 4px; display: none; line-height: 1.4; }
+    .warn-msg.show { display: block; }
     .validation-badge {
       display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600;
       padding: 2px 6px; border-radius: 3px;
@@ -1211,6 +1217,7 @@ ${logs.substring(0, 3000)}
         <button class="btn-browse" onclick="browseDir()">Browse</button>
       </div>
       <div class="error-msg" id="dataDir-error"></div>
+      <div class="warn-msg" id="dataDir-warn"></div>
     </div>
     <div class="field checkbox">
       <input type="checkbox" id="freshBuild" ${config.freshBuild ? 'checked' : ''} />
@@ -1273,7 +1280,7 @@ ${logs.substring(0, 3000)}
       }
     }
 
-    function updateValidationUI(errors) {
+    function updateValidationUI(errors, warnings) {
       validationState = errors;
 
       // Update error messages and field styling
@@ -1292,7 +1299,19 @@ ${logs.substring(0, 3000)}
         }
       });
 
-      // Update Next button state
+      // Render soft warnings (non-blocking advisories — amber, Next stays enabled)
+      const warnEl = document.getElementById('dataDir-warn');
+      if (warnEl) {
+        const w = warnings && warnings.dataDir;
+        if (w) {
+          warnEl.textContent = w;
+          warnEl.classList.add('show');
+        } else {
+          warnEl.classList.remove('show');
+        }
+      }
+
+      // Update Next button state — warnings never gate submission
       const allValid = Object.values(errors).every(e => e === null);
       document.getElementById('btn-next').disabled = !allValid;
     }
@@ -1324,7 +1343,7 @@ ${logs.substring(0, 3000)}
       } else if (msg.type === 'dockerEnvironmentCheck') {
         updateDockerWarning(msg.result);
       } else if (msg.type === 'dockerValidationErrors') {
-        updateValidationUI(msg.errors);
+        updateValidationUI(msg.errors, msg.warnings);
       } else if (msg.type === 'dockerConfigError') {
         const err = document.getElementById('error');
         err.textContent = msg.message;
