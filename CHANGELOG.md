@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.7.0](https://github.com/asieduernest12/occ/compare/v3.6.1...v3.7.0) (2026-04-20)
+
+
+### Features
+
+* **ticket-052+053:** fix Docker setup flicker, persist chosenHostType, surface gateway controls ([23521fe](https://github.com/asieduernest12/occ/commit/23521feae3673f40eaaba4b7c61662c315dc5f51))
+
+
+### Bug Fixes
+
+* **config:** open gateway dashboard externally to bypass Chrome LNA ([85a1576](https://github.com/asieduernest12/occ/commit/85a1576607d627e9902b34387b95517ef37e242c))
+* register missing openclaw.host.setup.{local,docker,ssh} commands ([93953d5](https://github.com/asieduernest12/occ/commit/93953d5a01ecc490314300ad7250373ab34976c1))
+* **ticket-051:** restore host picker flow and kill workspace-folder reload loop ([60e0d4b](https://github.com/asieduernest12/occ/commit/60e0d4badb1f6cb775ab1c3067f339536e91f5e0))
+
+## [3.6.1](https://github.com/asieduernest12/occ/compare/v3.6.0...v3.6.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* **macos-ci:** publish unsigned artifacts when signing secrets missing ([1d5c5b9](https://github.com/asieduernest12/occ/commit/1d5c5b9205c06639bb01a0f26ec1df739c2042a8))
+
 ## [3.6.1](https://github.com/asieduernest12/occ/compare/v3.6.0...v3.6.1) (2026-04-17)
 
 
