@@ -15,6 +15,7 @@ import { HostStatusBarItem } from './hosts/statusbar';
 import { HostTreeProvider } from './hosts/tree';
 import type { OpenClawCoreAPI } from './hosts/types';
 import { mergeDashboardWithProxy } from './utils/proxyUrl';
+import { initAuthGate, notifyAuthCompleted } from './authGate';
 
 const DEFAULT_GATEWAY_PORT = 18789;
 
@@ -663,6 +664,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       const activeId = hostRegistry.getActiveHostId();
       await hostManager.refreshHost(activeId);
     }),
+    // ticket-053: explicit-choice marker — called by setup wizards on success,
+    // and cleared by the Reconfigure escape hatch. See
+    // docs/plans/multihost/08-ui-design.md §0 Rule 6.
+    vscode.commands.registerCommand('openclaw.host.markChosen', async (type: 'local' | 'docker' | 'ssh') => {
+      if (type !== 'local' && type !== 'docker' && type !== 'ssh') { return; }
+      await hostManager.markActiveHostChosen(type);
+    }),
+    vscode.commands.registerCommand('openclaw.host.reconfigure', async () => {
+      await hostManager.clearActiveHostChoice();
+      void vscode.commands.executeCommand('openclaw.home.refresh');
+    }),
   );
 
   // Inference balance bar (shown at bottom-right, tracks $1.00 free budget).
@@ -694,6 +706,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
             void context.secrets.store(OCC_JWT_KEY, token).then(() => {
               // Also sync to renderer settings service (for chat / other renderer consumers).
               vscode.commands.executeCommand('occ.auth.setLegacyJwt', token);
+              // Signal the auth gate (if open) that sign-in completed so it
+              // can close itself and allow gateway detection to proceed.
+              notifyAuthCompleted();
             });
           }
         }
@@ -996,9 +1011,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
     }),
   );
 
-  // Auto-show OCC Home on startup (after activation settles).
+  // Startup flow per docs/plans/multihost/08-ui-design.md §0:
+  //   1. Auth gate — checks for a stored JWT; if absent, opens a sign-in panel
+  //      and waits for the deep-link URI handler to fire `notifyAuthCompleted()`.
+  //   2. Gateway detection — `routeHome` picks Status vs. Setup based on host state.
+  // The 500ms delay preserves the original "let activation settle" behaviour.
   setTimeout(() => {
-    routeHome(context.extensionUri, context);
+    void (async () => {
+      await initAuthGate(context, context.extensionUri);
+      routeHome(context.extensionUri, context);
+    })();
   }, 500);
 
   // Return OpenClawCoreAPI so adapter extensions can register their adapters.

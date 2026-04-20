@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { HostConnectionConfig, HostEntry, HostsFile, HostType, HostStatus } from './types';
+import type { HostChoiceType, HostConnectionConfig, HostEntry, HostsFile, HostType, HostStatus } from './types';
 
 // ─────────────────────────────────────────────
 // Paths
@@ -241,6 +241,29 @@ export class HostRegistry implements vscode.Disposable {
 		if (!this._hostsFile) { return; }
 		if (!this._hostsFile.hosts.find(h => h.id === id)) { return; }
 		this._hostsFile.activeHostId = id;
+		this._persist();
+		this._onDidChange.fire();
+	}
+
+	// ── ticket-053: explicit-choice marker ────
+
+	/** Returns the persisted chosenHostType, or undefined when the user has not yet completed a setup. */
+	getChosenHostType(): HostChoiceType | undefined {
+		return this._hostsFile?.chosenHostType;
+	}
+
+	/** Called by a setup wizard's success handler. Persists the marker and fires onDidChange. */
+	async markActiveHostChosen(type: HostChoiceType): Promise<void> {
+		if (!this._hostsFile) { return; }
+		this._hostsFile.chosenHostType = type;
+		this._persist();
+		this._onDidChange.fire();
+	}
+
+	/** Called by the Reconfigure escape hatch. Removes the marker so HomePanel falls back to the host picker. */
+	async clearActiveHostChoice(): Promise<void> {
+		if (!this._hostsFile) { return; }
+		delete this._hostsFile.chosenHostType;
 		this._persist();
 		this._onDidChange.fire();
 	}

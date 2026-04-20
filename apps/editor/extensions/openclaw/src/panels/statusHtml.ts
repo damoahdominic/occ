@@ -1044,6 +1044,7 @@ export function renderStatusHtml(
   <div class="btn-group">
     <button id="btn-primary" class="btn-primary" onclick="cmd('openclaw.configure')">${icSettings}Open Web Control</button>
     <button class="btn-secondary" id="btn-version" onclick="checkVersion()">${icRefreshCw}Check for Updates</button>
+    <button class="btn-secondary" id="btn-reconfigure" onclick="reconfigure()">Pick Different Host</button>
     <div id="version-result" style="display:none;font-size:clamp(10px,2vw,12px);margin-top:2px;line-height:1.5;max-width:min(320px,94vw);text-align:center;"></div>
   </div>
   ` : `
@@ -1284,6 +1285,11 @@ export function renderStatusHtml(
 
     function toggleChat() {
       vscode.postMessage({ command: 'toggleChat' });
+    }
+
+    // ticket-053 Task 4: escape hatch back to the host picker
+    function reconfigure() {
+      vscode.postMessage({ command: 'reconfigure' });
     }
 
     // ── Version check ─────────────────────────────────────────────

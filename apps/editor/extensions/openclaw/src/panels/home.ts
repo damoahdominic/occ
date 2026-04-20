@@ -84,8 +84,37 @@ function getOpenClawWorkspaceDir(): string {
   return fallback;
 }
 
+/**
+ * ticket-053: read the `chosenHostType` marker from ~/.occ/hosts.json without
+ * requiring a HostRegistry reference inside HomePanel. This is the same pattern
+ * getOpenClawWorkspaceDir() uses for openclaw.json — direct file read, best-effort.
+ *
+ * Returns 'local' | 'docker' | 'ssh' when the user has completed a setup wizard,
+ * or undefined when no explicit choice has been recorded (→ show host picker).
+ */
+function readChosenHostType(): 'local' | 'docker' | 'ssh' | undefined {
+  try {
+    const hostsPath = path.join(os.homedir(), '.occ', 'hosts.json');
+    const raw = fs.readFileSync(hostsPath, 'utf-8');
+    const json = JSON.parse(raw) as { chosenHostType?: unknown };
+    const v = json.chosenHostType;
+    return (v === 'local' || v === 'docker' || v === 'ssh') ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class HomePanel {
   public static currentPanel: HomePanel | undefined;
+  /**
+   * ticket-052: last-seen extensionUri, cached so the module-scope
+   * `openclaw.home.refresh` command can (re)open HomePanel even if the
+   * current panel was disposed — e.g. after the user picked Docker, the
+   * HomePanel disposes at home.ts ~273 and only the DockerSetupPanel is
+   * alive when `_handleLaunchGateway` fires the refresh command.
+   */
+  private static _lastExtensionUri: vscode.Uri | undefined;
+  private static _refreshCommandRegistered = false;
   private static _installTerminal: vscode.Terminal | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private readonly _extensionUri: vscode.Uri;
@@ -139,6 +168,33 @@ export class HomePanel {
     this._panel.onDidChangeViewState(e => {
       if (e.webviewPanel.visible) { void this._update(); }
     }, null, this._disposables);
+    // ticket-052: register a command that re-enters detection (Rules 2/4 of
+    // docs/plans/multihost/08-ui-design.md §0). Setup adapters call this after
+    // completion instead of swapping UI directly to the Status view — this keeps
+    // `_update()` as the single source of truth for "gateway up? show Status".
+    //
+    // Registration is process-global and ownership-free: disposing a HomePanel
+    // must not unregister the command, otherwise a setup flow that disposes
+    // HomePanel (home.ts ~273 on "chooseHostType") and then fires refresh would
+    // hit an unregistered command. The handler refreshes the current panel if
+    // one exists, otherwise opens a new panel (constructor runs `_update()`).
+    HomePanel._lastExtensionUri = extensionUri;
+    if (!HomePanel._refreshCommandRegistered) {
+      HomePanel._refreshCommandRegistered = true;
+      try {
+        vscode.commands.registerCommand('openclaw.home.refresh', () => {
+          const existing = HomePanel.currentPanel;
+          if (existing) {
+            void existing._update();
+          } else if (HomePanel._lastExtensionUri) {
+            HomePanel.createOrShow(HomePanel._lastExtensionUri, false);
+          }
+        });
+      } catch {
+        // Command already registered — nothing to do; flag stays true so we
+        // don't try again on subsequent panel creates.
+      }
+    }
     // Watch ~/.openclaw/openclaw.json for when OpenClaw first initialises.
     const configWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(path.join(os.homedir(), '.openclaw')), 'openclaw.json'),
@@ -264,6 +320,10 @@ export class HomePanel {
         if (args && args.length > 0) {
           void vscode.commands.executeCommand('void.openChatWithMessage', args[0], 'agent');
         }
+      } else if (msg.command === 'reconfigure') {
+        // ticket-053 Task 4: escape hatch — clears chosenHostType and
+        // dispatches openclaw.home.refresh which re-renders the picker.
+        void vscode.commands.executeCommand('openclaw.host.reconfigure');
       } else if (msg.command === 'chooseHostType') {
         const t = msg.hostType as string;
         // Best-effort: close files from the other host's dir (non-blocking).
@@ -395,14 +455,43 @@ export class HomePanel {
 
     // Probe the gateway HTTP endpoint — used below to skip the setup picker
     // when a gateway is already reachable (e.g. container running, editor reloaded).
-    const isGatewayReachable = !isConfigured && !isDockerRunning
+    //
+    // NOTE (ticket-052): previously this probe was skipped when `isDockerRunning`
+    // was true, because the old gate at the host-picker branch treated
+    // `isDockerRunning` itself as "show the picker." With `isDockerRunning` removed
+    // from that gate, we need the probe to run whenever we don't already have a
+    // definitive signal — i.e. any time `isConfigured` is false.
+    const isGatewayReachable = !isConfigured
       ? (await this._checkGatewayStatusRaw()) === 'running'
       : false;
 
-    // Host picker — single 3-card view (Local / Docker / SSH).
-    // Shown when Docker is up, when forced (e.g. after disconnect/cancel), or
-    // when there's no evidence of a running gateway anywhere.
-    if (isDockerRunning || this._forcePicker || (!isConfigured && !isGatewayReachable)) {
+    // ticket-053: route on the persisted explicit-choice marker, not on the
+    // live gateway probe. `chosenHostType` is set by setup wizards on success
+    // (via `openclaw.host.markChosen`) and cleared by `openclaw.host.reconfigure`.
+    // See docs/plans/multihost/08-ui-design.md §0 Rule 6.
+    let chosenHostType = readChosenHostType();
+
+    // Backward compatibility: legacy installs have a config file but no
+    // chosenHostType marker. Infer 'local' once so we don't kick existing users
+    // back to the host picker on upgrade. Docker legacy is rarer and will fall
+    // through to the picker one time, then setup will re-mark it on completion.
+    if (!chosenHostType && isConfigured && this._host.type === 'local') {
+      try {
+        await vscode.commands.executeCommand('openclaw.host.markChosen', 'local');
+        chosenHostType = 'local';
+      } catch { /* non-fatal — picker will still show, user can re-pick */ }
+    }
+
+    // Host picker is shown only when:
+    //   (a) the user has explicitly invoked Reconfigure (`_forcePicker`), or
+    //   (b) no `chosenHostType` marker has been recorded yet.
+    //
+    // ticket-052 removed `isDockerRunning` from this gate to stop the flicker.
+    // ticket-053 replaces `isConfigured` / `isGatewayReachable` entirely —
+    // once the user has completed setup, the Status panel owns the view
+    // regardless of whether the gateway is currently up (it will render an
+    // offline variant with a Start button, per §0a of the UI design doc).
+    if (this._forcePicker || !chosenHostType) {
       this._stopPolling();
       this._panel.webview.html = this._getHostTypeSelectionHtml(iconUri.toString());
       this._autoUpdateTriggered = false;
@@ -579,37 +668,32 @@ export class HomePanel {
     this._commandAction = action;
     try { this._panel.webview.postMessage({ type: 'gatewayStatus', status: intermediary }); } catch {}
 
-    // Hand off to AI — it will run the command and handle any errors
-    const verb = action === 'restart' ? 'restart' : action;
-    const osInfo = `${process.platform} ${os.release()} (${process.arch})`;
-    const port = this._getConfiguredPort();
-    const portCheckCmd = process.platform === 'win32'
-      ? `netstat -ano | findstr :${port}`
-      : `lsof -iTCP:${port} -sTCP:LISTEN -n -P 2>/dev/null || ss -tlnp 2>/dev/null | grep :${port}`;
-    const aiMessage = [
-      `Please ${verb} the OpenClaw gateway.`,
-      '',
-      `Run the following command in your terminal:`,
-      '```',
-      `openclaw gateway ${action}`,
-      '```',
-      '',
-      `Environment: ${osInfo}`,
-      `Configured gateway port: ${port}`,
-      '',
-      `After running the command, verify the gateway has reached the expected state by checking`,
-      `whether port ${port} is ${expectedState === 'running' ? 'actively listening' : 'no longer listening'}:`,
-      '```',
-      portCheckCmd,
-      '```',
-      '',
-      `The gateway is confirmed ${expectedState === 'running' ? 'running' : 'stopped'} when port ${port} ` +
-      `${expectedState === 'running' ? 'shows an active LISTEN entry' : 'shows no LISTEN entry'}.`,
-      `If the command fails or the port does not reach the expected state, diagnose and fix the issue.`,
-    ].join('\n');
+    // ticket-053 Task 3: invoke the active HostConnection's gateway control directly
+    // instead of handing off to the AI. `this._host` is always the active registry
+    // host (see constructor: coreAPI.onDidChangeActiveHost + getActiveHost).
+    const onLog = (line: string) => {
+      try { this._outputChannel.append(line); } catch { /* non-fatal */ }
+      writeLog(line);
+    };
+    this._outputChannel.show(true);
+    this._outputChannel.appendLine(`[gateway:${action}] invoking host adapter…`);
+    try {
+      if (action === 'start') {
+        await this._host.gatewayStart(onLog);
+      } else if (action === 'stop') {
+        await this._host.gatewayStop(onLog);
+      } else {
+        await this._host.gatewayRestart(onLog);
+      }
+      this._outputChannel.appendLine(`[gateway:${action}] completed`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this._outputChannel.appendLine(`[gateway:${action}] failed: ${msg}`);
+      vscode.window.showErrorMessage(`Gateway ${action} failed: ${msg}`);
+    }
 
-    await vscode.commands.executeCommand('void.openChatWithMessage', aiMessage, 'agent');
-    void vscode.commands.executeCommand('openclaw.balance.spend');
+    // Re-render the Status page so the new gateway state is reflected.
+    void this._update();
 
     // Poll in the background until gateway reaches expected state
     this._pollUntilState(expectedState, intermediary);
