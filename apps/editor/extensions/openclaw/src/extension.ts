@@ -8,7 +8,7 @@ import * as https from 'https';
 import { HomePanel } from './panels/home';
 import { StatusPanel } from './panels/status';
 import { setActiveOpenClawWorkspaceFolder } from './panels/statusController';
-import { stopConfigProxy, getDashboardUrl, ConfigPanel } from './panels/config';
+import { stopConfigProxy, getDashboardUrl } from './panels/config';
 import { HostRegistry } from './hosts/registry';
 import { HostManager } from './hosts/manager';
 import { HostStatusBarItem } from './hosts/statusbar';
@@ -730,8 +730,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
 
         const dashInfo = getDockerDashboardUrl(container, hostPort);
 
-        // 3. Open the web panel with the tokenized URL
-        await ConfigPanel.createOrShow(dashInfo);
+        // 3. Open the dashboard in the user's browser. We used to iframe it
+        //    inside a webview via ConfigPanel, but Chrome's Local Network
+        //    Access policy blocks a public-origin page from embedding a
+        //    127.0.0.1 iframe — when the editor is served at anything other
+        //    than `localhost`, the iframe fails with "The connection is
+        //    blocked because it was initiated by a public page to connect to
+        //    devices or servers on your local network." A top-level
+        //    navigation (openExternal) isn't subject to LNA, so this works
+        //    regardless of where the editor is hosted.
+        await vscode.env.openExternal(vscode.Uri.parse(dashInfo.url));
         return;
       }
 
@@ -739,8 +747,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<OpenCl
       const effectivePort = windowHostBinding ? windowHostBinding.port : getConfiguredGatewayPort();
       const reachable = await isWebServerReachable(effectivePort);
       if (reachable) {
-        // Open the web panel - it will use getDashboardUrl() which reads from ~/.openclaw/openclaw.json
-        await ConfigPanel.createOrShow();
+        // Open the dashboard in the user's browser — see LNA comment above.
+        const info = getDashboardUrl();
+        const dashboardUrl = info?.url ?? `http://localhost:${effectivePort}/`;
+        await vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
       } else {
         const configUrl = `http://localhost:${effectivePort}/`;
         const message =
