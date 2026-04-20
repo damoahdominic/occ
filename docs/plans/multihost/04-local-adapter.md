@@ -288,6 +288,7 @@ export class LocalHostConnection implements HostConnection {
   async gatewayRestart(): Promise<ExecResult> {
     return this.exec('openclaw', ['gateway', 'restart']);
   }
+  // gatewayStart/Stop/Restart — see "Gateway Lifecycle" note below.
   
   // ── VS Code Integration ──
   async openExplorer(p?: string): Promise<void> {
@@ -312,6 +313,25 @@ export class LocalHostConnection implements HostConnection {
   }
 }
 ```
+
+## Gateway Lifecycle
+
+`LocalHostConnection.gatewayStart / gatewayStop / gatewayRestart` shell to the
+locally-installed `openclaw` CLI:
+
+```
+openclaw gateway start
+openclaw gateway stop
+openclaw gateway restart
+```
+
+These are the control-plane surface for the Status panel's Start / Stop / Restart
+buttons (`apps/editor/extensions/openclaw/src/panels/statusHtml.ts:1214-1219`) on
+a local-active host. They differ from the Docker adapter's equivalents, which
+shell to `docker compose -f docker/docker-compose.openclaw.yml up -d / down / restart`
+on the user's workstation — see [`05-docker-adapter.md`](./05-docker-adapter.md)
+"Gateway Lifecycle". ticket-053 wires these methods to `openclaw.gateway.start/stop/restart`
+VS Code commands.
 
 ## What Moves From `home.ts` Into This Adapter
 

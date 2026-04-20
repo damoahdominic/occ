@@ -35,7 +35,7 @@ services:
 #      - "9888:9888"
     environment:
       NODE_ENV: development
-      NODE_OPTIONS: --max-old-space-size=7096
+      NODE_OPTIONS: --max-old-space-size=2048
       GITHUB_TOKEN: ${GITHUB_TOKEN:-OCC_GITHUB_TOKEN_NOT_SET}
       TSC_TRANSPILE_CPU_RATIO: ${TSC_TRANSPILE_CPU_RATIO:-0.75}
       # HOST_WORKSPACE lets extensions resolve host-side paths when invoking

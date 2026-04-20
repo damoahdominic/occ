@@ -30,6 +30,18 @@
 
 ## `hosts.json` Schema
 
+> **Note — ticket-053 (persist-host-choice-and-gateway-control).** `activeHostId`
+> alone is **not sufficient** to infer "user has completed setup". The host
+> registry seeds `activeHostId = "local"` on a fresh install (see `registry.ts`
+> `makeEmptyHostsFile()`), and `getActiveHostId()` also falls back to the string
+> `"local"` when `hosts.json` is missing. That makes the default `"local"`
+> indistinguishable from an explicit local choice, and would strand a user on a
+> Status page whenever the gateway happens to be down. ticket-053 introduces an
+> explicit-choice marker (see that ticket's §2.4 Technical Considerations for
+> the chosen mechanism — most likely a sibling `HostsFile.explicitChoice: boolean`
+> or a per-host `HostEntry.setupCompletedAt`) that setup wizards flip on success,
+> and that `HomePanel._update()` reads before deciding picker-vs-Status.
+
 ```typescript
 interface HostsFile {
   version: 1;
