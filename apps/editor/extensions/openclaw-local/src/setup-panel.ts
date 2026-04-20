@@ -917,6 +917,12 @@ export class LocalSetupPanel {
           await this._host.writeConfig(cfg);
         } catch { /* non-fatal */ }
       }
+      // ticket-053: persist the explicit-choice marker so HomePanel._update()
+      // will see `chosenHostType === 'local'` on its next tick and route to
+      // the Status view without the user needing to re-pick from the host picker.
+      try {
+        await vscode.commands.executeCommand('openclaw.host.markChosen', 'local');
+      } catch { /* non-fatal — local legacy path still works via isConfigured */ }
       setTimeout(() => {
         void this._showStatusPanel();
         if (isFree) {

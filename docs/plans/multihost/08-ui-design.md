@@ -2,39 +2,139 @@
 
 ## 0. Startup User Flow
 
+![Startup User Flow](./diagrams/startup-flow.svg)
+
+<details>
+<summary>ASCII fallback (for terminal / code-review views)</summary>
+
 ```
-                              ┌──────────────┐
-                              │   APP START  │
-                              └──────┬───────┘
-                                     │
-                         ┌───────────▼───────────┐
-                         │   Detect Gateway?     │
-                         └───────────┬───────────┘
-                    YES ─────────────┴───────────── NO
-                    │                                │
-         ┌──────────▼──────────┐       ┌────────────▼──────────────┐
-         │   Connect to        │       │        SETUP VIEW          │
-         │   Gateway           │       │  ────────────────────────  │
-         └──────────┬──────────┘       │  [💻 Local] [🐳 Docker]   │
-                    │                  │  [🌐 SSH — disabled/soon] │
-         ┌──────────▼──────────┐       └───┬──────────┬────────────┘
-         │   STATUS PANEL      │      Local │     Docker│      SSH │
-         │  ─────────────────  │           │           │          │
-         │  • Health / version │    ┌──────▼──────┐ ┌──▼──────────────┐ ┌──────────────┐
-         │  • Start / Stop     │    │ Local Setup │ │ Docker Setup    │ │ SSH Setup    │
-         │  • AI sign-in       │    └──────┬──────┘ │ Wizard          │ │ * todo       │
-         │  • Restart          │           │        └──────┬──────────┘ └──────────────┘
-         └──────────┬──────────┘           └──────────────┘
-                    │                             │ gateway now running
-                    │◄────────────────────────────┘
-                    │
-         ┌──────────▼──────────┐
-         │   [Disconnect]      │
-         └──────────┬──────────┘
-                    │
-                    ▼
-               SETUP VIEW  (loops back)
+                                    ●
+                                    │
+                                    ▼
+                       ╱─────────────────────────╲
+                       │ JWT in context.secrets? │
+                       ╲──no─────────────────yes─╱
+                           │                 │
+                           ▼                 │
+                  [ AuthGatePanel ]          │
+                           │                 │
+                           └────────┬────────┘
+                                    ▼
+                       [ HomePanel._update() ]
+                       [  (detection node)   ]
+                                    │
+                           ╱─────────────────╲
+                           │ chosenHostType? │
+                           ╲──set─────absent─╱
+                               │         │
+                               ▼         ▼
+                  ╱───────────────╲     [ HomePanel — Host Picker ]
+                  │gateway reach? │     [ [Local] [Docker] [SSH…] ]
+                  ╲──yes──────no──╱                 │
+                      │       │           ━━━━━━━━━━┻━━━━━━━━━━
+                      ▼       ▼           │                   │
+           [Status panel] [Status panel]  ▼                   ▼
+           [  — online  ] [  — offline ]  [LocalSetupPanel]   [DockerSetupPanel]
+                      │       │           │                   │
+                      └───┬───┘           ▼                   ▼
+                          ▼          [markActiveHost-    [markActiveHost-
+                  [ user action ]     Chosen('local')]    Chosen('docker')]
+                  [  Disconnect/]          │                   │
+                  [  Reconfigure]          └─────────┬─────────┘
+                          │                         │
+                          └────────────┬────────────┘
+                                 ━━━━━━┻━━━━━━
+                                       │
+                                       ▼
+                       [ executeCommand              ]
+                       [   ('openclaw.home.refresh') ]
+                                       │
+                                       ▼
+                                       ⊗
 ```
+
+Legend: `●` start  ·  `⊗` end  ·  `╱ ╲` decision  ·  `[ ]` action  ·  `━━━` fork/join bar.
+
+</details>
+
+**Key callouts** (moved out of the diagram to keep it notation-minimal, UML activity style):
+
+- **AuthGatePanel** (`authGate.ts`) runs when no JWT is in `context.secrets`. It opens the browser to `occode:///auth?token=...`, stores the returned JWT, and fires `onAuthCompleted` to release the gate.
+- **`HomePanel._update()` is the detection node.** Per **ticket-053**, it routes on the persisted `chosenHostType` marker in `hosts.json` — *not* on a live gateway probe. Reachability only chooses between the Status-online and Status-offline render; it never flips the view back to the host-picker once setup has completed.
+- **`executeCommand('openclaw.home.refresh')`** at the bottom closes one iteration of the flow. Every subsequent user action that needs to re-evaluate state (Disconnect, Reconfigure, setup completion) fires this command, which re-enters `HomePanel._update()` — the ⊗ is the end of one pass, not the end of the session.
+
+*Diagram source: [`diagrams/startup-flow.puml`](./diagrams/startup-flow.puml). Re-render with `./diagrams/render.sh [svg|png]` (requires Docker — uses `plantuml/plantuml:latest`).*
+
+### Flow rules
+
+1. **Auth gate comes first.** App activation calls `initAuthGate(context, extensionUri)` before `routeHome()`. If no JWT is in `context.secrets`, **`AuthGatePanel`** (from `apps/editor/extensions/openclaw/src/authGate.ts`) opens. The deep-link handler in `extension.ts` stores the JWT and fires `onAuthCompleted`, which closes `AuthGatePanel` and lets `routeHome()` proceed. **`HomePanel` never opens before auth completes.**
+2. **HomePanel is the detection node.** There is no separate "Detect Gateway" component — `HomePanel._update()` (`panels/home.ts`) **is** the detection node. It probes the gateway, then conditionally renders either the Status view (via `StatusPanelController`) or the host-picker HTML. Because `HomePanel` is the entrypoint that launches the host-setup panels in the first place, setup panels can always assume `HomePanel` exists.
+3. **Setup completion re-enters `HomePanel`, not Status directly.** `LocalSetupPanel`, `DockerSetupPanel`, and (future) `SSHSetupPanel` must call `vscode.commands.executeCommand('openclaw.home.refresh')` on their last step instead of swapping HTML. The `openclaw.home.refresh` command is owned by `HomePanel` (registered in its constructor, deliberately **not** disposed with the panel so it survives setup-panel lifecycle). The command invokes `HomePanel._update()`, which decides Status vs. host-picker based on probe results — a single source of truth for "is the gateway up?".
+4. **Disconnect loops to the same detection node.** Disconnecting from the Status view fires `openclaw.home.refresh`; when nothing is running, `HomePanel` renders the host-picker.
+5. **No direct setup → Status jump.** Setup panels must not call `StatusPanelController.show()` or swap the webview to Status HTML on their own. The old edge from "gateway now running" directly into Status has been removed from `DockerSetupPanel._handleLaunchGateway()` and replaced with a refresh command dispatch.
+6. **Persisted host choice beats gateway reachability for view routing** *(ticket-053)*. `HomePanel._update()` routes on an **explicit-choice marker** written by the setup wizards on success (`HostRegistry.markActiveHostChosen()`), NOT on a live gateway probe. Reachability only decides between a Status-online and a Status-offline render — it never flips the view back to the host-picker once the user has completed setup. The picker only appears when (a) no explicit choice has been recorded, or (b) `openclaw.host.reconfigure` has been invoked to clear the marker. See ticket-053 §2.4 for the schema mechanism and the Option 1-4 alternatives considered.
+
+## 0a. Status Panel — Offline & Control *(ticket-053)*
+
+Once `HomePanel._update()` has decided to render the Status panel (because the
+explicit-choice marker is set — see Rule 6), the Status panel itself has two
+modes plus a universal escape hatch:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Status Panel — online                                       │
+│                                                             │
+│  ● Gateway Running   v2026.3                                │
+│  [  Stop  ]  [  Restart  ]                                  │
+│                                                             │
+│  Host: Docker — occ-openclaw                                │
+│  (activity / agents / channels panels)                      │
+│                                                             │
+│                              [ Pick Different Host ]        │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ Status Panel — offline                                      │
+│                                                             │
+│  ○ Gateway Stopped                                          │
+│  [  Start  ]                                                │
+│                                                             │
+│  Host: Docker — occ-openclaw   (last seen 2m ago)           │
+│                                                             │
+│                              [ Pick Different Host ]        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Start / Stop / Restart buttons.** The button template already exists at
+`apps/editor/extensions/openclaw/src/panels/statusHtml.ts:1214-1219` with the
+state machine `running → Stop`, `stopped → Start`, `errored → Restart` and
+intermediate `starting / stopping / restarting` spinners. ticket-053 wires the
+existing `gatewayAction` postMessage (`statusHtml.ts:1256`) through to three new
+VS Code commands — `openclaw.gateway.start`, `openclaw.gateway.stop`,
+`openclaw.gateway.restart` — which each resolve the active
+`HostConnection` and call the matching `gatewayStart / gatewayStop / gatewayRestart`
+method (`hosts/types.ts:256-258`). Per-adapter:
+
+- **Local adapter** shells to `openclaw gateway start/stop/restart` — see
+  [`04-local-adapter.md` "Gateway Lifecycle"](./04-local-adapter.md).
+- **Docker adapter** shells to
+  `docker compose -f docker/docker-compose.openclaw.yml up -d / down / restart`
+  on the user's workstation — see
+  [`05-docker-adapter.md` "Gateway Lifecycle"](./05-docker-adapter.md) and the
+  root `AGENTS.md` § "OpenClaw Docker Gateway".
+
+**Reconfigure escape hatch.** The "Pick Different Host" button dispatches a new
+`openclaw.host.reconfigure` command that:
+
+1. Clears the explicit-choice marker via `HostRegistry.markActiveHostChosen`
+   (inverse / unset).
+2. Sets `HomePanel.currentPanel._forcePicker = true`.
+3. Dispatches `openclaw.home.refresh`.
+
+This is the only way a user with a persisted host choice can return to the
+picker — it un-jails users whose adapter has broken (Docker uninstalled,
+compose file deleted, corrupted `hosts.json`) and is also exposed as a palette
+command so it can be invoked even if the Status page is unresponsive.
 
 ## 1. Status Bar Host Picker
 

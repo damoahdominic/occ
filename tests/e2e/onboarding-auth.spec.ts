@@ -97,15 +97,60 @@ test.describe('Onboarding and Authentication', () => {
   });
 
   /**
+   * Scenario: Auth Gate Appears on Unauthenticated Startup
+   * Given: no JWT is stored in SecretStorage
+   * When: the editor activates
+   * Then: the AuthGate webview is visible with sign-in / sign-up buttons
+   * And: the Home panel is NOT opened yet (auth gate precedes gateway detection)
+   *
+   * Per docs/plans/multihost/08-ui-design.md §0 Rule 1: "Auth gate comes first."
+   * Note: In the default E2E profile a JWT may or may not be present. When no
+   * JWT is present we expect the AuthGate panel; when a JWT is present we
+   * expect the Home panel. The test asserts the rule holds whichever branch
+   * activation takes.
+   */
+  test('auth gate appears on unauthenticated startup', async ({ page }) => {
+    // Allow activation to run (initAuthGate is scheduled 500ms after activate()).
+    await page.locator('.monaco-workbench').waitFor({ timeout: 60_000 });
+    await page.waitForTimeout(4000);
+
+    const authGateTab = page.locator('[role="tab"]').filter({ hasText: /Sign in to OpenClaw/ });
+    const homeTab = page.locator('[role="tab"]').filter({ hasText: /OCC Home|Home/ });
+
+    const authGateVisible = await authGateTab.isVisible({ timeout: 10_000 }).catch(() => false);
+
+    if (authGateVisible) {
+      // Unauthenticated branch — AuthGate must be up, Home must be absent.
+      const innerFrame = getInnerFrame(page);
+      const hasSignInBtn = await isButtonVisible(innerFrame, /^sign\s*in$/i, 8_000);
+      const hasSignUpBtn = await isButtonVisible(innerFrame, /^sign\s*up$/i, 8_000);
+      expect(hasSignInBtn, 'AuthGate should show a Sign In button').toBe(true);
+      expect(hasSignUpBtn, 'AuthGate should show a Sign Up button').toBe(true);
+
+      const homeVisible = await homeTab.isVisible({ timeout: 1_000 }).catch(() => false);
+      expect(homeVisible, 'Home panel should not be open while AuthGate is active').toBe(false);
+    } else {
+      // Authenticated branch — JWT already present, gate was skipped, Home opens.
+      await homeTab.waitFor({ timeout: 30_000 });
+      const homeVisible = await homeTab.isVisible({ timeout: 5_000 }).catch(() => false);
+      expect(homeVisible, 'Home panel should be visible when JWT is already stored').toBe(true);
+    }
+  });
+
+  /**
    * Scenario: Successful Authentication via URI
    * Given: user initiated create account flow
    * When: mock backend returns auth callback URI
    * And: extension handles URI callback
    * Then: Home panel shows logged-in state
    * And: status bar displays user's balance
+   * And: AuthGate panel closes after the deep-link fires
+   * And: Home / gateway detection runs after the gate closes
    *
    * Note: Full URI callback requires mock backend setup.
-   * This test checks for authenticated state indicators.
+   * This test checks for authenticated state indicators and validates that the
+   * AuthGate gives way to the Home panel (no direct setup → Status jump; the
+   * detection node runs only after auth completes per §0 Rule 1).
    */
   test('authenticated state shows balance in status bar', async ({ page }) => {
     await waitForHomePanelTab(page);
@@ -123,6 +168,13 @@ test.describe('Onboarding and Authentication', () => {
       hasContent,
       'Home panel should display content'
     ).toBe(true);
+
+    // After the deep-link fires, the AuthGate panel must be closed — only the
+    // Home panel should remain. If the AuthGate tab is still visible, gateway
+    // detection has been blocked (which would be a Rule 1 regression).
+    const authGateTab = page.locator('[role="tab"]').filter({ hasText: /Sign in to OpenClaw/ });
+    const gateStillOpen = await authGateTab.isVisible({ timeout: 1_000 }).catch(() => false);
+    expect(gateStillOpen, 'AuthGate should close once authentication completes').toBe(false);
   });
 
   /**

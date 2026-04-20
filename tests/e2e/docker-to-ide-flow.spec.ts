@@ -14,7 +14,7 @@
  *   ticket-042  .tickets/ticket-042-docker-to-ide-e2e-flow/prd.md
  */
 
-import { test, expect, type FrameLocator } from './fixtures';
+import { test, expect, type FrameLocator, type Page } from './fixtures';
 import { waitForHomePanelTab, getInnerFrame } from './test-utils';
 
 // ─── Test environment defaults ────────────────────────────────────────────────
@@ -254,4 +254,98 @@ test.describe('Post-provision: Connect to Gateway (ticket-031 pending) @slow', (
   test.todo('API key input has password type and show/hide toggle (ticket-031)');
   test.todo('Skip closes OCC Home panel (ticket-034)');
   test.todo('Finish Setup closes panel and opens Void sidebar (ticket-034)');
+});
+
+// ─── Post-completion: Status page stability (ticket-052) ──────────────────────
+// Regression coverage for the "flicker back to step 1" bug. After the gateway
+// connect step:
+//   1. The Status page (Gateway row, etc.) must be visible.
+//   2. The host-picker (Local/Docker/SSH cards) must NOT be visible.
+//   3. Toggling the webview tab away and back must not re-render the host-picker.
+//
+// Matches acceptance criteria in .tickets/ticket-052-docker-setup-flicker-reset/prd.md §2.3.
+// Tag @slow — excluded from default CI, gated behind a healthy gateway container.
+
+test.describe('Post-completion: Status page stability (ticket-052) @slow', () => {
+  /**
+   * Drive the wizard to completion and wait past the detection hand-off.
+   * Navigator's fix replaces the old `setTimeout(_showStatusPanel, 1800)` with
+   * a dispatch of `openclaw.home.refresh`, which re-enters detection. The
+   * 1800ms delay is preserved so the "Setup complete!" message stays visible.
+   * We wait ~2.5s after clicking Connect to cover that delay plus the
+   * detection re-entry render.
+   */
+  async function completeWizardAndWaitForDetection(page: Page): Promise<FrameLocator> {
+    await openOccHomePanel(page);
+    const frame = await clickDockerCard(page);
+    await advanceToStep3(frame);
+    await frame.locator('text=Docker environment is ready').waitFor({ timeout: 300_000 });
+    await frame.locator('button:has-text("Connect to Gateway")').click();
+    // 1800ms handoff + safety margin for detection re-entry.
+    await page.waitForTimeout(2500);
+    return frame;
+  }
+
+  test('After gateway connect, Status page is rendered (no host-picker)', async ({ page }) => {
+    const frame = await completeWizardAndWaitForDetection(page);
+
+    // The Status page renders a "Gateway" row (see statusHtml.ts:1012). Use
+    // text-based selectors — statusHtml does not expose `data-testid` hooks
+    // and this spec should not fabricate them (ticket-052 scope is narrow).
+    await expect(
+      frame.locator('text=Gateway').first(),
+      'Status page Gateway row should be visible after detection hand-off',
+    ).toBeVisible({ timeout: 20_000 });
+
+    // Host-picker cards must be absent — they are the "flicker" symptom.
+    await expect(
+      frame.locator('[data-card="docker"]'),
+      'Docker host-picker card must NOT appear on the Status page',
+    ).toHaveCount(0);
+    await expect(
+      frame.locator('[data-card="local"]'),
+      'Local host-picker card must NOT appear on the Status page',
+    ).toHaveCount(0);
+
+    // Step 1 config panel must also be absent — a different surface of the
+    // same "reset to step 1" regression the old condition caused.
+    await expect(
+      frame.locator('#docker-config-step-1'),
+      'Docker config Step 1 must NOT appear on the Status page',
+    ).toHaveCount(0);
+  });
+
+  test('Status page stable across webview tab hide/show', async ({ page }) => {
+    const frame = await completeWizardAndWaitForDetection(page);
+
+    // Confirm we start on the Status page.
+    await expect(frame.locator('text=Gateway').first()).toBeVisible({ timeout: 20_000 });
+
+    // Toggle the OCC Home tab away by opening the Welcome page / another
+    // editor tab, then bring OCC Home back. This exercises
+    // `onDidChangeViewState` — the pathway that previously triggered the
+    // host-picker re-render via `_update()` when `isDockerRunning` was true.
+    const homeTab = page.locator('[role="tab"]').filter({ hasText: /OCC Home|Home/ }).first();
+
+    // Open a new untitled editor to push the OCC Home tab off-screen.
+    await page.keyboard.press('Control+N').catch(() => null);
+    await page.waitForTimeout(500);
+    // Return focus to the OCC Home tab — triggers onDidChangeViewState(visible=true).
+    await homeTab.click().catch(() => null);
+    await page.waitForTimeout(2000);
+
+    // Re-assert Status page still visible and host-picker still absent.
+    await expect(
+      frame.locator('text=Gateway').first(),
+      'Status page Gateway row should still be visible after tab toggle',
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      frame.locator('[data-card="docker"]'),
+      'Host-picker must NOT reappear after webview visibility toggle',
+    ).toHaveCount(0);
+    await expect(
+      frame.locator('#docker-config-step-1'),
+      'Docker config Step 1 must NOT reappear after webview visibility toggle',
+    ).toHaveCount(0);
+  });
 });

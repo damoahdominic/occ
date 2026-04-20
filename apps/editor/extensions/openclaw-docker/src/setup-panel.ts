@@ -59,6 +59,15 @@ export class DockerSetupPanel {
   private _disposables: vscode.Disposable[] = [];
   private _statusController: StatusPanelController | undefined;
   private _disposed = false;
+  /**
+   * ticket-052 race hardening: true once `_statusController` has been fully
+   * constructed and assigned. `_messageBuffer` holds any webview messages
+   * that arrive during the asynchronous controller construction (the
+   * `await import('./connection')` gap in `_showStatusPanel`). Flushed
+   * exactly once when the controller becomes ready.
+   */
+  private _statusControllerReady = false;
+  private _messageBuffer: Array<{ command: string; [key: string]: unknown }> = [];
 
   // Config flow state (0=Config, 1=Confirm, 2=Preflight, 3=Pull, 4=Onboard, 5=Launch, 6=Done)
   private _configStep: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 0;
@@ -153,8 +162,19 @@ export class DockerSetupPanel {
 
     this._panel.webview.onDidReceiveMessage(
       async (msg: { command: string; [key: string]: unknown }) => {
-        if (this._statusController) {
+        if (this._statusController && this._statusControllerReady) {
           this._statusController.handleMessage(msg);
+          return;
+        }
+
+        // ticket-052: StatusPanelController construction is asynchronous (it
+        // `await import('./connection')` before assigning `_statusController`).
+        // If a webview message arrives during that gap — e.g. an
+        // onDidChangeViewState-triggered probe — we must not drop it on the
+        // default `switch` below and route it to a random VS Code command.
+        // Buffer until the controller is ready, then flush exactly once.
+        if (this._isStatusControllerPending()) {
+          this._messageBuffer.push(msg);
           return;
         }
 
@@ -299,12 +319,18 @@ export class DockerSetupPanel {
   }
 
   /** Run all validation checks for form fields */
-  private async _runValidationChecks(config: Partial<DockerConfig>): Promise<{ [key: string]: string | null }> {
-    const errors: { [key: string]: string | null } = {
-      image: null,
-      port: null,
-      bindHost: null,
-      dataDir: null,
+  private async _runValidationChecks(config: Partial<DockerConfig>): Promise<{
+    errors:   { image: string | null; port: string | null; bindHost: string | null; dataDir: string | null };
+    warnings: { dataDir: string | null };
+  }> {
+    const errors = {
+      image: null as string | null,
+      port: null as string | null,
+      bindHost: null as string | null,
+      dataDir: null as string | null,
+    };
+    const warnings = {
+      dataDir: null as string | null,
     };
 
     // Validate image — blank is fine (defaults to DEFAULT_CONFIG.image)
@@ -329,7 +355,8 @@ export class DockerSetupPanel {
       errors.bindHost = 'Bind host must be 127.0.0.1 or 0.0.0.0';
     }
 
-    // Validate dataDir
+    // Validate dataDir — "required" and path-access remain blocking errors.
+    // Disk space is a soft recommendation surfaced as a warning, never blocking.
     if (!config.dataDir || config.dataDir.trim() === '') {
       errors.dataDir = 'Data directory is required';
     } else {
@@ -337,15 +364,11 @@ export class DockerSetupPanel {
       const accessError = await this._checkPathAccess(resolvedPath);
       if (accessError) {
         errors.dataDir = accessError;
-      } else {
-        const spaceError = await this._checkDiskSpace(resolvedPath);
-        if (spaceError) {
-          errors.dataDir = spaceError;
-        }
       }
+      warnings.dataDir = await this._checkDiskSpace(resolvedPath);
     }
 
-    return errors;
+    return { errors, warnings };
   }
 
   /** Check if a port is in use */
@@ -387,7 +410,7 @@ export class DockerSetupPanel {
     });
   }
 
-  /** Check available disk space (minimum 5GB) */
+  /** Soft disk-space recommendation (5 GB). Returns advisory text, never blocks. */
   private async _checkDiskSpace(fsPath: string): Promise<string | null> {
     return new Promise((resolve) => {
       try {
@@ -403,13 +426,14 @@ export class DockerSetupPanel {
           if (lines.length > 1) {
             const parts = lines[1].split(/\s+/);
             const available = parseInt(parts[3], 10);
-            const requiredBytes = 5 * 1024 * 1024 * 1024; // 5GB
+            const recommendedBytes = 5 * 1024 * 1024 * 1024; // 5 GB recommended
 
-            if (available < requiredBytes) {
+            if (available < recommendedBytes) {
               const availableGB = (available / (1024 * 1024 * 1024)).toFixed(1);
-              resolve(`Insufficient disk space: ${availableGB}GB available, 5GB required`);
-            } else {
-              resolve(null);
+              resolve(
+                `Only ${availableGB} GB free here — we recommend at least 5 GB. You can continue, but setup may run out of space.`,
+              );
+              return;
             }
           }
         }
@@ -576,9 +600,9 @@ ${logs.substring(0, 3000)}
   }
 
   private async _handleValidateFields(msg: { image: string; port: string; dataDir: string; bindHost: string }): Promise<void> {
-    const errors = await this._runValidationChecks(msg);
+    const { errors, warnings } = await this._runValidationChecks(msg);
     try {
-      this._panel.webview.postMessage({ type: 'dockerValidationErrors', errors });
+      this._panel.webview.postMessage({ type: 'dockerValidationErrors', errors, warnings });
     } catch { /* ignore */ }
   }
 
@@ -709,23 +733,63 @@ ${logs.substring(0, 3000)}
     this._panel.webview.html = this._getConfigHtml(webviewIconUri, this._activeConfig);
   }
 
+  /**
+   * ticket-052: true while `_showStatusPanel()` is in-flight but the
+   * StatusPanelController has not yet been fully constructed and assigned.
+   * During this window, webview messages are buffered in `_messageBuffer`
+   * so an `onDidChangeViewState`-triggered probe cannot be silently
+   * routed to the default command dispatcher.
+   */
+  private _statusControllerPending = false;
+
+  private _isStatusControllerPending(): boolean {
+    return this._statusControllerPending;
+  }
+
+  /** Flush any messages buffered during StatusPanelController construction. */
+  private _flushMessageBuffer(): void {
+    if (this._messageBuffer.length === 0) return;
+    const queued = this._messageBuffer;
+    this._messageBuffer = [];
+    if (this._statusController && this._statusControllerReady) {
+      for (const msg of queued) {
+        try { this._statusController.handleMessage(msg); } catch { /* non-fatal */ }
+      }
+    }
+    // If controller is missing (initialisation failed), the queued messages
+    // are dropped — the fallback path will have re-rendered the wizard, so
+    // any stale message is no longer meaningful.
+  }
+
   private async _showStatusPanel(): Promise<void> {
     if (!this._statusController) {
-      const { DockerHostConnection } = await import('./connection');
-      const host = new DockerHostConnection(
-        { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: this._hostPort }, localMountPath: this._dataDir },
-        CONTAINER,
-      );
-      this._statusController = new StatusPanelController(
-        this._panel,
-        this._homeUri,
-        host,
-        () => {
-          // Disconnect: clear binding, dispose this panel, reopen the host picker (never auto-route).
-          this.dispose();
-          void vscode.commands.executeCommand('openclaw.home.picker');
-        },
-      );
+      this._statusControllerPending = true;
+      try {
+        const { DockerHostConnection } = await import('./connection');
+        const host = new DockerHostConnection(
+          { type: 'docker', containerLabel: CONTAINER, portMappings: { gateway: this._hostPort }, localMountPath: this._dataDir },
+          CONTAINER,
+        );
+        this._statusController = new StatusPanelController(
+          this._panel,
+          this._homeUri,
+          host,
+          () => {
+            // Disconnect: clear binding, dispose this panel, reopen the host picker (never auto-route).
+            this.dispose();
+            void vscode.commands.executeCommand('openclaw.home.picker');
+          },
+        );
+        this._statusControllerReady = true;
+      } finally {
+        // Clear the pending flag even if construction threw, so future
+        // messages are routed rather than held indefinitely.
+        this._statusControllerPending = false;
+      }
+      // Flush exactly once, right after the controller becomes visible to
+      // external callers. Subsequent messages go straight through the
+      // `_statusController.handleMessage` path at the top of the handler.
+      this._flushMessageBuffer();
     }
     await this._statusController.show();
     this._panel.title = `OCC Home {Docker:${this._hostPort}}`;
@@ -964,7 +1028,34 @@ ${logs.substring(0, 3000)}
 
       log('\n✓ Setup complete!\n');
       try { this._panel.webview.postMessage({ type: 'launchDone' }); } catch { /* ignore */ }
-      setTimeout(() => void this._showStatusPanel(), 1800);
+
+      // ticket-052: honour docs/plans/multihost/08-ui-design.md §0 Rules 2 and 4.
+      // Rule 2: the last step of setup must loop back to the Detect Gateway node.
+      // Rule 4: no direct setup → Status jump.
+      //
+      // We keep the `launchDone` postMessage (user-visible "Setup complete!")
+      // but replace the old `setTimeout(() => this._showStatusPanel(), 1800)`
+      // with a call that re-enters detection via `openclaw.home.refresh`.
+      // That command is registered by HomePanel and either re-runs `_update()`
+      // on an existing HomePanel or creates one (whose constructor runs
+      // `_update()`). `_update()` then sees `isGatewayReachable === true` and
+      // routes to the Status view — so detection, not this setup panel, owns
+      // the render decision.
+      //
+      // The 1800ms delay is preserved so the "Setup complete!" message stays
+      // visible briefly before the detection-driven transition.
+      setTimeout(async () => {
+        // ticket-053: persist the explicit-choice marker BEFORE dispatching
+        // refresh, so HomePanel._update() reads `chosenHostType === 'docker'`
+        // on re-entry and routes to the Status view (instead of the picker).
+        try {
+          await vscode.commands.executeCommand('openclaw.host.markChosen', 'docker');
+        } catch { /* non-fatal — refresh will fall back to legacy isConfigured check */ }
+        void vscode.commands.executeCommand('openclaw.home.refresh');
+        // Hand over the tab: the setup wizard is done, and the detection node
+        // (HomePanel) owns the next view.
+        this.dispose();
+      }, 1800);
     } catch (err) {
       fail(String(err));
     }
@@ -1115,6 +1206,8 @@ ${logs.substring(0, 3000)}
     .field-error { border-color: #f87171 !important; }
     .error-msg { color: #f87171; font-size: 11px; margin-top: 4px; display: none; }
     .error-msg.show { display: block; }
+    .warn-msg { color: #fbbf24; font-size: 11px; margin-top: 4px; display: none; line-height: 1.4; }
+    .warn-msg.show { display: block; }
     .validation-badge {
       display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600;
       padding: 2px 6px; border-radius: 3px;
@@ -1211,6 +1304,7 @@ ${logs.substring(0, 3000)}
         <button class="btn-browse" onclick="browseDir()">Browse</button>
       </div>
       <div class="error-msg" id="dataDir-error"></div>
+      <div class="warn-msg" id="dataDir-warn"></div>
     </div>
     <div class="field checkbox">
       <input type="checkbox" id="freshBuild" ${config.freshBuild ? 'checked' : ''} />
@@ -1273,7 +1367,7 @@ ${logs.substring(0, 3000)}
       }
     }
 
-    function updateValidationUI(errors) {
+    function updateValidationUI(errors, warnings) {
       validationState = errors;
 
       // Update error messages and field styling
@@ -1292,7 +1386,19 @@ ${logs.substring(0, 3000)}
         }
       });
 
-      // Update Next button state
+      // Render soft warnings (non-blocking advisories — amber, Next stays enabled)
+      const warnEl = document.getElementById('dataDir-warn');
+      if (warnEl) {
+        const w = warnings && warnings.dataDir;
+        if (w) {
+          warnEl.textContent = w;
+          warnEl.classList.add('show');
+        } else {
+          warnEl.classList.remove('show');
+        }
+      }
+
+      // Update Next button state — warnings never gate submission
       const allValid = Object.values(errors).every(e => e === null);
       document.getElementById('btn-next').disabled = !allValid;
     }
@@ -1324,7 +1430,7 @@ ${logs.substring(0, 3000)}
       } else if (msg.type === 'dockerEnvironmentCheck') {
         updateDockerWarning(msg.result);
       } else if (msg.type === 'dockerValidationErrors') {
-        updateValidationUI(msg.errors);
+        updateValidationUI(msg.errors, msg.warnings);
       } else if (msg.type === 'dockerConfigError') {
         const err = document.getElementById('error');
         err.textContent = msg.message;

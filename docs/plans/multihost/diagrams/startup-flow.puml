@@ -1,0 +1,69 @@
+@startuml startup-flow
+title OCC — Startup User Flow
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #000000
+  BorderThickness 1
+  BarColor #000000
+  DiamondBackgroundColor #FFFFFF
+  DiamondBorderColor #000000
+  DiamondFontColor #000000
+  ArrowColor #000000
+  ArrowFontColor #000000
+  FontColor #000000
+  StartColor #000000
+  EndColor #000000
+}
+
+start
+
+if (JWT in context.secrets?) then (no)
+  :AuthGatePanel;
+else (yes)
+endif
+
+:HomePanel._update()
+(detection node);
+
+if (chosenHostType?) then (set)
+
+  if (gateway reachable?) then (yes)
+    :Status Panel — online
+    ● Gateway Running
+    [Stop]  [Restart]
+    [Pick Different Host];
+  else (no)
+    :Status Panel — offline
+    ○ Gateway Stopped
+    [Start]  [Restart]
+    [Pick Different Host];
+  endif
+
+  :user action
+  (Disconnect / Reconfigure);
+
+else (absent)
+
+  :HomePanel — Host Picker
+  [ Local ]  [ Docker ]  [ SSH — soon ];
+
+  fork
+    :LocalSetupPanel;
+    :markActiveHostChosen('local');
+  fork again
+    :DockerSetupPanel;
+    :markActiveHostChosen('docker');
+  end fork
+
+endif
+
+:executeCommand
+('openclaw.home.refresh');
+
+end
+
+@enduml

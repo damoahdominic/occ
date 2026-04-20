@@ -297,6 +297,51 @@ describe('MultiHost E2E', () => {
 });
 ```
 
+### ticket-053 — Persisted Host Choice & Gateway Control
+
+These extend `tests/e2e/docker-to-ide-flow.spec.ts` (and/or `onboarding-auth.spec.ts`)
+past the ticket-052 no-flicker coverage. Tag `@slow` consistent with the
+existing Docker flow specs.
+
+```typescript
+// e2e/docker-to-ide-flow.spec.ts — appended scenarios
+describe('ticket-053: persisted host choice + gateway control', () => {
+  it('setup completion persists the explicit-choice marker', async () => {
+    // Complete Docker setup end-to-end
+    // Read ~/.occ/hosts.json and assert the explicit-choice marker is set
+    // (Option 2: HostsFile.explicitChoice === true, OR
+    //  Option 3: the docker host entry has setupCompletedAt)
+  });
+
+  it('persisted choice survives gateway-down on reload', async () => {
+    // Given the explicit-choice marker is set
+    // Stop the occ-openclaw container
+    // Reload the Home panel (or the editor window)
+    // Assert the Status page (offline variant) is rendered
+    // Assert the host-picker DOM is absent
+    // Assert the Start Gateway button is visible
+  });
+
+  it('Start / Stop / Restart buttons drive the gateway lifecycle', async () => {
+    // From the stopped state: click Start → expect transition to running
+    //   and `docker compose -f docker/docker-compose.openclaw.yml up -d` (for Docker) OR
+    //   `openclaw gateway start` (for Local) as the shell
+    // From running: click Stop → expect transition to stopped
+    // From errored: click Restart → expect transition to running
+  });
+
+  it('Reconfigure returns to the host-picker', async () => {
+    // Click "Pick Different Host" on the Status page
+    // Assert the host-picker is rendered
+    // Assert the explicit-choice marker is cleared on disk
+  });
+
+  it('ticket-052 no-flicker assertion still passes', async () => {
+    // Regression: complete setup, toggle visibility, assert Status page stable
+  });
+});
+```
+
 ## CI Pipeline
 
 ```yaml

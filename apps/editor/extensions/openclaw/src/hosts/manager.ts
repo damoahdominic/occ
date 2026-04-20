@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type {
 	HostAdapter,
+	HostChoiceType,
 	HostConnection,
 	HostEntry,
 	HostStatus,
@@ -140,6 +141,20 @@ export class HostManager implements OpenClawCoreAPI, vscode.Disposable {
 		// Ensure connected
 		await this._ensureConnected(id);
 		this._onDidChangeActiveHost.fire(this._connections.get(id));
+	}
+
+	// ── ticket-053: chosenHostType pass-throughs ──
+
+	getChosenHostType(): HostChoiceType | undefined {
+		return this.registry.getChosenHostType();
+	}
+
+	async markActiveHostChosen(type: HostChoiceType): Promise<void> {
+		await this.registry.markActiveHostChosen(type);
+	}
+
+	async clearActiveHostChoice(): Promise<void> {
+		await this.registry.clearActiveHostChoice();
 	}
 
 	// ── Connection management ─────────────────

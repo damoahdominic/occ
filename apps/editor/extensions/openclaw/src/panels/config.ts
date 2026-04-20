@@ -435,19 +435,27 @@ export class ConfigPanel {
       const targetPort = dashInfo?.port ?? DEFAULT_GATEWAY_PORT;
       const proxyPort = await getOrStartConfigProxy(targetPort);
 
-      let proxySrc: string;
+      // Build the raw loopback URL, then ask VS Code to tunnel it through the
+      // editor's own origin. In VS Code Web this returns a same-origin URL so
+      // Chrome's Private Network Access policy doesn't block the iframe —
+      // without this the webview shows "The connection is blocked because it
+      // was initiated by a public page to connect to devices or servers on
+      // your local network." whenever the editor is accessed via anything
+      // other than `localhost`. In desktop VS Code it's a no-op.
+      let loopbackSrc: string;
       let externalSrc: string;
 
       if (dashInfo?.url) {
-        // Replace the host in the tokenized URL with the proxy address.
         const parsed = new URL(dashInfo.url);
-        proxySrc = `http://127.0.0.1:${proxyPort}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        loopbackSrc = `http://127.0.0.1:${proxyPort}${parsed.pathname}${parsed.search}${parsed.hash}`;
         externalSrc = dashInfo.url;
       } else {
-        // Fallback: open root of gateway (no token)
-        proxySrc = `http://127.0.0.1:${proxyPort}/`;
+        loopbackSrc = `http://127.0.0.1:${proxyPort}/`;
         externalSrc = `http://localhost:${targetPort}/`;
       }
+
+      const proxySrc = await vscode.env.asExternalUri(vscode.Uri.parse(loopbackSrc))
+        .then(uri => uri.toString(true), () => loopbackSrc);
 
       this._panel.webview.html = this._iframeHtml(proxySrc, externalSrc);
     } catch (err) {

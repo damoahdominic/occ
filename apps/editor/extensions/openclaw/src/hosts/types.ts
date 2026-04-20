@@ -159,6 +159,14 @@ export type HostConnectionConfig =
 export type HostType = 'local' | 'docker' | 'ssh' | 'cloud';
 export type HostStatus = 'online' | 'offline' | 'error' | 'unknown';
 
+/**
+ * ticket-053: the set of host types the user can explicitly pick and complete
+ * setup for. Mutually exclusive — `chosenHostType` on HostsFile holds exactly
+ * one of these (or is absent, meaning "no explicit choice, show picker").
+ */
+export const HOST_CHOICE_TYPES = ['local', 'docker', 'ssh'] as const;
+export type HostChoiceType = typeof HOST_CHOICE_TYPES[number];
+
 export interface HostEntry {
 	id: string;
 	type: HostType;
@@ -181,6 +189,14 @@ export interface HostEntry {
 export interface HostsFile {
 	version: 1;
 	activeHostId: string;
+	/**
+	 * ticket-053: set once the user completes a host setup wizard. Absence means
+	 * "no explicit choice yet" → HomePanel shows the host-picker. Presence means
+	 * "user finished setup" → HomePanel routes to Status (online or offline per
+	 * reachability). Never infer from `activeHostId` alone: the default seed
+	 * sets activeHostId='local' regardless of whether the user picked it.
+	 */
+	chosenHostType?: HostChoiceType;
 	hosts: HostEntry[];
 }
 
@@ -305,6 +321,11 @@ export interface OpenClawCoreAPI {
 	getHost(id: string): HostConnection | undefined;
 	getAllHosts(): HostEntry[];
 	setActiveHost(id: string): Promise<void>;
+
+	/** ticket-053: explicit-choice marker API — see HostsFile.chosenHostType. */
+	getChosenHostType(): HostChoiceType | undefined;
+	markActiveHostChosen(type: HostChoiceType): Promise<void>;
+	clearActiveHostChoice(): Promise<void>;
 
 	readonly onDidChangeActiveHost: vscode.Event<HostConnection | undefined>;
 	readonly onDidChangeHostStatus: vscode.Event<{ hostId: string; status: HostStatus }>;

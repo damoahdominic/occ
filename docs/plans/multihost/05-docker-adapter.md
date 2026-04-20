@@ -313,6 +313,10 @@ export class DockerHostConnection implements HostConnection {
   async gatewayStart(): Promise<ExecResult> { return this.exec('openclaw', ['gateway', 'start']); }
   async gatewayStop(): Promise<ExecResult> { return this.exec('openclaw', ['gateway', 'stop']); }
   async gatewayRestart(): Promise<ExecResult> { return this.exec('openclaw', ['gateway', 'restart']); }
+
+  // See "Gateway Lifecycle" below — on the bundled OCC Docker adapter, the real
+  // implementation shells to `docker compose -f docker/docker-compose.openclaw.yml`
+  // against the user's workstation, not `openclaw` inside the container.
   
   // ── VS Code Integration ──
   async openExplorer(p?: string): Promise<void> {
@@ -373,6 +377,48 @@ export class DockerHostConnection implements HostConnection {
   }
 }
 ```
+
+## Gateway Lifecycle
+
+`DockerHostConnection.gatewayStart / gatewayStop / gatewayRestart` are the
+control-plane surface for the Status panel's Start / Stop / Restart buttons
+(see `apps/editor/extensions/openclaw/src/panels/statusHtml.ts:1214-1219` and
+ticket-053). On the bundled OCC setup — where the gateway is a Docker Compose
+stack launched by the setup wizard — these methods shell out on the user's
+workstation to the canonical compose file:
+
+```
+docker compose -f docker/docker-compose.openclaw.yml up -d        # gatewayStart
+docker compose -f docker/docker-compose.openclaw.yml down         # gatewayStop
+docker compose -f docker/docker-compose.openclaw.yml restart      # gatewayRestart
+```
+
+This file path is load-bearing: it is the single source of truth defined in the
+root `AGENTS.md` § "OpenClaw Docker Gateway" and used by the setup wizard, the
+Status panel controls, and any future CLI automation. The same compose file
+path is re-used in the dev override invocation (`-f docker/docker-compose.openclaw.yml -f docker/docker-compose.openclaw.override.yml`)
+but the Status panel's buttons intentionally use the production-parity form
+without the override.
+
+Requirements for the implementation:
+
+- **Must not race with the setup wizard.** The setup wizard runs `up -d` against
+  the same compose file while configuring the gateway. The Status panel's
+  Start/Stop/Restart buttons are only rendered after the setup wizard has
+  disposed (they live inside the Status panel, not the wizard), so in practice
+  there is no overlap — but implementations must not leak a background
+  long-running `docker compose` process that would clash with a later wizard run.
+- **Must stream logs.** Use `execStream` / the adapter's `onLog` hook so the
+  Status panel can surface build output when the user hits Start from the
+  stopped / errored state.
+- **Must respect `dockerHost` overrides** in the `DockerConnection` config (e.g.
+  `DOCKER_HOST=ssh://user@remote`) — see the existing `localExec` helper at
+  `05-docker-adapter.md` "Docker Host Connection" `localExec`.
+
+For ad-hoc containers created via the Add Host wizard (rather than the bundled
+compose stack), adapters MAY fall back to the in-container
+`openclaw gateway start/stop/restart` form shown in the sketch above, but the
+bundled OCC path is always the compose form.
 
 ## Docker Compose Support
 

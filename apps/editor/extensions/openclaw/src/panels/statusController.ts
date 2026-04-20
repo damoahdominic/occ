@@ -91,17 +91,33 @@ function _applyActiveOpenClawWorkspaceFolder(targetPath: string): void {
 
     if (targetFound && toRemove.length === 0) return; // already correct
 
-    // Remove stale dirs in descending index order so indices stay valid
-    for (const idx of [...toRemove].sort((a, b) => b - a)) {
-      vscode.workspace.updateWorkspaceFolders(idx, 1);
+    // VS Code only permits one pending updateWorkspaceFolders operation at a time;
+    // separate remove+add calls drop the second, leaving folders=[] which then
+    // triggers openOpenClawFolder() to rewrite the file on the next activate —
+    // a reload loop. Fuse the remove+add into a single atomic call.
+    const addSpec = targetFound ? undefined : { uri: targetUri, name: path.basename(targetPath) };
+
+    if (toRemove.length > 0) {
+      const sorted = [...toRemove].sort((a, b) => a - b);
+      const start = sorted[0];
+      const contiguous = sorted.every((v, i) => v === start + i);
+      if (contiguous) {
+        if (addSpec) {
+          vscode.workspace.updateWorkspaceFolders(start, sorted.length, addSpec);
+        } else {
+          vscode.workspace.updateWorkspaceFolders(start, sorted.length);
+        }
+        return;
+      }
+      // Non-contiguous: remove highest index first; the add (if needed) will
+      // happen on the next debounced call. Safe — next call sees correct state.
+      vscode.workspace.updateWorkspaceFolders(sorted[sorted.length - 1], 1);
+      if (addSpec) { _wsUpdateTarget = targetPath; }
+      return;
     }
 
-    if (!targetFound) {
-      const count = vscode.workspace.workspaceFolders?.length ?? 0;
-      vscode.workspace.updateWorkspaceFolders(count, null, {
-        uri: targetUri,
-        name: path.basename(targetPath),
-      });
+    if (addSpec) {
+      vscode.workspace.updateWorkspaceFolders(folders.length, null, addSpec);
     }
   } catch { /* non-fatal */ }
 }
